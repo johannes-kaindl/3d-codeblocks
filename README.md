@@ -1,87 +1,94 @@
-# 3d-codeblocks — Seed
+# 3D Codeblocks
 
-**Status: Seed, kein Plan.** Angelegt 2026-07-23 aus der outpost-worldbuilding-Session.
-Dieses Dokument hält Idee, Bedarf und Vorwissen fest, damit Jay hier ein eigenes
-`brainstorm → spec → plan` starten kann. Es ist bewusst KEIN Scaffold — die
-Plugin-Struktur entsteht erst nach der Spec.
+Render 3D artifacts inline in your notes. Put a path in a `3d` code block and get an
+interactive viewport — orbit, zoom and pan without leaving the note.
 
-## Die Idee
+````markdown
+```3d
+file: weltmodell/3d/eg.glb
+height: 420
+title: Ground floor
+```
+````
 
-Ein Obsidian-Plugin, das 3D-Inhalte direkt in Notizen rendert — interaktiv
-(Orbit/Zoom/Pan) statt als statisches Bild. Zwei Stufen:
+Only `file:` is required. A block that contains nothing but a path works too:
 
-1. **Artefakt-Viewer (erster Meilenstein):** generierte 3D-Dateien (GLB, ggf.
-   STL) aus einem Codeblock heraus anzeigen, z.B.:
+````markdown
+```3d
+weltmodell/3d/eg.glb
+```
+````
 
-   ````markdown
-   ```3d
-   file: weltmodell/3d/eg.glb
-   ```
-   ````
+## Why
 
-2. **Quellcode-Renderer (Ausbaustufe):** `scad`- und `x3d`-Codeblöcke live
-   rendern — OpenSCAD-Quelltext bzw. X3D-XML steht *in* der Notiz und wird beim
-   Anzeigen zu einem WebGL-Viewport. Das ist die eigentliche Lücke im
-   Obsidian-Ökosystem: bestehende 3D-Plugins zeigen nur statische Dateien,
-   keinen Quellcode.
+Generated 3D output — a floor plan, a scan, a CAD export — usually lives next to the
+note that discusses it, but you have to leave Obsidian to look at it. This plugin keeps
+it in place: regenerate the file, and the view updates without a restart.
 
-## Der Bedarf (Erstkonsument: outpost-worldbuilding)
+## Supported formats
 
-Im Repo `outpost-worldbuilding` (Hybrid Code+Vault) entsteht ein iterativer
-Weltmodell-Loop: `data.py` (Geometrie-SSOT) → generierte Etagen-Grundrisse (SVG)
-+ 3D-Views (GLB) → Feedback in einer Weltmodell-Note → Geometrie-Verfeinerung.
-Spec: `outpost-worldbuilding/docs/superpowers/specs/2026-07-23-grundriss-loop-design.md`.
+| Extension | Notes |
+|---|---|
+| `.glb`, `.gltf` | Materials and colours come from the file |
+| `.stl` | No materials in the format; the plugin applies a theme-aware default |
 
-Der Loop erzeugt `weltmodell/3d/{keller,eg,og,turm,haus}.glb`. Bis dieses Plugin
-existiert, werden die per Community-Plugin („3D Embed") oder extern betrachtet —
-dieses Plugin ersetzt das mit einem integrierten, flüssigen Viewer.
+**Compressed glTF is not supported.** Draco and Meshopt decoders run in web workers,
+which Obsidian's renderer forbids. Such files are detected and reported in plain
+language instead of failing with a parser error — export uncompressed.
 
-**Wichtige Architektur-Entscheidung aus der Diskussion 2026-07-23:** Das Plugin
-ist ein **Viewer für generierte Artefakte, kein Editor-Substrat**. Die
-Geometrie-Wahrheit bleibt `data.py` im Konsumenten-Repo; editierbare
-scad/x3d-Codeblöcke als SSOT wurden verworfen (Zweitwahrheit-Drift, und die
-SDXL-Anker-Pipeline braucht benannte Python-Objekte mit Semantik). Für die
-Ausbaustufe heißt das: Codeblock-Rendering ja — aber Codeblöcke, die *im Vault
-als Illustration/Skizze leben*, nicht als Quelle der Pipeline-Geometrie.
+## Block keys
 
-## Anforderungen (aus Konsumenten-Sicht)
+| Key | Required | Meaning |
+|---|---|---|
+| `file:` | yes | Path to the model. Resolved like a wikilink (relative, vault-absolute or short form) |
+| `height:` | no | Viewport height in pixels; falls back to the setting |
+| `title:` | no | Caption above the viewport |
 
-- GLB aus Vault-Pfad rendern, Orbit-Steuerung, sinnvolle Default-Kamera.
-- Theme-bewusst: Viewport-Hintergrund passt zu hellem UND dunklem Obsidian-Theme.
-- Performt in einer Note mit 4–5 Viewports (eine Note = alle Etagen).
-- Regenerierte Dateien (gleicher Pfad, neuer Inhalt) ohne Obsidian-Neustart
-  neu laden (Cache-Invalidierung über mtime o.ä.).
-- Desktop first; Mobile nice-to-have (der WASM-Pfad hielte es offen).
+Unknown keys are reported below the viewport rather than silently ignored — a typo like
+`heigth:` should not look like a plugin bug.
 
-## Technisches Vorwissen (aus Gemini-Recherche, 2026-07-23, ungeprüft)
+## Settings
 
-- **API-Kern:** `registerMarkdownCodeBlockProcessor("3d" | "scad" | "x3d", …)` —
-  dasselbe Muster wie Mermaid/Dataview.
-- **OpenSCAD-Rendering, zwei Pfade:** (a) `openscad-wasm` (Manifold-Engine) im
-  Prozess — kein lokales OpenSCAD nötig, mobile-fähig; (b) CLI-Wrapper via
-  `child_process` + STL-Import — voller Feature-Support (`use`/`include`),
-  schneller Prototyp, desktop-only.
-- **X3D:** X_ITE (npm) oder X3DOM — XML-String rein, fertiges Canvas mit
-  Orbit-Steuerung raus.
-- **Bekannte Fallstricke:** (1) Obsidian zerstört/erneuert Codeblock-DOM beim
-  Tippen ständig → WebGL-Kontexte und three.js-Szenen sauber `dispose()`n,
-  sonst Speicherleck in Minuten. (2) `ResizeObserver` für Pane-Resizes.
-  (3) Re-Rendering im Live-Preview debounien (300–500 ms).
+| Setting | Default | Meaning |
+|---|---|---|
+| View mode | Interactive right away | Or: still image, activate on click |
+| Default height | 400 px | For blocks without `height:` |
+| Auto-rotate | off | Spin until you interact |
+| Show ground grid | off | Reference grid under the model |
+| Maximum live 3D views | 6 | Older views become still images beyond this |
 
-## Dach-Konventionen (verbindlich, vor der Spec lesen)
+The last setting exists because browsers cap simultaneous WebGL contexts (around 8–16)
+and silently kill the oldest ones. Rather than let that happen at random, the plugin
+decides which viewport turns into a still image.
 
-- `../AGENTS.md` — Kit-first-Regel: vor jedem Problem `../REGISTRY.md` +
-  `obsidian-kit` prüfen.
-- `../UI-STANDARD.md` — Obsidian-nativ first, nur Theme-CSS-Variablen.
-- Test-Setup: Skill `obsidian-plugin-test-pattern` (vitest + Kit-Obsidian-Mock).
-- Erst-Release: Skill `plugin-release-setup` im Dach.
-- Settings später zweigleisig deklarativ (siehe REGISTRY „Zweigleisige
-  deklarative Settings" — Kit-Kandidat mit 2 Exemplaren).
+## Performance
 
-## Offene Fragen für den Brainstorm
+There is no continuous render loop. A frame is drawn only when something changes —
+an open note with several 3D blocks costs no GPU time while you read it. Blocks build
+their viewport when they scroll into view and release it again when they leave.
 
-- Engine-Wahl: three.js direkt vs. X_ITE für alles vs. Mix je Blocktyp?
-- Ein Codeblock-Typ `3d` mit `file:`-Config vs. eigene Typen pro Format?
-- Wie viel Viewer-Konfiguration im Codeblock (Kamera, Hintergrund, Autorotate)?
-- WASM- vs. CLI-Pfad für OpenSCAD im ersten Wurf (falls Stufe 2 früh kommt)?
-- Abgrenzung zum bestehenden „3D Embed"-Plugin: ersetzen oder koexistieren?
+## Installation
+
+Not in the community store yet. To try it: build with `npm install && npm run build`,
+then copy `main.js`, `manifest.json` and `styles.css` into
+`<vault>/.obsidian/plugins/3d-codeblocks/`.
+
+## Development
+
+```bash
+npm install
+npm run dev     # watch build
+npm run gate    # lint + typecheck + tests + purity + bundle size
+```
+
+`src/core/` holds the pure logic (config parsing, format detection, camera fitting,
+context budget) and imports neither `obsidian` nor `three` — enforced by `check:pure`.
+`src/viewer/` wraps three.js and knows nothing about Obsidian. `src/obsidian/` connects
+the two and owns the lifecycle.
+
+Design and plan: `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+Manual test checklist: `docs/SMOKE.md`.
+
+## License
+
+AGPL-3.0-or-later
