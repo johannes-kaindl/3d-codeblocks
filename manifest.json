@@ -1,0 +1,11 @@
+{
+  "id": "3d-codeblocks",
+  "name": "3D Codeblocks",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Render 3D artifacts (GLB, glTF, STL) inline from a code block — orbit, zoom and pan without leaving your note.",
+  "author": "Johannes Kaindl",
+  "authorUrl": "https://jkaindl.de",
+  "fundingUrl": "",
+  "isDesktopOnly": false
+}
