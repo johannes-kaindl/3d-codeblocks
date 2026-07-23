@@ -17,4 +17,17 @@ export default tseslint.config(
       },
     },
   },
+  // --- file-scoped Overrides (mit Begruendung) ------------------------------
+  {
+    files: ["src/obsidian/settings.ts"],
+    rules: {
+      // Die deklarative Settings-API (getSettingDefinitions) setzt Obsidian >=1.13.0
+      // voraus; manifest minAppVersion ist 1.5.0 — display() ist hier der einzig
+      // unterstuetzte Weg. Die Empfehlung ist ein Versionskonflikt-Fehlalarm.
+      "obsidianmd/settings-tab/prefer-setting-definitions": "off",
+      // "3D" ist ein Fachbegriff, kein Satzanfang — die Regel wuerde daraus "3d"
+      // machen ("Maximum live 3d views"), was schlicht falsch geschrieben ist.
+      "obsidianmd/ui/sentence-case": "off",
+    },
+  },
 );

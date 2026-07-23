@@ -60,6 +60,11 @@ export class TFile {
   basename = "";
   extension = "";
   stat = { mtime: 0, ctime: 0, size: 0 };
+  // `vault`/`parent` gehoeren zu TAbstractFile. Sie werden nie benutzt, muessen aber
+  // da sein: `typecheck:test` prueft gegen die ECHTEN obsidian-Typen (der Mock-Alias
+  // gilt nur zur Laufzeit, nie in der tsconfig — PROF-OBS-08).
+  vault: any = {};
+  parent: any = null;
 }
 
 export class Notice {
