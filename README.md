@@ -1,7 +1,22 @@
 # 3D Codeblocks
 
-Render 3D artifacts inline in your notes. Put a path in a `3d` code block and get an
-interactive viewport — orbit, zoom and pan without leaving the note.
+View 3D artifacts (GLB, glTF, STL) inside Obsidian — orbit, zoom and pan without
+leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed.
+
+## Four ways to show a model
+
+**1. Open a file.** Click a `.gltf`, `.glb` or `.stl` in the file explorer — it opens
+in its own pane, full size, fully interactive.
+
+**2. Embed a file** with the normal wiki-embed syntax. Add `|<height>` for a fixed height:
+
+```markdown
+![[weltmodell/3d/eg.gltf]]
+![[weltmodell/3d/eg.gltf|300]]
+```
+
+**3. The `3d` code block** — a file reference with an optional title and height. Best
+when you want several models in one note (e.g. every floor of a building), each labelled:
 
 ````markdown
 ```3d
@@ -11,11 +26,14 @@ title: Ground floor
 ```
 ````
 
-Only `file:` is required. A block that contains nothing but a path works too:
+Only `file:` is required; a block with nothing but a path works too.
+
+**4. The `gltf` code block** — glTF **JSON** written straight into the note, for small
+hand-written or sketch models. (Binary GLB does not fit in a text block; use a file for that.)
 
 ````markdown
-```3d
-weltmodell/3d/eg.glb
+```gltf
+{ "asset": { "version": "2.0" }, "scenes": [], "nodes": [] }
 ```
 ````
 
@@ -55,11 +73,12 @@ Unknown keys are reported below the viewport rather than silently ignored — a 
 | Default height | 400 px | For blocks without `height:` |
 | Auto-rotate | off | Spin until you interact |
 | Show ground grid | off | Reference grid under the model |
-| Maximum live 3D views | 6 | Older views become still images beyond this |
+| Maximum live 3D views | 6 (slider 0–12) | Older inline views become still images beyond this; 0 turns the limit off |
 
 The last setting exists because browsers cap simultaneous WebGL contexts (around 8–16)
 and silently kill the oldest ones. Rather than let that happen at random, the plugin
-decides which viewport turns into a still image.
+decides which inline viewport turns into a still image. Opened files (way 1) are always
+fully interactive and never counted against this limit.
 
 ## Performance
 

@@ -10,8 +10,9 @@ export interface ActiveContext {
 }
 
 export function pickEvictions(active: ActiveContext[], limit: number): string[] {
-  const effectiveLimit = Math.max(1, limit);
-  const excess = active.length - effectiveLimit;
+  // limit 0 = off: die Begrenzung ist deaktiviert, nie verdraengen.
+  if (limit <= 0) return [];
+  const excess = active.length - limit;
   if (excess <= 0) return [];
 
   return [...active]

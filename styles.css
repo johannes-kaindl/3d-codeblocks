@@ -30,6 +30,19 @@
   display: none;
 }
 
+/* FileView: die Buehne fuellt das ganze Pane. */
+.tdcb-block.tdcb-fill {
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tdcb-block.tdcb-fill .tdcb-stage {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+}
+
 .tdcb-poster {
   width: 100%;
   height: 100%;

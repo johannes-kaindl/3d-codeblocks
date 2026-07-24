@@ -59,14 +59,16 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Maximum live 3D views")
       .setDesc(
-        `Older views turn into still images beyond this number (1 to ${MAX_CONTEXTS_LIMIT}). ` +
-          "Raise only if your machine copes.",
+        "How many inline models stay interactive at once. Older ones become still images. " +
+          "0 turns the limit off (the browser then caps it itself).",
       )
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.maxContexts))
+      .addSlider((slider) =>
+        // Der Wert wird seit neuerem Obsidian automatisch inline neben dem Slider gezeigt.
+        slider
+          .setLimits(0, MAX_CONTEXTS_LIMIT, 1)
+          .setValue(this.plugin.settings.maxContexts)
           .onChange(async (value) => {
-            await this.persist({ maxContexts: Number(value) });
+            await this.persist({ maxContexts: value });
           }),
       );
   }

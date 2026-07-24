@@ -42,12 +42,9 @@ describe("pickEvictions", () => {
     expect(pickEvictions(active, 2)).toEqual(["a"]);
   });
 
-  it("treats a limit below one as one", () => {
-    const active = [
-      { id: "a", lastUsedAt: 1 },
-      { id: "b", lastUsedAt: 2 },
-    ];
-    expect(pickEvictions(active, 0)).toEqual(["a"]);
+  it("treats a limit of zero as off (never evicts)", () => {
+    const active = Array.from({ length: 20 }, (_, i) => ({ id: `v${i}`, lastUsedAt: i }));
+    expect(pickEvictions(active, 0)).toEqual([]);
   });
 
   it("does not mutate the input array", () => {

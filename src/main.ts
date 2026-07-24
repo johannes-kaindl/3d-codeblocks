@@ -1,17 +1,23 @@
-import { Plugin, TFile, type MarkdownPostProcessorContext } from "obsidian";
+import { Plugin, TFile, type MarkdownPostProcessorContext, type WorkspaceLeaf } from "obsidian";
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
 import { ModelBlock } from "./obsidian/block-child";
 import { ContextManager } from "./obsidian/context-manager";
+import { registerModelEmbeds } from "./obsidian/embed";
+import type { TrackedView } from "./obsidian/tracked-view";
+import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
+import { GltfBlock } from "./obsidian/gltf-block";
 import { SettingsTab } from "./obsidian/settings";
 import { readSceneColors } from "./obsidian/theme";
 import { isWebGLAvailable } from "./obsidian/webgl";
 import { loadModel } from "./viewer/loaders";
 import { Viewport } from "./viewer/viewport";
+import type { HostBaseDeps } from "./obsidian/viewer-host";
 
 export default class ThreeDCodeblocksPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
 
-  private readonly blocks = new Set<ModelBlock>();
+  // Alle Inline-Views (Block, gltf-Block, Embed) — bekommen `modify` und Theme-Wechsel.
+  private readonly views = new Set<TrackedView>();
   private readonly contexts = new ContextManager(
     () => this.settings.maxContexts,
     () => Date.now(),
@@ -21,44 +27,68 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     this.settings = mergeSettings(await this.loadData());
     this.addSettingTab(new SettingsTab(this.app, this));
 
+    const hostDeps: HostBaseDeps = {
+      settings: () => this.settings,
+      factory: {
+        create: (options) => new Viewport(options),
+        isWebGLAvailable,
+      },
+      budget: this.contexts,
+      loadModel,
+      readColors: readSceneColors,
+    };
+
+    // ```3d file: — Datei-Verweis mit Titel/Höhe (mehrere pro Notiz).
     this.registerMarkdownCodeBlockProcessor(
       "3d",
       (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-        const block = new ModelBlock(el, source, ctx.sourcePath, {
-          app: this.app,
-          settings: () => this.settings,
-          factory: {
-            create: (options) => new Viewport(options),
-            isWebGLAvailable,
-          },
-          budget: this.contexts,
-          loadModel,
-          readColors: readSceneColors,
-        });
-
-        this.blocks.add(block);
-        block.register(() => this.blocks.delete(block));
+        const block = new ModelBlock(el, source, ctx.sourcePath, { ...hostDeps, app: this.app });
+        this.track(block);
         ctx.addChild(block);
       },
     );
+
+    // ```gltf — glTF-JSON direkt im Block.
+    this.registerMarkdownCodeBlockProcessor(
+      "gltf",
+      (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+        const block = new GltfBlock(el, source, hostDeps);
+        this.track(block);
+        ctx.addChild(block);
+      },
+    );
+
+    // ![[datei.gltf]] — Embed in einer Notiz. Der Postprocessor meldet neue Embeds
+    // über den Callback zum Tracken an.
+    registerModelEmbeds(this, { ...hostDeps, app: this.app }, (view) => this.track(view));
+
+    // Datei anklicken → 3D-View im ganzen Pane.
+    this.registerView(VIEW_TYPE_3D, (leaf: WorkspaceLeaf) => new ModelFileView(leaf, hostDeps));
+    this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
 
     // Regenerierte Dateien (gleicher Pfad, neuer Inhalt) sollen ohne Neustart neu laden.
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
         if (!(file instanceof TFile)) return;
-        for (const block of this.blocks) void block.onFileModified(file);
+        for (const view of this.views) void view.onFileModified(file);
       }),
     );
 
     // Theme-Wechsel: Hintergrund und STL-Material folgen sofort.
     this.registerEvent(
       this.app.workspace.on("css-change", () => {
-        for (const block of this.blocks) block.refreshColors();
+        for (const view of this.views) view.refreshColors();
       }),
     );
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /** View für `modify`/Theme registrieren und beim Entladen wieder abmelden. */
+  private track(view: TrackedView): void {
+    this.views.add(view);
+    view.register(() => this.views.delete(view));
   }
 }

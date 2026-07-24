@@ -51,6 +51,20 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 - [ ] **Poster-Qualität** — das eingefrorene Standbild zeigt das Modell, nicht eine
       leere Fläche (falls doch: `preserveDrawingBuffer` in `viewer/viewport.ts` prüfen).
 
+## Datei-nativer Ausbau (2026-07-24)
+
+- [ ] **Datei öffnen** — `.gltf` im Datei-Explorer anklicken → 3D-View im ganzen Pane,
+      voll interaktiv, Doppelklick-Reset geht. Auch `.glb`/`.stl`.
+- [ ] **Embed** — `![[weltmodell/3d/eg.gltf]]` in einer Notiz → gerendert;
+      `![[weltmodell/3d/eg.gltf|300]]` → Höhe 300.
+- [ ] **`gltf`-Codeblock** — gültiges glTF-JSON → gerendert; kaputtes JSON → Meldung
+      „The glTF code is not valid JSON."
+- [ ] **Slider** — Settings: „Maximum live 3D views" ist ein Slider (0–12). Auf 0 →
+      keine Degradierung (alle inline live); auf 2 → nur 2 gleichzeitig live, Rest Standbild.
+- [ ] **Koexistenz** — bestehende ` ```3d file: `-Blöcke funktionieren unverändert.
+- [ ] **Theme im Embed/gltf-Block** — hell↔dunkel wechseln → Hintergrund folgt auch
+      in Embeds und gltf-Blöcken.
+
 ## Befunde
 
 _Hier notieren, was auffällt._
