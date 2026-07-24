@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-07-24
+
 ### Fixed
 
 - `authorUrl` set to the GitHub profile so the community-store validator can reach it

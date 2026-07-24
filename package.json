@@ -1,6 +1,6 @@
 {
   "name": "three-d-codeblocks",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Render 3D artifacts (GLB, glTF, STL) inline in your notes from a code block — orbit, zoom, pan. Local-first, no cloud.",
   "type": "module",
   "scripts": {
