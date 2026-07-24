@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Plugin id changed to `three-d-codeblocks` to satisfy the community-store rule that
+  ids contain only lowercase letters and hyphens (no digits). The display name
+  "3D Codeblocks" is unchanged.
+
 ## [0.1.0] — 2026-07-24
 
 ### Added
