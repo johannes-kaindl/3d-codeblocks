@@ -13,7 +13,10 @@ export interface SceneColors {
 
 export const GRID_NAME = "tdcb-grid";
 
-export function buildScene(colors: SceneColors, showGrid: boolean): Scene {
+// Das Grid wird NICHT hier gebaut, sondern erst wenn das Modell da ist — Größe und
+// Höhe hängen an dessen Bounding-Box (der Viewport ruft `makeGrid`). Ein festes 10er-
+// Grid wäre unter einem 120 großen Modell unsichtbar.
+export function buildScene(colors: SceneColors): Scene {
   const scene = new Scene();
   scene.background = new Color(colors.background);
 
@@ -23,13 +26,14 @@ export function buildScene(colors: SceneColors, showGrid: boolean): Scene {
   key.position.set(1, 2, 1);
   scene.add(key);
 
-  if (showGrid) scene.add(makeGrid(colors.grid));
-
   return scene;
 }
 
-export function makeGrid(color: string): GridHelper {
-  const grid = new GridHelper(10, 10, new Color(color), new Color(color));
+/** Grid in der Größe des Modells (Grundfläche X/Z, Y-up), an dessen Unterkante. */
+export function makeGrid(color: string, size: number, y: number): GridHelper {
+  const c = new Color(color);
+  const grid = new GridHelper(size, 10, c, c);
+  grid.position.y = y;
   grid.name = GRID_NAME;
   return grid;
 }

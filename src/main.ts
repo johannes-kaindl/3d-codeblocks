@@ -2,7 +2,7 @@ import { Plugin, TFile, type MarkdownPostProcessorContext, type WorkspaceLeaf } 
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
 import { ModelBlock } from "./obsidian/block-child";
 import { ContextManager } from "./obsidian/context-manager";
-import { registerModelEmbeds } from "./obsidian/embed";
+import { registerModelEmbeds, unregisterModelEmbeds } from "./obsidian/embed";
 import type { TrackedView } from "./obsidian/tracked-view";
 import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
 import { GltfBlock } from "./obsidian/gltf-block";
@@ -58,9 +58,14 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       },
     );
 
-    // ![[datei.gltf]] — Embed in einer Notiz. Der Postprocessor meldet neue Embeds
-    // über den Callback zum Tracken an.
-    registerModelEmbeds(this, { ...hostDeps, app: this.app }, (view) => this.track(view));
+    // ![[datei.gltf]] — Embed in einer Notiz über die (inoffizielle) embedRegistry.
+    // Fehlt die API in einer künftigen Obsidian-Version, laufen die anderen drei Wege
+    // weiter; nur Embeds entfallen dann.
+    const embedsOk = registerModelEmbeds(this.app, { ...hostDeps, app: this.app }, (view) =>
+      this.track(view),
+    );
+    if (embedsOk) this.register(() => unregisterModelEmbeds(this.app));
+    else console.warn("[3d-codeblocks] embedRegistry unavailable — ![[…]] embeds disabled.");
 
     // Datei anklicken → 3D-View im ganzen Pane.
     this.registerView(VIEW_TYPE_3D, (leaf: WorkspaceLeaf) => new ModelFileView(leaf, hostDeps));

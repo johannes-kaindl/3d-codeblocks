@@ -4,12 +4,18 @@ import { vi } from "vitest";
 
 export function makeFakeEl(): any {
   const children: any[] = [];
+  const attrs: Record<string, string> = {};
   const el: any = {
     children,
     className: "",
     textContent: "",
     style: {},
     dataset: {},
+    getAttribute: (name: string) => (name in attrs ? attrs[name] : null),
+    setAttribute: (name: string, value: string) => {
+      attrs[name] = value;
+    },
+    getAttr: (name: string) => (name in attrs ? attrs[name] : null),
     createDiv: (opts?: any) => {
       const child = makeFakeEl();
       children.push(child);

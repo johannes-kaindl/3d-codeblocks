@@ -43,6 +43,7 @@ export class Viewport {
 
   private model: Object3D | null = null;
   private bounds: { min: Vector3; max: Vector3 } | null = null;
+  private currentColors: SceneColors;
   private needsRender = true;
   private frame: number | null = null;
   private disposed = false;
@@ -63,7 +64,8 @@ export class Viewport {
     this.renderer.setPixelRatio(Math.min(this.view.devicePixelRatio, 2));
     options.container.appendChild(this.renderer.domElement);
 
-    this.scene = buildScene(options.colors, options.showGrid);
+    this.currentColors = options.colors;
+    this.scene = buildScene(options.colors);
     this.camera = new PerspectiveCamera(FOV_DEG, this.aspect(), 0.1, 1000);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -97,20 +99,16 @@ export class Viewport {
 
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
+    this.updateGrid();
     this.resetCamera();
   }
 
   setColors(colors: SceneColors): void {
     if (this.disposed) return;
 
+    this.currentColors = colors;
     this.scene.background = new Color(colors.background);
-
-    const grid = this.scene.getObjectByName(GRID_NAME);
-    if (grid) {
-      this.scene.remove(grid);
-      disposeObject(grid);
-      this.scene.add(makeGrid(colors.grid));
-    }
+    this.updateGrid();
 
     if (this.model) {
       this.model.traverse((child) => {
@@ -175,6 +173,21 @@ export class Viewport {
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
+  }
+
+  /** Grid an die Bounding-Box anpassen: Grundfläche X/Z, an der Unterkante (min.y). */
+  private updateGrid(): void {
+    const existing = this.scene.getObjectByName(GRID_NAME);
+    if (existing) {
+      this.scene.remove(existing);
+      disposeObject(existing);
+    }
+    if (!this.options.showGrid || !this.bounds) return;
+
+    const extentX = this.bounds.max.x - this.bounds.min.x;
+    const extentZ = this.bounds.max.z - this.bounds.min.z;
+    const size = Math.max(extentX, extentZ, 1) * 1.4;
+    this.scene.add(makeGrid(this.currentColors.grid, size, this.bounds.min.y));
   }
 
   private aspect(): number {

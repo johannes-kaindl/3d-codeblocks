@@ -1,11 +1,16 @@
-// `![[datei.gltf]]`-Embeds. Obsidian rendert dafuer einen `.internal-embed`-Span; ein
-// Markdown-Postprocessor faengt die 3d-Dateien ab und haengt einen ViewerHost hinein.
-// (Es gibt keine dedizierte public Embed-API — der Postprocessor-Weg ist store-konform.)
-import { MarkdownRenderChild, type App, type Plugin, type TFile } from "obsidian";
-import { matchModelEmbed, type EmbedSrc } from "../core/embed-src";
+// `![[datei.gltf]]`-Embeds über Obsidians embedRegistry.
+//
+// WICHTIG — inoffizielle API: `app.embedRegistry` ist nicht Teil der öffentlichen
+// Obsidian-Typen. Sie ist der EINZIGE zuverlässige Weg, echte Datei-Embeds
+// (`![[x.gltf]]`) zu rendern — der Markdown-Postprocessor-Weg greift für Datei-Embeds
+// nicht (er läuft vor Obsidians Embed-Laden, und Obsidian verwaltet den Span selbst).
+// Deshalb: Feature-Detection (nur registrieren, wenn vorhanden) + eigene, minimale
+// Typ-Deklaration statt einer Dependency. Verschwindet die API, fehlen nur Embeds.
+import { MarkdownRenderChild, type App, type TFile } from "obsidian";
+import { heightFromAlt } from "../core/embed-src";
 import { detectFormat } from "../core/format";
 import { buildBox, type BoxParts } from "./render-box";
-import { readModel, resolveModelPath } from "./file-source";
+import { readModel } from "./file-source";
 import type { TrackedView } from "./tracked-view";
 import { ViewerHost, needsContainerInspection, type HostBaseDeps } from "./viewer-host";
 
@@ -15,30 +20,46 @@ export interface EmbedDeps extends HostBaseDeps {
   app: App;
 }
 
-export class ModelEmbed extends MarkdownRenderChild {
+// --- minimale Deklaration der inoffiziellen embedRegistry-API --------------------
+interface EmbedContext {
+  app: App;
+  containerEl: HTMLElement;
+}
+interface EmbedComponentLike {
+  loadFile(file: TFile): void | Promise<void>;
+}
+interface EmbedRegistry {
+  isExtensionRegistered?(extension: string): boolean;
+  registerExtension(
+    extension: string,
+    creator: (context: EmbedContext, file: TFile, subpath: string) => EmbedComponentLike,
+  ): void;
+  unregisterExtension?(extension: string): void;
+}
+
+const MODEL_EXTENSIONS = ["gltf", "glb", "stl"] as const;
+
+export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   private parts: BoxParts | null = null;
   private host: ViewerHost | null = null;
   private file: TFile | null = null;
   private loadedMtime: number | null = null;
   private unloaded = false;
-  /** Laufendes Render-Promise (fuer Tests abwartbar). */
+  /** Laufendes Render-Promise (für Tests abwartbar). */
   rendering: Promise<void> = Promise.resolve();
 
   constructor(
-    containerEl: HTMLElement,
-    private readonly embed: EmbedSrc,
-    private readonly sourcePath: string,
+    private readonly hostEl: HTMLElement,
     private readonly deps: EmbedDeps,
   ) {
-    super(containerEl);
+    super(hostEl);
   }
 
-  onload(): void {
-    this.parts = buildBox(this.containerEl, {
-      height: this.embed.height ?? this.deps.settings().defaultHeight,
-    });
-    this.host = new ViewerHost(this.parts.stage, this.parts.message, { ...this.deps, managed: true });
-    this.rendering = this.loadNow();
+  /** Ruft Obsidian mit der bereits aufgelösten Datei. */
+  loadFile(file: TFile): Promise<void> {
+    this.file = file;
+    this.rendering = this.render();
+    return this.rendering;
   }
 
   onunload(): void {
@@ -47,23 +68,36 @@ export class ModelEmbed extends MarkdownRenderChild {
     this.host = null;
   }
 
-  /** Oeffentlich fuer Tests. */
-  async loadNow(): Promise<void> {
-    if (this.unloaded || !this.host) return;
+  onFileModified(file: TFile): void {
+    if (this.unloaded || !this.file) return;
+    if (file.path !== this.file.path || file.stat.mtime === this.loadedMtime) return;
+    void this.render();
+  }
 
-    const file = resolveModelPath(this.deps.app, this.embed.path, this.sourcePath);
-    if (!file) {
-      this.host.showError({ kind: "missing-file", path: this.embed.path });
-      return;
+  refreshColors(): void {
+    this.host?.refreshColors();
+  }
+
+  private async render(): Promise<void> {
+    if (this.unloaded || !this.file) return;
+
+    if (!this.parts) {
+      this.hostEl.empty();
+      this.parts = buildBox(this.hostEl, { height: this.embedHeight() });
+      this.host = new ViewerHost(this.parts.stage, this.parts.message, {
+        ...this.deps,
+        managed: true,
+      });
     }
+    if (!this.host) return;
 
+    const file = this.file;
     const format = detectFormat(file.path);
     if (format === null) {
-      this.host.showError({ kind: "unsupported-format", path: this.embed.path });
+      this.host.showError({ kind: "unsupported-format", path: file.path });
       return;
     }
 
-    this.file = file;
     await this.host.render({
       provideBytes: async () => {
         const model = await readModel(this.deps.app, file);
@@ -72,39 +106,40 @@ export class ModelEmbed extends MarkdownRenderChild {
       },
       format,
       inspectContainer: needsContainerInspection(file.path),
-      label: this.embed.path,
+      label: file.basename,
     });
   }
 
-  onFileModified(file: TFile): void {
-    if (this.unloaded || !this.file) return;
-    if (file.path !== this.file.path || file.stat.mtime === this.loadedMtime) return;
-    void this.loadNow();
-  }
-
-  refreshColors(): void {
-    this.host?.refreshColors();
+  private embedHeight(): number {
+    return heightFromAlt(this.hostEl.getAttribute("alt")) ?? this.deps.settings().defaultHeight;
   }
 }
 
-/** Registriert den Postprocessor, der 3d-Embeds in Viewports verwandelt. `track` meldet
-    jeden neuen Embed beim Plugin an (für `modify`/Theme-Wechsel). */
+/** Registriert die 3d-Endungen bei der (inoffiziellen) embedRegistry. `track` meldet
+    jeden Embed für modify/Theme-Wechsel an. Gibt `false` zurück, wenn die API fehlt. */
 export function registerModelEmbeds(
-  plugin: Plugin,
+  app: App,
   deps: EmbedDeps,
   track: (view: TrackedView) => void,
-): void {
-  plugin.registerMarkdownPostProcessor((el, ctx) => {
-    for (const span of Array.from(el.querySelectorAll<HTMLElement>(".internal-embed"))) {
-      const src = span.getAttribute("src");
-      if (!src) continue;
-      const match = matchModelEmbed(src);
-      if (!match) continue;
+): boolean {
+  const registry = (app as unknown as { embedRegistry?: EmbedRegistry }).embedRegistry;
+  if (!registry || typeof registry.registerExtension !== "function") return false;
 
-      span.empty();
-      const embed = new ModelEmbed(span, match, ctx.sourcePath, deps);
+  for (const ext of MODEL_EXTENSIONS) {
+    if (registry.isExtensionRegistered?.(ext)) continue;
+    registry.registerExtension(ext, (context) => {
+      const embed = new ModelEmbed(context.containerEl, deps);
       track(embed);
-      ctx.addChild(embed);
-    }
-  });
+      return embed;
+    });
+  }
+  return true;
+}
+
+/** Beim Plugin-Entladen die Endungen wieder freigeben (sonst hält die Registry
+    tote Creators). */
+export function unregisterModelEmbeds(app: App): void {
+  const registry = (app as unknown as { embedRegistry?: EmbedRegistry }).embedRegistry;
+  if (!registry?.unregisterExtension) return;
+  for (const ext of MODEL_EXTENSIONS) registry.unregisterExtension(ext);
 }
