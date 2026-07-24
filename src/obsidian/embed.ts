@@ -21,18 +21,23 @@ export interface EmbedDeps extends HostBaseDeps {
 }
 
 // --- minimale Deklaration der inoffiziellen embedRegistry-API --------------------
+// Verifiziert gegen obsidian-typings (release/obsidian-catalyst/1.11.7):
+//   EmbedCreator = (context, file, subpath?) => EmbedComponent
+//   EmbedComponent extends Component { loadFile(): void }   ← OHNE Parameter!
+// Die Datei kommt über den Creator (Konstruktor), NICHT über loadFile.
 interface EmbedContext {
   app: App;
   containerEl: HTMLElement;
+  sourcePath?: string;
 }
 interface EmbedComponentLike {
-  loadFile(file: TFile): void | Promise<void>;
+  loadFile(): void;
 }
 interface EmbedRegistry {
   isExtensionRegistered?(extension: string): boolean;
   registerExtension(
     extension: string,
-    creator: (context: EmbedContext, file: TFile, subpath: string) => EmbedComponentLike,
+    creator: (context: EmbedContext, file: TFile, subpath?: string) => EmbedComponentLike,
   ): void;
   unregisterExtension?(extension: string): void;
 }
@@ -42,7 +47,6 @@ const MODEL_EXTENSIONS = ["gltf", "glb", "stl"] as const;
 export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   private parts: BoxParts | null = null;
   private host: ViewerHost | null = null;
-  private file: TFile | null = null;
   private loadedMtime: number | null = null;
   private unloaded = false;
   /** Laufendes Render-Promise (für Tests abwartbar). */
@@ -50,16 +54,16 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
 
   constructor(
     private readonly hostEl: HTMLElement,
+    private readonly file: TFile,
     private readonly deps: EmbedDeps,
   ) {
     super(hostEl);
   }
 
-  /** Ruft Obsidian mit der bereits aufgelösten Datei. */
-  loadFile(file: TFile): Promise<void> {
-    this.file = file;
+  /** Obsidian ruft dies OHNE Argument nach dem Erstellen — die Datei kam über den
+      Konstruktor (den Creator-Callback). */
+  loadFile(): void {
     this.rendering = this.render();
-    return this.rendering;
   }
 
   onunload(): void {
@@ -69,7 +73,7 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   }
 
   onFileModified(file: TFile): void {
-    if (this.unloaded || !this.file) return;
+    if (this.unloaded) return;
     if (file.path !== this.file.path || file.stat.mtime === this.loadedMtime) return;
     void this.render();
   }
@@ -79,7 +83,7 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   }
 
   private async render(): Promise<void> {
-    if (this.unloaded || !this.file) return;
+    if (this.unloaded) return;
 
     if (!this.parts) {
       this.hostEl.empty();
@@ -127,8 +131,8 @@ export function registerModelEmbeds(
 
   for (const ext of MODEL_EXTENSIONS) {
     if (registry.isExtensionRegistered?.(ext)) continue;
-    registry.registerExtension(ext, (context) => {
-      const embed = new ModelEmbed(context.containerEl, deps);
+    registry.registerExtension(ext, (context, file) => {
+      const embed = new ModelEmbed(context.containerEl, file, deps);
       track(embed);
       return embed;
     });

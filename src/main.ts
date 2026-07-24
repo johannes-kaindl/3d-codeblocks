@@ -1,4 +1,10 @@
-import { Plugin, TFile, type MarkdownPostProcessorContext, type WorkspaceLeaf } from "obsidian";
+import {
+  Notice,
+  Plugin,
+  TFile,
+  type MarkdownPostProcessorContext,
+  type WorkspaceLeaf,
+} from "obsidian";
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
 import { ModelBlock } from "./obsidian/block-child";
 import { ContextManager } from "./obsidian/context-manager";
@@ -64,8 +70,14 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     const embedsOk = registerModelEmbeds(this.app, { ...hostDeps, app: this.app }, (view) =>
       this.track(view),
     );
-    if (embedsOk) this.register(() => unregisterModelEmbeds(this.app));
-    else console.warn("[3d-codeblocks] embedRegistry unavailable — ![[…]] embeds disabled.");
+    if (embedsOk) {
+      this.register(() => unregisterModelEmbeds(this.app));
+    } else {
+      // Sichtbar machen (statt still): dann ist im Smoke sofort klar, ob Embeds fehlen,
+      // weil die API weg ist — oder aus einem anderen Grund.
+      console.warn("[3d-codeblocks] embedRegistry unavailable — ![[…]] embeds disabled.");
+      new Notice("3D Codeblocks: ![[…]] embeds unavailable (Obsidian embedRegistry missing).");
+    }
 
     // Datei anklicken → 3D-View im ganzen Pane.
     this.registerView(VIEW_TYPE_3D, (leaf: WorkspaceLeaf) => new ModelFileView(leaf, hostDeps));

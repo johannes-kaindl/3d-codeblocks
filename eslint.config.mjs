@@ -19,6 +19,14 @@ export default tseslint.config(
   },
   // --- file-scoped Overrides (mit Begruendung) ------------------------------
   {
+    files: ["src/main.ts"],
+    rules: {
+      // "3D Codeblocks" (Plugin-Eigenname) und "embedRegistry" (API-Name) sind keine
+      // Satzwörter — sentence-case wäre hier eine Falschschreibung.
+      "obsidianmd/ui/sentence-case": "off",
+    },
+  },
+  {
     files: ["src/obsidian/settings.ts"],
     rules: {
       // Die deklarative Settings-API (getSettingDefinitions) setzt Obsidian >=1.13.0

@@ -63,12 +63,15 @@ function fileAt(path: string, mtime = 1): TFile {
 }
 
 describe("ModelEmbed", () => {
-  it("renders the resolved file via loadFile", async () => {
+  it("renders the file when Obsidian calls loadFile() with NO argument", async () => {
+    // Obsidian übergibt die Datei über den Creator (Konstruktor) und ruft loadFile()
+    // ohne Argument. Ein loadFile(file)-Bug würde hier nichts rendern.
     const { deps, loadModel } = makeDeps();
     const el = makeFakeEl();
 
-    const embed = new ModelEmbed(el, deps);
-    await embed.loadFile(fileAt("weltmodell/3d/eg.gltf"));
+    const embed = new ModelEmbed(el, fileAt("weltmodell/3d/eg.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
 
     expect(loadModel).toHaveBeenCalledTimes(1);
   });
@@ -78,8 +81,9 @@ describe("ModelEmbed", () => {
     const el = makeFakeEl();
     el.setAttribute("alt", "250");
 
-    const embed = new ModelEmbed(el, deps);
-    await embed.loadFile(fileAt("a.gltf"));
+    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
 
     const stage = el.children[0].children.find((c: any) =>
       String(c.className).includes("tdcb-stage"),
@@ -92,8 +96,9 @@ describe("ModelEmbed", () => {
     const el = makeFakeEl();
     const file = fileAt("a.gltf", 1);
 
-    const embed = new ModelEmbed(el, deps);
-    await embed.loadFile(file);
+    const embed = new ModelEmbed(el, file, deps);
+    embed.loadFile();
+    await embed.rendering;
     const before = app.vault.readBinary.mock.calls.length;
 
     file.stat.mtime = 99;
@@ -107,8 +112,9 @@ describe("ModelEmbed", () => {
     const { deps, created } = makeDeps();
     const el = makeFakeEl();
 
-    const embed = new ModelEmbed(el, deps);
-    await embed.loadFile(fileAt("a.gltf"));
+    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
     embed.onunload();
 
     expect(created[0].dispose).toHaveBeenCalled();
