@@ -99,6 +99,15 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     );
   }
 
+  onunload(): void {
+    // three setzt beim Laden einen globalen Marker (window.__THREE__). Obsidian räumt
+    // Globals beim Plugin-Reload (disable/enable) nicht auf → beim Wiedereinschalten
+    // warnt three „Multiple instances of Three.js". Marker hier entfernen, damit ein
+    // Reload sauber ist. (Bei normalem Laden beim Start tritt die Warnung nicht auf.)
+    const w = window as unknown as { __THREE__?: unknown };
+    if (w.__THREE__ !== undefined) delete w.__THREE__;
+  }
+
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
   }

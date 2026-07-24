@@ -7,7 +7,7 @@
 // Deshalb: Feature-Detection (nur registrieren, wenn vorhanden) + eigene, minimale
 // Typ-Deklaration statt einer Dependency. Verschwindet die API, fehlen nur Embeds.
 import { MarkdownRenderChild, type App, type TFile } from "obsidian";
-import { heightFromAlt } from "../core/embed-src";
+import { embedHeightFromAttrs } from "../core/embed-src";
 import { detectFormat } from "../core/format";
 import { buildBox, type BoxParts } from "./render-box";
 import { readModel } from "./file-source";
@@ -58,8 +58,6 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
     private readonly hostEl: HTMLElement,
     private readonly file: TFile,
     private readonly deps: EmbedDeps,
-    /** Obsidians „angezeigter Text" des Embeds — bei `![[x|250]]` steht hier die Höhe. */
-    private readonly linktext?: string,
   ) {
     super(hostEl);
   }
@@ -119,12 +117,11 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   }
 
   private embedHeight(): number {
-    // Obsidian legt den `|`-Wert je nach Pfad in `linktext` ODER im `alt`-Attribut ab —
-    // beide prüfen, dann die Default-Höhe.
     return (
-      heightFromAlt(this.linktext) ??
-      heightFromAlt(this.hostEl.getAttribute("alt")) ??
-      this.deps.settings().defaultHeight
+      embedHeightFromAttrs(
+        this.hostEl.getAttribute("width"),
+        this.hostEl.getAttribute("height"),
+      ) ?? this.deps.settings().defaultHeight
     );
   }
 }
@@ -142,7 +139,7 @@ export function registerModelEmbeds(
   for (const ext of MODEL_EXTENSIONS) {
     if (registry.isExtensionRegistered?.(ext)) continue;
     registry.registerExtension(ext, (context, file) => {
-      const embed = new ModelEmbed(context.containerEl, file, deps, context.linktext);
+      const embed = new ModelEmbed(context.containerEl, file, deps);
       track(embed);
       return embed;
     });

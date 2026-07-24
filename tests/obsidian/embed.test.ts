@@ -76,11 +76,12 @@ describe("ModelEmbed", () => {
     expect(loadModel).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the linktext height for the stage", async () => {
+  it("uses the width attribute (|N) as the height", async () => {
     const { deps } = makeDeps();
     const el = makeFakeEl();
+    el.setAttribute("width", "250");
 
-    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps, "250");
+    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps);
     embed.loadFile();
     await embed.rendering;
 
@@ -90,26 +91,11 @@ describe("ModelEmbed", () => {
     expect(stage.style.height).toBe("250px");
   });
 
-  it("falls back to the alt attribute for the height", async () => {
-    const { deps } = makeDeps();
-    const el = makeFakeEl();
-    el.setAttribute("alt", "180");
-
-    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps);
-    embed.loadFile();
-    await embed.rendering;
-
-    const stage = el.children[0].children.find((c: any) =>
-      String(c.className).includes("tdcb-stage"),
-    );
-    expect(stage.style.height).toBe("180px");
-  });
-
   it("uses the default height when no dimension is given", async () => {
     const { deps } = makeDeps();
     const el = makeFakeEl();
 
-    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps, "a.gltf");
+    const embed = new ModelEmbed(el, fileAt("a.gltf"), deps);
     embed.loadFile();
     await embed.rendering;
 

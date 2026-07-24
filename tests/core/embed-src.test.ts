@@ -1,31 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { heightFromAlt } from "../../src/core/embed-src";
+import { embedHeightFromAttrs } from "../../src/core/embed-src";
 
-describe("heightFromAlt", () => {
-  it("returns undefined without an alt", () => {
-    expect(heightFromAlt(null)).toBeUndefined();
-    expect(heightFromAlt(undefined)).toBeUndefined();
-    expect(heightFromAlt("")).toBeUndefined();
+describe("embedHeightFromAttrs", () => {
+  it("returns undefined without any dimension", () => {
+    expect(embedHeightFromAttrs(null, null)).toBeUndefined();
+    expect(embedHeightFromAttrs("", "")).toBeUndefined();
   });
 
-  it("reads a plain numeric alt as the height", () => {
-    expect(heightFromAlt("300")).toBe(300);
+  it("reads the single |N value (Obsidian puts it in width)", () => {
+    expect(embedHeightFromAttrs("250", null)).toBe(250);
   });
 
-  it("reads the number after a pipe", () => {
-    expect(heightFromAlt("weltmodell/3d/eg.gltf|420")).toBe(420);
+  it("prefers an explicit height (|WxH)", () => {
+    expect(embedHeightFromAttrs("100", "200")).toBe(200);
   });
 
-  it("trims whitespace", () => {
-    expect(heightFromAlt("  250 ")).toBe(250);
-  });
-
-  it("ignores a non-numeric alt", () => {
-    expect(heightFromAlt("some caption")).toBeUndefined();
-  });
-
-  it("ignores a non-positive number", () => {
-    expect(heightFromAlt("0")).toBeUndefined();
-    expect(heightFromAlt("-5")).toBeUndefined();
+  it("ignores non-numeric or non-positive values", () => {
+    expect(embedHeightFromAttrs("wide", null)).toBeUndefined();
+    expect(embedHeightFromAttrs("0", null)).toBeUndefined();
+    expect(embedHeightFromAttrs("-5", null)).toBeUndefined();
   });
 });

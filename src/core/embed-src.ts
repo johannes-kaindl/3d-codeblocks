@@ -1,14 +1,19 @@
-// Höhe aus dem alt-Text eines Embeds lesen. Pure.
+// Embed-Dimension aus den Attributen des `.internal-embed`-Spans lesen. Pure.
 //
-// Obsidian legt bei `![[datei.gltf|300]]` den Teil nach `|` als alt-Text ab. Eine
-// reine Zahl darin nutzen wir als Viewport-Höhe; alles andere ignorieren wir. Das
-// Datei-Matching selbst übernimmt `embedRegistry.registerExtension` (nach Endung),
-// nicht mehr eigener Code.
+// Verifiziert per Diagnose (2026-07-24): Obsidian legt `![[x|N]]` als `width="N"` ab
+// und `![[x|WxH]]` als `width="W" height="H"`. `alt`/`linktext` tragen nur den Pfad.
+// Für einen vollbreiten 3D-Viewport ist die Höhe das sinnvolle Maß: eine explizite
+// Höhe bevorzugen, sonst die einzelne |N-Zahl (die in `width` landet) als Höhe nehmen.
 
-export function heightFromAlt(alt: string | null | undefined): number | undefined {
-  if (!alt) return undefined;
-  // Der alt kann "300" sein oder — je nach Obsidian-Version — "datei.gltf|300".
-  const tail = alt.includes("|") ? alt.slice(alt.lastIndexOf("|") + 1) : alt;
-  const height = Number(tail.trim());
-  return Number.isFinite(height) && height > 0 ? height : undefined;
+export function embedHeightFromAttrs(
+  widthAttr: string | null,
+  heightAttr: string | null,
+): number | undefined {
+  const height = Number(heightAttr);
+  if (Number.isFinite(height) && height > 0) return height;
+
+  const width = Number(widthAttr);
+  if (Number.isFinite(width) && width > 0) return width;
+
+  return undefined;
 }
