@@ -90,7 +90,7 @@ their viewport when they scroll into view and release it again when they leave.
 
 Not in the community store yet. To try it: build with `npm install && npm run build`,
 then copy `main.js`, `manifest.json` and `styles.css` into
-`<vault>/.obsidian/plugins/3d-codeblocks/`.
+`<vault>/.obsidian/plugins/three-d-codeblocks/`.
 
 ## Development
 
