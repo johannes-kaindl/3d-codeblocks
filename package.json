@@ -1,0 +1,44 @@
+{
+  "name": "3d-codeblocks",
+  "version": "0.1.0",
+  "description": "Render 3D artifacts (GLB, glTF, STL) inline in your notes from a code block — orbit, zoom, pan. Local-first, no cloud.",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs --production",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src",
+    "deploy": "npm run build && cp main.js manifest.json styles.css \"${OBSIDIAN_PLUGIN_DIR:?set OBSIDIAN_PLUGIN_DIR}\"/",
+    "check:pure": "node scripts/check-pure.mjs",
+    "check:bundle": "node esbuild.config.mjs --production && node scripts/check-bundle.mjs",
+    "gate": "npm run lint && npm run typecheck && npm run typecheck:test && npm test && npm run check:pure && npm run check:bundle"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "3d",
+    "glb",
+    "gltf",
+    "stl",
+    "viewer",
+    "three-js"
+  ],
+  "author": "Johannes Kaindl",
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/three": "^0.169.0",
+    "esbuild": "^0.23",
+    "eslint": "^9",
+    "eslint-plugin-obsidianmd": "latest",
+    "obsidian": "latest",
+    "typescript": "^5.5",
+    "typescript-eslint": "^8",
+    "vitest": "^2"
+  }
+}

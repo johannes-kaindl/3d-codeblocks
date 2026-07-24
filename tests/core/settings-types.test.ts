@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+import { DEFAULT_SETTINGS, mergeSettings } from "../../src/core/settings-types";
+
+describe("mergeSettings", () => {
+  it("returns the defaults for null or undefined", () => {
+    expect(mergeSettings(null)).toEqual(DEFAULT_SETTINGS);
+    expect(mergeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("has sensible defaults", () => {
+    expect(DEFAULT_SETTINGS).toEqual({
+      viewMode: "immediate",
+      defaultHeight: 400,
+      autoRotate: false,
+      showGrid: false,
+      maxContexts: 6,
+    });
+  });
+
+  it("keeps stored values", () => {
+    expect(mergeSettings({ defaultHeight: 250 }).defaultHeight).toBe(250);
+  });
+
+  it("drops an unknown view mode", () => {
+    expect(mergeSettings({ viewMode: "sideways" }).viewMode).toBe("immediate");
+  });
+
+  it("drops a non-positive height", () => {
+    expect(mergeSettings({ defaultHeight: 0 }).defaultHeight).toBe(400);
+    expect(mergeSettings({ defaultHeight: "tall" }).defaultHeight).toBe(400);
+  });
+
+  it("clamps maxContexts to a sane range", () => {
+    expect(mergeSettings({ maxContexts: 0 }).maxContexts).toBe(1);
+    expect(mergeSettings({ maxContexts: 999 }).maxContexts).toBe(16);
+  });
+
+  it("ignores unknown keys", () => {
+    expect(mergeSettings({ nope: true })).toEqual(DEFAULT_SETTINGS);
+  });
+});
