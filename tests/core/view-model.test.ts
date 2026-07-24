@@ -71,4 +71,10 @@ describe("toViewModel", () => {
     expect(vm.message).toBe("Could not load the model: unexpected token");
     expect(vm.showReloadButton).toBe(true);
   });
+
+  it("reports invalid glTF JSON from a code block", () => {
+    const vm = toViewModel({ kind: "invalid-gltf-json" });
+    expect(vm.message).toBe("The glTF code is not valid JSON.");
+    expect(vm.tone).toBe("error");
+  });
 });

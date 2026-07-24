@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   maxContexts: 6,
 };
 
-export const MAX_CONTEXTS_LIMIT = 16;
+export const MAX_CONTEXTS_LIMIT = 12;
 
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
@@ -34,7 +34,10 @@ function boolean(value: unknown, fallback: boolean): boolean {
 
 function clampContexts(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SETTINGS.maxContexts;
-  return Math.min(MAX_CONTEXTS_LIMIT, Math.max(1, Math.round(value)));
+  const rounded = Math.round(value);
+  // 0 = off (unbegrenzt); negativ ist unsinnig → Default. Sonst auf 0..12 klemmen.
+  if (rounded < 0) return DEFAULT_SETTINGS.maxContexts;
+  return Math.min(MAX_CONTEXTS_LIMIT, rounded);
 }
 
 export function mergeSettings(loaded: unknown): PluginSettings {

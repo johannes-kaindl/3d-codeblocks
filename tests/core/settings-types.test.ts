@@ -30,9 +30,14 @@ describe("mergeSettings", () => {
     expect(mergeSettings({ defaultHeight: "tall" }).defaultHeight).toBe(400);
   });
 
-  it("clamps maxContexts to a sane range", () => {
-    expect(mergeSettings({ maxContexts: 0 }).maxContexts).toBe(1);
-    expect(mergeSettings({ maxContexts: 999 }).maxContexts).toBe(16);
+  it("allows 0 (off) and clamps the top to 12", () => {
+    expect(mergeSettings({ maxContexts: 0 }).maxContexts).toBe(0);
+    expect(mergeSettings({ maxContexts: 13 }).maxContexts).toBe(12);
+    expect(mergeSettings({ maxContexts: 999 }).maxContexts).toBe(12);
+  });
+
+  it("rejects a negative maxContexts back to the default", () => {
+    expect(mergeSettings({ maxContexts: -3 }).maxContexts).toBe(6);
   });
 
   it("ignores unknown keys", () => {
