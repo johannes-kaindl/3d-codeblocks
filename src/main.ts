@@ -75,7 +75,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     } else {
       // Sichtbar machen (statt still): dann ist im Smoke sofort klar, ob Embeds fehlen,
       // weil die API weg ist — oder aus einem anderen Grund.
-      console.warn("[3d-codeblocks] embedRegistry unavailable — ![[…]] embeds disabled.");
+      console.warn("[three-d-codeblocks] embedRegistry unavailable — ![[…]] embeds disabled.");
       new Notice("3D Codeblocks: ![[…]] embeds unavailable (Obsidian embedRegistry missing).");
     }
 
