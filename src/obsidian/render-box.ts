@@ -11,14 +11,19 @@ export interface BoxParts {
 
 export function buildBox(
   parent: HTMLElement,
-  opts: { title?: string; height: number },
+  opts: { title?: string; height?: number; fill?: boolean },
 ): BoxParts {
   const root = parent.createDiv({ cls: "tdcb-block" });
 
   if (opts.title) root.createDiv({ cls: "tdcb-title", text: opts.title });
 
   const stage = root.createDiv({ cls: "tdcb-stage" });
-  stage.style.height = `${opts.height}px`;
+  if (opts.fill) {
+    // FileView: die Buehne fuellt das ganze Pane (Hoehe kommt aus dem CSS).
+    root.addClass("tdcb-fill");
+  } else {
+    stage.style.height = `${opts.height ?? 400}px`;
+  }
 
   return {
     root,

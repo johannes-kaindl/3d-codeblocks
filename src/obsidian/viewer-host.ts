@@ -43,12 +43,16 @@ export interface ContextBudget {
   unregister(id: string): void;
 }
 
-export interface ViewerHostDeps {
+/** Alles, was jeder Weg zum Rendern braucht — ohne den weg-spezifischen `managed`-Schalter. */
+export interface HostBaseDeps {
   settings: () => PluginSettings;
   factory: ViewportFactory;
   budget: ContextBudget;
   loadModel(buffer: ArrayBuffer, format: ModelFormat, materialColor: string): Promise<unknown>;
   readColors(el: HTMLElement): SceneColors;
+}
+
+export interface ViewerHostDeps extends HostBaseDeps {
   /** true = Poster/Budget nutzen (Inline, mehrere pro Notiz moeglich);
       false = immer voll interaktiv, kein Budget (FileView: ein Modell, ein Pane). */
   managed: boolean;

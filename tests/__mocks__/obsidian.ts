@@ -138,6 +138,28 @@ export class MarkdownRenderChild {
   registerEvent(_ref: any) {}
 }
 
+export class FileView {
+  app: any;
+  contentEl: any = makeFakeEl();
+  file: any = null;
+  constructor(public leaf: any) {
+    this.app = leaf?.app ?? makeFakeApp();
+  }
+  getViewType(): string {
+    return "unknown";
+  }
+  getDisplayText(): string {
+    return "";
+  }
+  onLoadFile(_file: any): Promise<void> {
+    return Promise.resolve();
+  }
+  onUnloadFile(_file: any): Promise<void> {
+    return Promise.resolve();
+  }
+  register(_cb: any) {}
+}
+
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
