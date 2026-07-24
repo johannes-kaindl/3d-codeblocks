@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `authorUrl` set to the GitHub profile so the community-store validator can reach it
+  (the portal reaches URLs from a restricted IP range and flags some personal domains
+  as unreachable even when they respond fine in a browser).
+
 ## [0.1.1] — 2026-07-24
 
 ### Fixed
