@@ -26,6 +26,10 @@
   height: 100%;
 }
 
+.tdcb-stage.tdcb-hidden {
+  display: none;
+}
+
 .tdcb-poster {
   width: 100%;
   height: 100%;
@@ -51,17 +55,21 @@
   gap: var(--size-4-2);
   padding: var(--size-4-2);
   font-size: var(--font-ui-small);
+  /* Text immer --text-normal, nie eine Signalfarbe auf einer Signalflaeche —
+     --text-error auf --background-modifier-error verschmilzt (beide rot). Der
+     Fehler wird stattdessen ueber den linken Border-Akzent getragen. */
   color: var(--text-normal);
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
 }
 
 .tdcb-message-error {
-  background: var(--background-modifier-error);
-  color: var(--text-error);
-  border-radius: var(--radius-s);
+  border-left: 3px solid var(--text-error);
 }
 
 .tdcb-message-info {
   color: var(--text-muted);
+  border-left: 3px solid var(--background-modifier-border);
 }
 
 .tdcb-hint {

@@ -179,6 +179,33 @@ describe("ModelBlock", () => {
     expect(JSON.stringify(el.children)).toContain("Compressed glTF is not supported");
   });
 
+  it("collapses the empty stage on a terminal error", async () => {
+    const { deps, app } = makeDeps();
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(null);
+    const el = makeFakeEl();
+
+    const block = new ModelBlock(el, "file: missing.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    expect(JSON.stringify(el.children)).toContain("tdcb-hidden");
+  });
+
+  it("keeps the stage visible when the model is ready", async () => {
+    const { deps, app } = makeDeps();
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("a.gltf"));
+    const el = makeFakeEl();
+
+    const block = new ModelBlock(el, "file: a.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    const stage = el.children[0].children.find((c: any) =>
+      String(c.className).includes("tdcb-stage"),
+    );
+    expect(String(stage.className)).not.toContain("tdcb-hidden");
+  });
+
   it("shows the warnings from the config below the viewport", async () => {
     const { deps, app } = makeDeps();
     app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());

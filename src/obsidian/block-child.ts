@@ -284,6 +284,13 @@ export class ModelBlock extends MarkdownRenderChild {
   }
 
   private show(state: ViewerState): void {
+    // Nur diese drei Zustaende brauchen die Viewport-Flaeche. Bei jedem Fehler
+    // waere ein leerer schwarzer Kasten in voller Hoehe nur Ballast ueber der
+    // Meldung — also einklappen.
+    const stageNeeded =
+      state.kind === "loading" || state.kind === "ready" || state.kind === "poster";
+    this.parts?.stage.toggleClass("tdcb-hidden", !stageNeeded);
+
     const host = this.parts?.message ?? this.containerEl;
     renderMessage(host, toViewModel(state), () => void this.loadNow());
   }

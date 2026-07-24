@@ -75,6 +75,8 @@ export class Viewport {
     this.controls.addEventListener("start", () => options.onInteract());
 
     this.renderer.domElement.addEventListener("webglcontextlost", this.handleContextLost);
+    // Doppelklick setzt die Kamera auf den Einpass-Blick zurueck.
+    this.renderer.domElement.addEventListener("dblclick", this.handleDoubleClick);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(options.container);
@@ -165,6 +167,7 @@ export class Viewport {
     if (this.frame !== null) this.view.cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
     this.renderer.domElement.removeEventListener("webglcontextlost", this.handleContextLost);
+    this.renderer.domElement.removeEventListener("dblclick", this.handleDoubleClick);
     this.controls.dispose();
 
     disposeObject(this.scene);
@@ -182,6 +185,11 @@ export class Viewport {
   private readonly handleContextLost = (event: Event): void => {
     event.preventDefault();
     this.options.onContextLost();
+  };
+
+  private readonly handleDoubleClick = (): void => {
+    this.options.onInteract();
+    this.resetCamera();
   };
 
   private requestRender(): void {
