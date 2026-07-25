@@ -43,7 +43,7 @@ const ISO_ELEVATION = 30;
 const DIRECTION: Vec3 = directionFromAngles(ISO_AZIMUTH, ISO_ELEVATION);
 const MARGIN = 1.2;
 /** Untergrenze je Achse — verhindert Division durch null bei flacher/leerer Box. */
-const MIN_EXTENT = 1e-3;
+export const MIN_EXTENT = 1e-3;
 
 export function fitCamera(min: Vec3, max: Vec3, fovDeg: number, aspect: number): CameraFit {
   const target: Vec3 = {

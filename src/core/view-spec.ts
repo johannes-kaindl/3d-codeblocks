@@ -4,7 +4,7 @@
 // automatischen Einpass-Distanz, deshalb bleibt eine gespeicherte Ansicht sinnvoll,
 // wenn dasselbe Modell in anderer Groesse neu generiert wird.
 
-import { directionFromAngles, fitCamera, type CameraFit, type Vec3 } from "./camera-fit";
+import { MIN_EXTENT, directionFromAngles, fitCamera, type CameraFit, type Vec3 } from "./camera-fit";
 
 export interface ViewSpec {
   /** Drehung um die Hochachse, 0..359. 0 = von vorn (+Z), wachsend nach rechts. */
@@ -119,7 +119,7 @@ export function viewToCamera(
       z: fit.target.z + dir.z * distance,
     },
     target: fit.target,
-    near: Math.max(distance / 1000, 1e-3),
+    near: Math.max(distance / 1000, MIN_EXTENT),
     far: distance + fit.radius * 10,
     distance,
     radius: fit.radius,
