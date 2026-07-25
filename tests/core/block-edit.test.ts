@@ -69,4 +69,25 @@ describe("applyViewKey", () => {
   it("returns empty string when removing view from empty source", () => {
     expect(applyViewKey("", null)).toBe("");
   });
+
+  it("preserves mixed CRLF and LF boundaries", () => {
+    const source = "file: a.glb\r\nheight: 300\nwidth: 10\r\n";
+    const result = applyViewKey(source, TOP);
+    expect(result).toBe("file: a.glb\r\nview: top\r\nheight: 300\nwidth: 10\r\n");
+    // Verify the height/width boundary is still bare LF, not normalized to CRLF
+    expect(result).toContain("height: 300\nwidth:");
+  });
+
+  it("handles single newline without losing it", () => {
+    const result = applyViewKey("\n", TOP);
+    expect(result).toBe("\nview: top\n");
+  });
+
+  it("inserts with CRLF boundary in a CRLF-only source", () => {
+    const source = "file: a.glb\r\n";
+    const result = applyViewKey(source, TOP);
+    // The inserted line should inherit \r from the anchor line
+    expect(result).toBe("file: a.glb\r\nview: top\r\n");
+    expect(result).toContain("file: a.glb\r\nview: top\r\n");
+  });
 });
