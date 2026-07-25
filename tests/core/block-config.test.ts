@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseBlockConfig } from "../../src/core/block-config";
+import { NAMED_VIEWS } from "../../src/core/view-spec";
 
 describe("parseBlockConfig", () => {
   it("reads file, height and title", () => {
@@ -70,5 +71,30 @@ describe("parseBlockConfig", () => {
     const r = parseBlockConfig("file: a.glb\nfile: b.glb");
     expect(r.config?.file).toBe("b.glb");
     expect(r.warnings).toEqual(["`file` given more than once — using the last one."]);
+  });
+});
+
+describe("view key", () => {
+  it("reads a named view", () => {
+    const result = parseBlockConfig("file: a.glb\nview: top");
+    expect(result.config?.view).toEqual(NAMED_VIEWS.top);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("reads three numbers", () => {
+    const result = parseBlockConfig("file: a.glb\nview: 45, 30, 1.2");
+    expect(result.config?.view).toEqual({ azimuth: 45, elevation: 30, distance: 1.2 });
+  });
+
+  it("warns about an unreadable value but still renders", () => {
+    const result = parseBlockConfig("file: a.glb\nview: schräg-von-oben");
+    expect(result.config).not.toBeNull();
+    expect(result.config?.view).toBeUndefined();
+    expect(result.warnings[0]).toContain("`view`");
+    expect(result.errors).toEqual([]);
+  });
+
+  it("leaves view undefined when the key is absent", () => {
+    expect(parseBlockConfig("file: a.glb").config?.view).toBeUndefined();
   });
 });
