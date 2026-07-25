@@ -6,18 +6,29 @@
 // nicht (er läuft vor Obsidians Embed-Laden, und Obsidian verwaltet den Span selbst).
 // Deshalb: Feature-Detection (nur registrieren, wenn vorhanden) + eigene, minimale
 // Typ-Deklaration statt einer Dependency. Verschwindet die API, fehlen nur Embeds.
+//
+// Kein Codeblock dahinter → nur steuerbar (Fit/Presets), nie speicherbar; siehe
+// `readOnlyController`, den sich diese Klasse mit `ModelFileView` teilt.
 import { MarkdownRenderChild, type App, type TFile } from "obsidian";
+import type { ActiveViewport } from "../core/active-viewport";
 import { embedHeightFromAttrs } from "../core/embed-src";
 import { detectFormat } from "../core/format";
 import { buildBox, type BoxParts } from "./render-box";
 import { readModel } from "./file-source";
+import { readOnlyController } from "./read-only-controller";
 import type { TrackedView } from "./tracked-view";
-import { ViewerHost, needsContainerInspection, type HostBaseDeps } from "./viewer-host";
+import {
+  ViewerHost,
+  needsContainerInspection,
+  wrapBudgetWithActive,
+  type HostBaseDeps,
+} from "./viewer-host";
 
 export type { TrackedView } from "./tracked-view";
 
 export interface EmbedDeps extends HostBaseDeps {
   app: App;
+  active: ActiveViewport;
 }
 
 // --- minimale Deklaration der inoffiziellen embedRegistry-API --------------------
@@ -54,6 +65,11 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   /** Laufendes Render-Promise (für Tests abwartbar). */
   rendering: Promise<void> = Promise.resolve();
 
+  readonly controller = readOnlyController(
+    () => this.host,
+    () => this.file.path,
+  );
+
   constructor(
     private readonly hostEl: HTMLElement,
     private readonly file: TFile,
@@ -70,6 +86,9 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
 
   onunload(): void {
     this.unloaded = true;
+    // Reihenfolge wie in ModelBlock: erst clearIf (raeumt nur auf, wenn dieser Embed
+    // auch der aktive war), dann erst den Host disposen.
+    this.deps.active.clearIf(this.controller);
     this.host?.dispose();
     this.host = null;
   }
@@ -93,6 +112,7 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
       this.host = new ViewerHost(this.parts.stage, this.parts.message, {
         ...this.deps,
         managed: true,
+        budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this.controller),
       });
     }
     if (!this.host) return;

@@ -4,20 +4,31 @@
 //
 // Obsidian ruft `onunload()`, wenn es den Codeblock-DOM wegwirft (in Live Preview bei
 // jedem Tastendruck) — dort disposen wir den Host und damit den WebGL-Kontext.
-import { MarkdownRenderChild, type App, type TFile } from "obsidian";
+import { Notice, MarkdownRenderChild, type App, type TFile } from "obsidian";
+import {
+  NO_BLOCK_REASON,
+  type ActiveViewport,
+  type ViewportController,
+} from "../core/active-viewport";
+import { applyViewKey } from "../core/block-edit";
 import { parseBlockConfig, type BlockConfig } from "../core/block-config";
 import { detectFormat, type ModelFormat } from "../core/format";
 import type { PluginSettings } from "../core/settings-types";
+import type { ViewSpec } from "../core/view-spec";
 import { toViewModel } from "../core/view-model";
 import type { SceneColors } from "../viewer/scene";
+import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
 import { readModel, resolveModelPath } from "./file-source";
 import { buildBox, renderHint, renderMessage, type BoxParts } from "./render-box";
 import {
   ViewerHost,
+  describeError,
   needsContainerInspection,
+  wrapBudgetWithActive,
   type ContextBudget,
   type ViewportFactory,
 } from "./viewer-host";
+import { buildToolbar, toolbarVisible } from "./viewport-toolbar";
 
 // Re-Export, damit bestehende Importe (main.ts, Tests) stabil bleiben.
 export type { ViewportFactory, ContextBudget, ViewportLike, ViewportCreateOptions } from "./viewer-host";
@@ -29,9 +40,15 @@ export interface BlockDeps {
   budget: ContextBudget;
   loadModel(buffer: ArrayBuffer, format: ModelFormat, materialColor: string): Promise<unknown>;
   readColors(el: HTMLElement): SceneColors;
+  active: ActiveViewport;
+  writePorts: WritePorts;
+  /** Zeilen dieses Blocks — `null`, wenn Obsidian sie nicht kennt (Popover, Export). */
+  sectionInfo: () => { lineStart: number; lineEnd: number } | null;
+  /** Ist die Sidebar (Task 10) gerade offen? Entscheidet mit, ob die Toolbar erscheint. */
+  panelVisible: () => boolean;
 }
 
-export class ModelBlock extends MarkdownRenderChild {
+export class ModelBlock extends MarkdownRenderChild implements ViewportController {
   private readonly deps: BlockDeps;
   private readonly source: string;
   private readonly sourcePath: string;
@@ -42,6 +59,8 @@ export class ModelBlock extends MarkdownRenderChild {
   private file: TFile | null = null;
   private loadedMtime: number | null = null;
   private observer: IntersectionObserver | null = null;
+  private unsubscribeActive: (() => void) | null = null;
+  private toolbar: HTMLElement | null = null;
   private unloaded = false;
 
   constructor(containerEl: HTMLElement, source: string, sourcePath: string, deps: BlockDeps) {
@@ -69,17 +88,87 @@ export class ModelBlock extends MarkdownRenderChild {
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: true,
+      budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this),
     });
 
+    // Klasse aus der Registry ableiten statt einweg zu setzen — sonst bleibt
+    // `tdcb-active` an jedem je beruehrten Block haengen, sobald ein anderer aktiv
+    // wird (nichts setzt sie je wieder zurueck). `subscribe` liefert nur AENDERUNGEN,
+    // der Anfangszustand ("nicht aktiv") ist bereits der Default ohne Klasse.
+    this.unsubscribeActive = this.deps.active.subscribe((controller) => {
+      this.containerEl.toggleClass("tdcb-active", controller === this);
+    });
+
+    this.syncToolbar();
     this.observeVisibility();
   }
 
   onunload(): void {
     this.unloaded = true;
+    // Reihenfolge wichtig: erst clearIf (loest ggf. noch die Abmeld-Benachrichtigung
+    // aus und nimmt die Klasse mit), dann abbestellen.
+    this.deps.active.clearIf(this);
+    this.unsubscribeActive?.();
+    this.unsubscribeActive = null;
     this.observer?.disconnect();
     this.observer = null;
     this.host?.dispose();
     this.host = null;
+  }
+
+  // --- ViewportController -----------------------------------------------------
+
+  label(): string {
+    return this.config?.title ?? this.config?.file ?? "3D model";
+  }
+
+  getView(): ViewSpec | null {
+    return this.host?.currentView() ?? null;
+  }
+
+  applyView(spec: ViewSpec | null): void {
+    this.host?.applyView(spec);
+  }
+
+  canSave(): boolean {
+    return this.deps.sectionInfo() !== null;
+  }
+
+  async save(spec: ViewSpec | null): Promise<void> {
+    const info = this.deps.sectionInfo();
+    if (info === null) {
+      new Notice(NO_BLOCK_REASON);
+      return;
+    }
+
+    // Obsidian liefert `source` u. U. mit einem trailing "\n" (siehe `stripTrailingNewline`).
+    // `bodyAt` in block-writer.ts haengt nie einen Trenner an einen rekonstruierten Rumpf —
+    // ungekuerzt wuerde der Abgleich JEDES Mal als "Note changed" scheitern und der
+    // geschriebene Rumpf eine Leerzeile vor der schliessenden Fence bekommen.
+    const body = stripTrailingNewline(this.source);
+    const next = applyViewKey(body, spec);
+    if (next === body) {
+      // Ohne Feedback wirkt der Save-/Clear-Button hier tot — er tut ja etwas,
+      // nur ist das Ergebnis mit dem Ist-Zustand identisch.
+      new Notice("View already up to date");
+      return;
+    }
+
+    try {
+      await writeBlockBody(
+        this.deps.writePorts,
+        { path: this.sourcePath, lineStart: info.lineStart, lineEnd: info.lineEnd, fence: "3d" },
+        body,
+        next,
+      );
+      new Notice(spec === null ? "View cleared" : "View saved");
+    } catch (error) {
+      new Notice(
+        error instanceof BlockChangedError
+          ? error.message
+          : `Could not save view: ${describeError(error)}`,
+      );
+    }
   }
 
   /** Oeffentlich, damit Tests den Ladeweg ohne IntersectionObserver anstossen koennen. */
@@ -108,7 +197,14 @@ export class ModelBlock extends MarkdownRenderChild {
       format,
       inspectContainer: needsContainerInspection(file.path),
       label: this.config.title ?? file.path,
+      view: this.config.view,
     });
+
+    // `buildToolbar()` friert `getView()` beim Bau ein — das Modell laedt aber erst
+    // HIER (asynchron ueber `render`) fertig. Ohne dieses Nachziehen bliebe der
+    // Save-Button in der Default-Konfiguration (Toolbar statt Sidebar) fuer immer
+    // deaktiviert, weil `syncToolbar()` in `onload()` noch vor jedem Modell laeuft.
+    this.syncToolbar();
   }
 
   /** Reagiert auf Regenerierung durch den Erzeuger-Loop (gleicher Pfad, neuer Inhalt). */
@@ -120,6 +216,26 @@ export class ModelBlock extends MarkdownRenderChild {
 
   refreshColors(): void {
     this.host?.refreshColors();
+  }
+
+  /** Leiste an- oder abhaengen, je nach Einstellung und Sichtbarkeit der Sidebar. */
+  syncToolbar(): void {
+    if (!this.parts || this.unloaded) return;
+
+    this.toolbar?.remove();
+    this.toolbar = null;
+
+    const { panelPlacement } = this.deps.settings();
+    if (!toolbarVisible(panelPlacement, this.deps.panelVisible())) return;
+
+    // In den Viewport-Wrapper haengen (nicht `root`, das auch den `title:`-Caption
+    // traegt, und NICHT `stage` selbst): `root` wuerde die Leiste ueber den Titel statt
+    // ueber den Viewport setzen; `stage` wird von `ViewerHost` in Poster-Modus,
+    // Reaktivierung und Fehler-Reload komplett geleert (`stage.empty()`) — eine dort
+    // haengende Leiste wuerde bei jedem dieser Wege verschwinden und nie zurueckkommen,
+    // weil `syncToolbar()` nur den initialen Ladeweg abdeckt. `viewport` ist Geschwister
+    // der Buehne, nicht Kind, und ueberlebt deshalb alle drei.
+    this.toolbar = buildToolbar(this.parts.viewport, this);
   }
 
   private observeVisibility(): void {
@@ -139,4 +255,13 @@ export class ModelBlock extends MarkdownRenderChild {
     );
     this.observer.observe(parts.root);
   }
+}
+
+/** Genau EIN trailing Zeilenende ("\n" oder "\r\n") entfernen — nicht mehr, nicht
+    ueber Regex mit Rueckwaertssuche, die bei sehr langen Quellen teuer waere. Ohne
+    trailing Zeilenende bleibt der Text unveraendert. */
+function stripTrailingNewline(text: string): string {
+  if (text.endsWith("\r\n")) return text.slice(0, -2);
+  if (text.endsWith("\n")) return text.slice(0, -1);
+  return text;
 }

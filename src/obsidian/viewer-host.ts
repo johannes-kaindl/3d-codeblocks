@@ -7,15 +7,19 @@
 //
 // `loadModel`/`readColors`/`factory` kommen als Dependency herein, damit der Kern ohne
 // echtes three.js/WebGL testbar bleibt.
+import type { ActiveViewport, ViewportController } from "../core/active-viewport";
 import { detectFormat, type ModelFormat } from "../core/format";
 import { inspectGlb, unsupportedRequired } from "../core/gltf-inspect";
 import type { PluginSettings } from "../core/settings-types";
 import { toViewModel, type ViewerState } from "../core/view-model";
+import type { ViewSpec } from "../core/view-spec";
 import type { SceneColors } from "../viewer/scene";
 import { renderMessage } from "./render-box";
 
 export interface ViewportLike {
   setModel(object: unknown): void;
+  setView(spec: ViewSpec | null): void;
+  getView(): ViewSpec | null;
   setColors(colors: SceneColors): void;
   resize(): void;
   resetCamera(): void;
@@ -43,6 +47,27 @@ export interface ContextBudget {
   unregister(id: string): void;
 }
 
+/** Budget-Wrapper, den alle vier Wege (Block, gltf-Block, Embed, FileView) brauchen:
+    `register`/`unregister` reichen unveraendert durch, `touch` markiert zusaetzlich
+    den uebergebenen Controller als aktiv. `budget.touch` ist der einzige Ort, der
+    echte Nutzerinteraktion meldet (siehe `onInteract` in `ViewportOptions`) — Autorotate
+    zaehlt bewusst nicht. War vorher an vier Stellen wortgleich dupliziert; ein `gltf`-
+    Block, der das ausliess, blieb dadurch komplett aus der Aktiv-Verdrahtung raus. */
+export function wrapBudgetWithActive(
+  budget: ContextBudget,
+  active: ActiveViewport,
+  controller: ViewportController,
+): ContextBudget {
+  return {
+    register: (id, release) => budget.register(id, release),
+    unregister: (id) => budget.unregister(id),
+    touch: (id) => {
+      active.set(controller);
+      budget.touch(id);
+    },
+  };
+}
+
 /** Alles, was jeder Weg zum Rendern braucht — ohne den weg-spezifischen `managed`-Schalter. */
 export interface HostBaseDeps {
   settings: () => PluginSettings;
@@ -65,6 +90,7 @@ export interface RenderSource {
   inspectContainer: boolean;
   /** alt-Text des Poster-Bilds. */
   label: string;
+  view?: ViewSpec;
 }
 
 let nextHostId = 0;
@@ -103,7 +129,7 @@ export class ViewerHost {
     try {
       bytes = await source.provideBytes();
     } catch (error) {
-      this.show({ kind: "load-failed", detail: describe(error) });
+      this.show({ kind: "load-failed", detail: describeError(error) });
       return;
     }
     if (this.disposed) return;
@@ -127,6 +153,14 @@ export class ViewerHost {
   refreshColors(): void {
     if (this.disposed || !this.viewport) return;
     this.viewport.setColors(this.deps.readColors(this.stage));
+  }
+
+  currentView(): ViewSpec | null {
+    return this.viewport?.getView() ?? null;
+  }
+
+  applyView(spec: ViewSpec | null): void {
+    this.viewport?.setView(spec);
   }
 
   dispose(): void {
@@ -160,9 +194,10 @@ export class ViewerHost {
         return;
       }
       viewport.setModel(object);
+      viewport.setView(source.view ?? null);
     } catch (error) {
       this.releaseViewport();
-      this.show({ kind: "load-failed", detail: describe(error) });
+      this.show({ kind: "load-failed", detail: describeError(error) });
       return;
     }
 
@@ -237,6 +272,7 @@ export function needsContainerInspection(path: string): boolean {
   return detectFormat(path) === "gltf" && path.toLowerCase().endsWith(".glb");
 }
 
-function describe(error: unknown): string {
+// Exportiert, damit `block-child.ts` dieselbe Fehlertext-Hilfe nutzt statt sie zu spiegeln.
+export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

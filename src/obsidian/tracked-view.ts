@@ -6,4 +6,7 @@ export interface TrackedView {
   onFileModified(file: TFile): void | Promise<void>;
   refreshColors(): void;
   register(cb: () => void): void;
+  /** Leiste an-/abhaengen, wenn sich Placement oder Sidebar-Sichtbarkeit aendern.
+      Optional: nur `ModelBlock` hat ueberhaupt eine Hover-Toolbar. */
+  syncToolbar?(): void;
 }

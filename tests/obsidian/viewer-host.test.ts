@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { makeFakeEl } from "../__mocks__/obsidian";
 import { ViewerHost } from "../../src/obsidian/viewer-host";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
+import { NAMED_VIEWS } from "../../src/core/view-spec";
 
 function makeVp() {
   return {
     disposed: 0,
     setModel: vi.fn(),
+    setView: vi.fn(),
+    getView: vi.fn(() => null),
     setColors: vi.fn(),
     resize: vi.fn(),
     resetCamera: vi.fn(),
@@ -77,5 +80,23 @@ describe("ViewerHost", () => {
     const { host, message } = makeHost();
     host.showError({ kind: "missing-file", path: "a/b.gltf" });
     expect(JSON.stringify(message.children)).toContain("File not found: a/b.gltf");
+  });
+
+  it("applies the block's view after loading the model", async () => {
+    const { host, created } = makeHost();
+    await host.render({
+      provideBytes: bytes,
+      format: "gltf",
+      inspectContainer: false,
+      label: "x",
+      view: NAMED_VIEWS.top,
+    });
+    expect(created[0].setView).toHaveBeenCalledWith(NAMED_VIEWS.top);
+  });
+
+  it("fits automatically when the block has no view", async () => {
+    const { host, created } = makeHost();
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+    expect(created[0].setView).toHaveBeenCalledWith(null);
   });
 });

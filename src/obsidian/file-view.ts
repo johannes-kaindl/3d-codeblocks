@@ -3,20 +3,38 @@
 // Endungen mit `VIEW_TYPE_3D` (in main.ts).
 //
 // Ein Modell pro Pane, immer voll interaktiv → `managed: false` (kein Poster/Budget).
+// Kein Codeblock dahinter → nur steuerbar (Fit/Presets), nie speicherbar; siehe
+// `readOnlyController`, den sich diese Klasse mit `ModelEmbed` teilt.
 import { FileView, type TFile, type WorkspaceLeaf } from "obsidian";
+import type { ActiveViewport } from "../core/active-viewport";
 import { detectFormat } from "../core/format";
 import { buildBox, type BoxParts } from "./render-box";
-import { ViewerHost, needsContainerInspection, type HostBaseDeps } from "./viewer-host";
+import { readOnlyController } from "./read-only-controller";
+import {
+  ViewerHost,
+  needsContainerInspection,
+  wrapBudgetWithActive,
+  type HostBaseDeps,
+} from "./viewer-host";
 
 export const VIEW_TYPE_3D = "tdcb-3d-model";
+
+export interface FileViewDeps extends HostBaseDeps {
+  active: ActiveViewport;
+}
 
 export class ModelFileView extends FileView {
   private parts: BoxParts | null = null;
   private host: ViewerHost | null = null;
 
+  readonly controller = readOnlyController(
+    () => this.host,
+    () => this.file?.path ?? "3D model",
+  );
+
   constructor(
     leaf: WorkspaceLeaf,
-    private readonly deps: HostBaseDeps,
+    private readonly deps: FileViewDeps,
   ) {
     super(leaf);
   }
@@ -41,6 +59,7 @@ export class ModelFileView extends FileView {
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: false,
+      budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this.controller),
     });
 
     const format = detectFormat(file.path);
@@ -58,10 +77,18 @@ export class ModelFileView extends FileView {
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    // Ohne das bleibt die Registry beim Dateiwechsel im selben Pane auf diesem
+    // Controller stehen, obwohl der Host schon weg ist (bis `onLoadFile` einen neuen
+    // baut) — `clearIf` raeumt nur auf, wenn dieser Controller auch der aktive war.
+    this.deps.active.clearIf(this.controller);
     this.teardown();
   }
 
   onunload(): void {
+    // Reihenfolge wie in ModelBlock: erst clearIf (raeumt nur auf, wenn diese View
+    // auch die aktive war), dann erst den Host disposen — sonst saehe ein waehrend
+    // `clearIf` benachrichtigter Listener schon einen toten Host.
+    this.deps.active.clearIf(this.controller);
     this.teardown();
   }
 

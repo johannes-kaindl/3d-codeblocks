@@ -2,7 +2,15 @@
    Nur Obsidian-Theme-Variablen, keine festen Farben (UI-STANDARD §3). */
 
 .tdcb-block {
+  position: relative;
   margin: var(--size-4-2) 0;
+}
+
+/* `tdcb-active` sitzt auf `containerEl` (block-child.ts), nicht auf `.tdcb-block` selbst —
+   `.tdcb-block` ist ein Kind-Div von `buildBox` (render-box.ts). Deshalb Nachfahren-Selektor,
+   kein Compound wie bei `.tdcb-block.tdcb-fill` (dort traegt dasselbe Element beide Klassen). */
+.tdcb-active .tdcb-stage {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
 }
 
 .tdcb-title {
@@ -11,8 +19,14 @@
   margin-bottom: var(--size-4-1);
 }
 
-.tdcb-stage {
+/* Wrapper UM die Buehne — traegt die Positionierung fuer die Hover-Toolbar
+   (render-box.ts erklaert, warum sie hier haengt und nicht in `.tdcb-stage`). */
+.tdcb-viewport {
   position: relative;
+  width: 100%;
+}
+
+.tdcb-stage {
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--background-modifier-border);
@@ -30,10 +44,17 @@
   display: none;
 }
 
-/* FileView: die Buehne fuellt das ganze Pane. */
+/* FileView: die Buehne fuellt das ganze Pane. Der Viewport-Wrapper muss den Flex-Platz
+   zuerst an sich nehmen (`flex: 1`) und ihn dann selbst als Flex-Container an die
+   Buehne weiterreichen — sonst bliebe die Buehne auf ihrer Inhaltshoehe stehen. */
 .tdcb-block.tdcb-fill {
   height: 100%;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tdcb-block.tdcb-fill .tdcb-viewport {
+  flex: 1;
   display: flex;
   flex-direction: column;
 }
@@ -104,4 +125,52 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+.tdcb-toolbar {
+  position: absolute;
+  top: var(--size-4-2);
+  right: var(--size-4-2);
+  display: flex;
+  gap: var(--size-4-1);
+  padding: var(--size-4-1);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  opacity: 0;
+  transition: opacity 120ms ease-in-out;
+}
+
+.tdcb-block:hover .tdcb-toolbar,
+.tdcb-toolbar:focus-within {
+  opacity: 1;
+}
+
+/* Ohne Hover (Touch) bliebe die Leiste sonst unerreichbar. */
+@media (hover: none) {
+  .tdcb-toolbar {
+    opacity: 1;
+  }
+}
+
+.tdcb-toolbar-button {
+  display: flex;
+  align-items: center;
+  padding: var(--size-4-1);
+}
+
+.tdcb-panel-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-1);
+  margin-bottom: var(--size-4-3);
+}
+
+.tdcb-panel-actions {
+  display: flex;
+  gap: var(--size-4-2);
+}
+
+.tdcb-panel-label {
+  margin-bottom: var(--size-4-2);
+  color: var(--text-muted);
 }

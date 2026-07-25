@@ -14,6 +14,7 @@ describe("mergeSettings", () => {
       autoRotate: false,
       showGrid: false,
       maxContexts: 6,
+      panelPlacement: "auto",
     });
   });
 
@@ -42,5 +43,20 @@ describe("mergeSettings", () => {
 
   it("ignores unknown keys", () => {
     expect(mergeSettings({ nope: true })).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe("panelPlacement", () => {
+  it("defaults to auto", () => {
+    expect(mergeSettings({}).panelPlacement).toBe("auto");
+  });
+
+  it("keeps a valid value", () => {
+    expect(mergeSettings({ panelPlacement: "toolbar" }).panelPlacement).toBe("toolbar");
+  });
+
+  it("falls back to the default for garbage", () => {
+    expect(mergeSettings({ panelPlacement: "somewhere" }).panelPlacement).toBe("auto");
+    expect(mergeSettings({ panelPlacement: 7 }).panelPlacement).toBe("auto");
   });
 });

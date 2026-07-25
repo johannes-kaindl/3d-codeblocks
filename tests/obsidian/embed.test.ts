@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TFile, makeFakeApp, makeFakeEl } from "../__mocks__/obsidian";
 import { ModelEmbed, registerModelEmbeds } from "../../src/obsidian/embed";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
+import { ActiveViewport } from "../../src/core/active-viewport";
 
 function makeGlb(): ArrayBuffer {
   const bytes = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" } }));
@@ -20,23 +21,28 @@ function makeGlb(): ArrayBuffer {
   return buf;
 }
 
-function makeDeps() {
+function makeDeps(overrides: Record<string, unknown> = {}) {
   const created: any[] = [];
   const app = makeFakeApp();
   app.vault.readBinary = vi.fn().mockResolvedValue(makeGlb());
   const loadModel = vi.fn().mockResolvedValue({});
+  const active = (overrides.active as ActiveViewport | undefined) ?? new ActiveViewport();
   return {
     app,
     created,
     loadModel,
+    active,
     deps: {
       app,
       settings: () => DEFAULT_SETTINGS,
       factory: {
         isWebGLAvailable: () => true,
-        create: () => {
+        create: (opts: any) => {
           const vp = {
+            opts,
             setModel: vi.fn(),
+            setView: vi.fn(),
+            getView: vi.fn(() => null),
             setColors: vi.fn(),
             resize: vi.fn(),
             resetCamera: vi.fn(),
@@ -50,8 +56,32 @@ function makeDeps() {
       budget: { register: vi.fn(), touch: vi.fn(), unregister: vi.fn() },
       loadModel,
       readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
+      active,
+      ...overrides,
     } as any,
   };
+}
+
+/** Ein geladener Embed mit aktiver Registry — analog `loadedBlock` (Task 9). */
+async function makeLoadedEmbed(overrides: Record<string, unknown> = {}) {
+  const { deps, created, active } = makeDeps(overrides);
+  const el = makeFakeEl();
+  const embed = new ModelEmbed(el, fileAt("a.gltf"), deps);
+  embed.loadFile();
+  await embed.rendering;
+  return { embed, created, active };
+}
+
+/** Rekursiv nach `.tdcb-stage` suchen -- sie haengt seit dem Viewport-Wrapper-Fix
+    (Toolbar-Ueberleben in Poster-/Reaktivierungs-/Fehler-Reload-Pfaden) unter
+    `.tdcb-viewport`, nicht mehr direkt unter `.tdcb-block`. */
+function findStage(el: any): any {
+  if (String(el.className).includes("tdcb-stage")) return el;
+  for (const child of el.children ?? []) {
+    const found = findStage(child);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 function fileAt(path: string, mtime = 1): TFile {
@@ -85,9 +115,7 @@ describe("ModelEmbed", () => {
     embed.loadFile();
     await embed.rendering;
 
-    const stage = el.children[0].children.find((c: any) =>
-      String(c.className).includes("tdcb-stage"),
-    );
+    const stage = findStage(el);
     expect(stage.style.height).toBe("250px");
   });
 
@@ -99,9 +127,7 @@ describe("ModelEmbed", () => {
     embed.loadFile();
     await embed.rendering;
 
-    const stage = el.children[0].children.find((c: any) =>
-      String(c.className).includes("tdcb-stage"),
-    );
+    const stage = findStage(el);
     expect(stage.style.height).toBe("400px");
   });
 
@@ -132,6 +158,22 @@ describe("ModelEmbed", () => {
     embed.onunload();
 
     expect(created[0].dispose).toHaveBeenCalled();
+  });
+});
+
+describe("ModelEmbed as a ViewportController", () => {
+  it("registers itself as the active viewport when the user interacts", async () => {
+    const { embed, created, active } = await makeLoadedEmbed();
+    created[0].opts.onInteract();
+    expect(active.get()).toBe(embed.controller);
+    expect(active.get()?.canSave()).toBe(false);
+  });
+
+  it("clears itself from the registry on unload", async () => {
+    const { embed, created, active } = await makeLoadedEmbed();
+    created[0].opts.onInteract();
+    embed.onunload();
+    expect(active.get()).toBeNull();
   });
 });
 

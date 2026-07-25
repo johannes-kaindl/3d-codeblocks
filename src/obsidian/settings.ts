@@ -71,6 +71,24 @@ export class SettingsTab extends PluginSettingTab {
             await this.persist({ maxContexts: value });
           }),
       );
+
+    new Setting(containerEl)
+      .setName("Controls placement")
+      .setDesc("Where the buttons for saving a view appear.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("auto", "Sidebar when open, toolbar otherwise")
+          .addOption("sidebar", "Sidebar only")
+          .addOption("toolbar", "Toolbar only")
+          .setValue(this.plugin.settings.panelPlacement)
+          .onChange(async (value) => {
+            await this.persist({ panelPlacement: value });
+            // Sonst wirkt die neue Wahl erst nach einem Reload -- bereits offene
+            // Bloecke behalten sonst ihre alte Leiste (oder keine), bis irgendein
+            // anderer Grund sie neu zeichnet.
+            this.plugin.syncAllToolbars();
+          }),
+      );
   }
 
   private async persist(patch: Record<string, unknown>): Promise<void> {

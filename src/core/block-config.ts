@@ -4,10 +4,13 @@
 //   `key: value`  — nur wenn die Zeile `^[A-Za-z][A-Za-z0-9_-]*\s*:` erfuellt
 //   alles andere  — Pfad-Kurzform (deshalb ueberlebt `some folder/odd:name.glb`)
 
+import { VIEW_NAMES, parseView, type ViewSpec } from "./view-spec";
+
 export interface BlockConfig {
   file: string;
   height?: number;
   title?: string;
+  view?: ViewSpec;
 }
 
 export interface ParseResult {
@@ -20,7 +23,7 @@ export interface ParseResult {
 }
 
 const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:(.*)$/;
-const KNOWN_KEYS = ["file", "height", "title"] as const;
+const KNOWN_KEYS = ["file", "height", "title", "view"] as const;
 
 function stripQuotes(value: string): string {
   const trimmed = value.trim();
@@ -35,6 +38,7 @@ export function parseBlockConfig(source: string): ParseResult {
   let file: string | undefined;
   let height: number | undefined;
   let title: string | undefined;
+  let view: ViewSpec | undefined;
   let fileSeen = 0;
 
   for (const rawLine of source.split("\n")) {
@@ -62,6 +66,15 @@ export function parseBlockConfig(source: string): ParseResult {
       fileSeen += 1;
     } else if (key === "title") {
       title = value;
+    } else if (key === "view") {
+      const parsed = parseView(value);
+      if (parsed === null) {
+        warnings.push(
+          `\`view\`: unknown view \`${value}\` — use ${VIEW_NAMES} or three numbers (azimuth,elevation,distance)`,
+        );
+      } else {
+        view = parsed;
+      }
     } else {
       const parsed = Number(value);
       if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -80,5 +93,5 @@ export function parseBlockConfig(source: string): ParseResult {
     return { config: null, errors: ["No `file:` given."], warnings };
   }
 
-  return { config: { file, height, title }, errors: [], warnings };
+  return { config: { file, height, title, view }, errors: [], warnings };
 }

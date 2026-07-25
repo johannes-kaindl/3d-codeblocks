@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Saved camera angles: turn a model, press **Save view**, and the angle is written into
+  the code block as `view:` (`iso`, `top`, or `azimuth,elevation,distance`).
+- Sidebar view with view presets and Save/Clear/Fit, plus a hover toolbar on the model
+  when the sidebar is closed. New setting: **Controls placement**.
+
 ## [0.1.2] — 2026-07-24
 
 ### Fixed

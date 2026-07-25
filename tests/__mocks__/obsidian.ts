@@ -5,12 +5,15 @@ import { vi } from "vitest";
 export function makeFakeEl(): any {
   const children: any[] = [];
   const attrs: Record<string, string> = {};
+  const handlers: Record<string, ((event?: any) => void)[]> = {};
   const el: any = {
     children,
     className: "",
     textContent: "",
     style: {},
     dataset: {},
+    disabled: false,
+    title: "",
     getAttribute: (name: string) => (name in attrs ? attrs[name] : null),
     setAttribute: (name: string, value: string) => {
       attrs[name] = value;
@@ -18,6 +21,7 @@ export function makeFakeEl(): any {
     getAttr: (name: string) => (name in attrs ? attrs[name] : null),
     createDiv: (opts?: any) => {
       const child = makeFakeEl();
+      setParent(child, el);
       children.push(child);
       if (typeof opts === "string") child.className = opts;
       else if (opts) {
@@ -28,6 +32,7 @@ export function makeFakeEl(): any {
     },
     createEl: (tag: string, opts?: any) => {
       const child = makeFakeEl();
+      setParent(child, el);
       children.push(child);
       child.tagName = tag.toUpperCase();
       if (opts?.text) child.textContent = opts.text;
@@ -36,6 +41,7 @@ export function makeFakeEl(): any {
     },
     createSpan: (opts?: any) => el.createEl("span", opts),
     empty: () => {
+      for (const child of children) setParent(child, null);
       children.length = 0;
     },
     setText: (text: string) => {
@@ -48,16 +54,46 @@ export function makeFakeEl(): any {
       el.className = el.className.replace(cls, "").trim();
     },
     toggleClass: (cls: string, on: boolean) => (on ? el.addClass(cls) : el.removeClass(cls)),
-    addEventListener: vi.fn(),
+    // Registriert weiterhin ueber vi.fn (bestehende Tests lesen `.mock.calls`), fuehrt
+    // den Handler aber auch wirklich aus — sonst bleibt `click()` unten wirkungslos.
+    addEventListener: vi.fn((type: string, fn: (event?: any) => void) => {
+      (handlers[type] ??= []).push(fn);
+    }),
     removeEventListener: vi.fn(),
     appendChild: (child: any) => {
+      setParent(child, el);
       children.push(child);
     },
     detach: () => {
+      for (const child of children) setParent(child, null);
       children.length = 0;
     },
+    click: () => {
+      for (const fn of handlers.click ?? []) fn({ stopPropagation: () => {} });
+    },
+    // Muss sich wirklich aus `parentEl.children` austragen — sonst kann kein Test
+    // eine liegen gebliebene oder doppelte Toolbar erkennen (nur das `removed`-Flag
+    // zu setzen liess eine "entfernte" Leiste im DOM-Baum der Eltern zurueck).
+    remove: () => {
+      el.removed = true;
+      const parent = el.parentEl;
+      if (parent) {
+        const siblings = parent.children as any[];
+        const idx = siblings.indexOf(el);
+        if (idx !== -1) siblings.splice(idx, 1);
+        setParent(el, null);
+      }
+    },
   };
+  // Nicht-aufzaehlbar: `JSON.stringify(el.children)` (viele bestehende Tests) durchsucht
+  // Text im Baum -- ein sichtbares `parentEl` machte den Baum zirkulaer und liess genau
+  // diese Tests mit "Converting circular structure to JSON" abstuerzen.
+  Object.defineProperty(el, "parentEl", { value: null, writable: true, enumerable: false });
   return el;
+}
+
+function setParent(el: any, parent: any): void {
+  el.parentEl = parent;
 }
 
 export class TFile {
@@ -133,6 +169,15 @@ export class Setting {
   }
 }
 
+export class MarkdownView {
+  file: TFile | null = null;
+  editor: any = {};
+  leaf: any;
+  constructor(leaf?: any) {
+    this.leaf = leaf;
+  }
+}
+
 export class MarkdownRenderChild {
   containerEl: any;
   constructor(containerEl: any) {
@@ -170,17 +215,35 @@ export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
+export class ItemView {
+  containerEl: any = makeFakeEl();
+  contentEl: any = makeFakeEl();
+  constructor(public leaf: any) {}
+  register(): void {}
+  registerEvent(): void {}
+  onload(): void {}
+  onunload(): void {}
+}
+
+export function setIcon(el: any, name: string): void {
+  el.dataset = el.dataset ?? {};
+  el.dataset.icon = name;
+}
+
 export function makeFakeApp(): any {
   return {
     vault: {
       readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
       getAbstractFileByPath: vi.fn().mockReturnValue(null),
+      read: vi.fn().mockResolvedValue(""),
+      process: vi.fn().mockResolvedValue(""),
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
     },
     workspace: {
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
+      getLeavesOfType: vi.fn().mockReturnValue([]),
     },
     metadataCache: {
       getFirstLinkpathDest: vi.fn().mockReturnValue(null),

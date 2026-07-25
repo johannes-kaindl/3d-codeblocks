@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TFile, makeFakeApp } from "../__mocks__/obsidian";
 import { ModelFileView, VIEW_TYPE_3D } from "../../src/obsidian/file-view";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
+import { ActiveViewport } from "../../src/core/active-viewport";
 
 function makeGlb(): ArrayBuffer {
   const bytes = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" } }));
@@ -20,19 +21,23 @@ function makeGlb(): ArrayBuffer {
   return buf;
 }
 
-function makeView() {
+function makeView(overrides: Record<string, unknown> = {}) {
   const created: any[] = [];
   const loadModel = vi.fn().mockResolvedValue({});
   const app = makeFakeApp();
   app.vault.readBinary = vi.fn().mockResolvedValue(makeGlb());
   const budget = { register: vi.fn(), touch: vi.fn(), unregister: vi.fn() };
+  const active = (overrides.active as ActiveViewport | undefined) ?? new ActiveViewport();
   const view = new ModelFileView({ app } as any, {
     settings: () => DEFAULT_SETTINGS,
     factory: {
       isWebGLAvailable: () => true,
-      create: () => {
+      create: (opts: any) => {
         const vp = {
+          opts,
           setModel: vi.fn(),
+          setView: vi.fn(),
+          getView: vi.fn(() => null),
           setColors: vi.fn(),
           resize: vi.fn(),
           resetCamera: vi.fn(),
@@ -46,8 +51,21 @@ function makeView() {
     budget,
     loadModel,
     readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
+    active,
+    ...overrides,
   } as any);
-  return { view, created, budget, loadModel, app };
+  return { view, created, budget, loadModel, app, active };
+}
+
+/** Eine geladene FileView mit aktiver Registry — analog `loadedBlock` (Task 9). */
+async function makeLoadedFileView(overrides: Record<string, unknown> = {}) {
+  const { view, created, active } = makeView(overrides);
+  const file = fileAt("weltmodell/3d/haus.glb");
+  await view.onLoadFile(file);
+  // Echtes Obsidian setzt `this.file`, bevor es `onLoadFile` ruft — der Mock tut das
+  // nicht, deshalb hier von Hand, sonst waere das Label immer der Fallback.
+  (view as unknown as { file: TFile }).file = file;
+  return { view, created, active };
 }
 
 function fileAt(path: string): TFile {
@@ -89,5 +107,26 @@ describe("ModelFileView", () => {
     await view.onUnloadFile(fileAt("a.glb"));
 
     expect(created[0].dispose).toHaveBeenCalled();
+  });
+});
+
+describe("ModelFileView as a ViewportController", () => {
+  it("registers itself as the active viewport when the user interacts", async () => {
+    const { view, created, active } = await makeLoadedFileView();
+    created[0].opts.onInteract();
+    expect(active.get()).toBe(view.controller);
+    expect(active.get()?.canSave()).toBe(false);
+  });
+
+  it("clears itself from the registry on unload", async () => {
+    const { view, created, active } = await makeLoadedFileView();
+    created[0].opts.onInteract();
+    view.onunload();
+    expect(active.get()).toBeNull();
+  });
+
+  it("reports the file path as its label", async () => {
+    const { view } = await makeLoadedFileView();
+    expect(view.controller.label()).toBe("weltmodell/3d/haus.glb");
   });
 });
