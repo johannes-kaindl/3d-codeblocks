@@ -91,11 +91,13 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 - [ ] **9. Fremdänderung während offener Notiz** — Notiz in einem zweiten Fenster ändern,
       dann in der ersten speichern → Abbruch mit „Note changed — view not saved", Notiz
       bleibt unbeschädigt (unveränderter Blockrumpf).
-- [ ] **10. Offene Frage: trailing newline** — beobachten (z. B. kurz Devtools/Konsole
-      oder den geschriebenen Block genau ansehen), ob Obsidian den Codeblock-`source` mit
-      oder ohne abschließendes `\n` an den Prozessor übergibt. Der Schreibweg toleriert
-      beides (`stripTrailingNewline` in `block-child.ts`) — hier nur festhalten, welcher
-      Fall in der Praxis tatsächlich auftritt, damit das nicht länger offen ist.
+- [x] **10. Trailing newline — erledigt durch Punkt 1, keine eigene Beobachtung nötig.**
+      Ursprünglich als offene Frage notiert („liefert Obsidian den `source` mit oder ohne
+      abschließendes `\n`?"). Beantwortet sich implizit: der Schreibweg vergleicht den
+      gemerkten Blockrumpf gegen die Notiz, und `stripTrailingNewline` (`block-child.ts`)
+      deckt beide Fälle ab. **Speichert Punkt 1 erfolgreich, ist der reale Fall abgedeckt** —
+      und nur das ist die verwertbare Information. Welcher der beiden Fälle es ist, ändert
+      am Code nichts, kostet aber einen Devtools-Umweg. Bewusst gestrichen statt beobachtet.
 
 ## Befunde
 
