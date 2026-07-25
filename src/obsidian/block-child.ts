@@ -55,6 +55,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   private file: TFile | null = null;
   private loadedMtime: number | null = null;
   private observer: IntersectionObserver | null = null;
+  private unsubscribeActive: (() => void) | null = null;
   private unloaded = false;
 
   constructor(containerEl: HTMLElement, source: string, sourcePath: string, deps: BlockDeps) {
@@ -87,10 +88,17 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
         unregister: (id) => this.deps.budget.unregister(id),
         touch: (id) => {
           this.deps.active.set(this);
-          this.containerEl.addClass("tdcb-active");
           this.deps.budget.touch(id);
         },
       },
+    });
+
+    // Klasse aus der Registry ableiten statt einweg zu setzen — sonst bleibt
+    // `tdcb-active` an jedem je beruehrten Block haengen, sobald ein anderer aktiv
+    // wird (nichts setzt sie je wieder zurueck). `subscribe` liefert nur AENDERUNGEN,
+    // der Anfangszustand ("nicht aktiv") ist bereits der Default ohne Klasse.
+    this.unsubscribeActive = this.deps.active.subscribe((controller) => {
+      this.containerEl.toggleClass("tdcb-active", controller === this);
     });
 
     this.observeVisibility();
@@ -98,7 +106,11 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
 
   onunload(): void {
     this.unloaded = true;
+    // Reihenfolge wichtig: erst clearIf (loest ggf. noch die Abmeld-Benachrichtigung
+    // aus und nimmt die Klasse mit), dann abbestellen.
     this.deps.active.clearIf(this);
+    this.unsubscribeActive?.();
+    this.unsubscribeActive = null;
     this.observer?.disconnect();
     this.observer = null;
     this.host?.dispose();
@@ -130,14 +142,19 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       return;
     }
 
-    const next = applyViewKey(this.source, spec);
-    if (next === this.source) return;
+    // Obsidian liefert `source` u. U. mit einem trailing "\n" (siehe `stripTrailingNewline`).
+    // `bodyAt` in block-writer.ts haengt nie einen Trenner an einen rekonstruierten Rumpf —
+    // ungekuerzt wuerde der Abgleich JEDES Mal als "Note changed" scheitern und der
+    // geschriebene Rumpf eine Leerzeile vor der schliessenden Fence bekommen.
+    const body = stripTrailingNewline(this.source);
+    const next = applyViewKey(body, spec);
+    if (next === body) return;
 
     try {
       await writeBlockBody(
         this.deps.writePorts,
         { path: this.sourcePath, lineStart: info.lineStart, lineEnd: info.lineEnd, fence: "3d" },
-        this.source,
+        body,
         next,
       );
       new Notice(spec === null ? "View cleared" : "View saved");
@@ -208,4 +225,13 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     );
     this.observer.observe(parts.root);
   }
+}
+
+/** Genau EIN trailing Zeilenende ("\n" oder "\r\n") entfernen — nicht mehr, nicht
+    ueber Regex mit Rueckwaertssuche, die bei sehr langen Quellen teuer waere. Ohne
+    trailing Zeilenende bleibt der Text unveraendert. */
+function stripTrailingNewline(text: string): string {
+  if (text.endsWith("\r\n")) return text.slice(0, -2);
+  if (text.endsWith("\n")) return text.slice(0, -1);
+  return text;
 }

@@ -240,13 +240,21 @@ async function loadedBlock(
   overrides: Record<string, unknown> = {},
 ) {
   const written: string[] = [];
-  const active = new ActiveViewport();
+  // `active` per Aufruf frisch, ausser der Aufrufer teilt eine Registry ueber mehrere
+  // Bloecke hinweg (siehe Tests zum identitaets-scoped `clearIf`/`tdcb-active`).
+  const active = (overrides.active as ActiveViewport | undefined) ?? new ActiveViewport();
+  // Der von Obsidian gelieferte Blockquelltext kann ein trailing "\n" tragen (siehe
+  // `applyViewKey`/`block-edit.ts`) -- das reale Notiz-Fragment dagegen hat immer genau
+  // EINE Zeile pro Zeile im Rumpf. Fuer den Fake-Notizinhalt und `sectionInfo` zaehlt
+  // deshalb der Rumpf OHNE ein etwaiges trailing "\n".
+  const bodyLines = source.replace(/\n$/, "").split("\n");
+  const noteFor = (body: string) => ["```3d", body, "```"].join("\n");
   const writePorts = {
     editorFor: () => null,
     vault: {
-      read: async () => ["```3d", source, "```"].join("\n"),
+      read: async () => noteFor(bodyLines.join("\n")),
       process: async (_path: string, fn: (text: string) => string) => {
-        const next = fn(["```3d", source, "```"].join("\n"));
+        const next = fn(noteFor(bodyLines.join("\n")));
         written.push(next.split("\n").slice(1, -1).join("\n"));
       },
     },
@@ -255,7 +263,7 @@ async function loadedBlock(
   const { deps, created, app } = makeDeps({
     active,
     writePorts,
-    sectionInfo: () => ({ lineStart: 0, lineEnd: source.split("\n").length + 1 }),
+    sectionInfo: () => ({ lineStart: 0, lineEnd: bodyLines.length + 1 }),
     panelVisible: () => false,
     ...overrides,
   });
@@ -283,11 +291,29 @@ describe("as a ViewportController", () => {
   });
 
   it("leaves another block active when a different one unloads", async () => {
-    const first = await loadedBlock();
+    // Geteilte Registry -- sonst pruefen `first.active` und `other.active` zwei
+    // voneinander unabhaengige Objekte und der Test besteht auch dann, wenn
+    // `clearIf(this)` faelschlich durch `set(null)` ersetzt wuerde.
+    const active = new ActiveViewport();
+    const first = await loadedBlock("file: model.glb", { active });
     first.created[0].opts.onInteract();
-    const other = await loadedBlock();
+    const other = await loadedBlock("file: model.glb", { active });
     other.block.onunload();
-    expect(first.active.get()).toBe(first.block);
+    expect(active.get()).toBe(first.block);
+  });
+
+  it("marks only the currently active block with tdcb-active", async () => {
+    const active = new ActiveViewport();
+    const first = await loadedBlock("file: model.glb", { active });
+    const second = await loadedBlock("file: model.glb", { active });
+
+    first.created[0].opts.onInteract();
+    expect(String(first.block.containerEl.className)).toContain("tdcb-active");
+    expect(String(second.block.containerEl.className)).not.toContain("tdcb-active");
+
+    second.created[0].opts.onInteract();
+    expect(String(first.block.containerEl.className)).not.toContain("tdcb-active");
+    expect(String(second.block.containerEl.className)).toContain("tdcb-active");
   });
 
   it("can save when the section info is known", async () => {
@@ -316,6 +342,18 @@ describe("as a ViewportController", () => {
     const { block, written } = await loadedBlock("file: model.glb\nview: top");
     await block.save(NAMED_VIEWS.top);
     expect(written).toEqual([]);
+  });
+
+  // Obsidian liefert `source` an den Codeblock-Prozessor moeglicherweise mit einem
+  // trailing "\n" (das dieses Repo an anderer Stelle -- `applyViewKey` -- bewusst
+  // erhaelt). `bodyAt` haengt aber nie einen trailing-Separator an einen rekonstruierten
+  // Rumpf an. Ohne das trailing "\n" vorher abzuschneiden, wuerde JEDES Speichern mit
+  // "Note changed" scheitern und der geschriebene Rumpf eine Leerzeile vor der
+  // schliessenden Fence bekommen.
+  it("tolerates a trailing newline in the block source", async () => {
+    const { block, written } = await loadedBlock("file: model.glb\n");
+    await block.save(NAMED_VIEWS.top);
+    expect(written[0]).toBe("file: model.glb\nview: top");
   });
 });
 

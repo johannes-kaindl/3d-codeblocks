@@ -213,5 +213,25 @@ describe("writeBlockBody", () => {
       expect(editor.replaceRange).not.toHaveBeenCalled();
       expect(state.content).toBe(note);
     });
+
+    // Tilde-Fences sind gueltiges CommonMark und Obsidian rendert sie -- ein Block
+    // waere sonst rendersichtbar, aber niemals speicherbar.
+    it("writes when the fence uses tildes instead of backticks", async () => {
+      const note = ["~~~3d", "file: a.glb", "~~~"].join("\n");
+      const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 2, fence: "3d" };
+      const { state, ports } = makePorts(note);
+      await writeBlockBody(ports, loc, "file: a.glb", "file: a.glb\nview: top");
+      expect(state.content).toBe(["~~~3d", "file: a.glb", "view: top", "~~~"].join("\n"));
+    });
+
+    // Nur das erste Token des Info-Strings zaehlt -- weitere Woerter (z. B. ein vom
+    // Nutzer angehaengter Kommentar) duerfen den Guard nicht auf ewig verriegeln.
+    it("writes when the info string carries a trailing token after the language", async () => {
+      const note = ["```3d extra", "file: a.glb", "```"].join("\n");
+      const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 2, fence: "3d" };
+      const { state, ports } = makePorts(note);
+      await writeBlockBody(ports, loc, "file: a.glb", "file: a.glb\nview: top");
+      expect(state.content).toBe(["```3d extra", "file: a.glb", "view: top", "```"].join("\n"));
+    });
   });
 });

@@ -85,13 +85,19 @@ function normalizeLineEndings(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "");
 }
 
-const FENCE_LINE = /^\s*`{3,}(.*)$/;
+// Backtick- UND Tilde-Fences sind gueltiges CommonMark und werden von Obsidian
+// gerendert (~~~3d faehrt genauso wie ```3d) -- nur Backticks zu akzeptieren wuerde
+// einen gerenderten Block treffen, der sich nie speichern liesse.
+const FENCE_LINE = /^\s*(?:`{3,}|~{3,})(.*)$/;
 
-/** Sprache der eroeffnenden Fence in `line`, oder `null`, wenn dort keine Fence steht. */
+/** Sprache der eroeffnenden Fence in `line`, oder `null`, wenn dort keine Fence steht.
+    Nur das erste Token des Info-Strings zaehlt (` ```3d extra ` ist immer noch „3d“) --
+    sonst wuerde ein Block mit zusaetzlichen Info-String-Woertern nie mehr gespeichert. */
 function fenceLanguage(line: string | undefined): string | null {
   if (line === undefined) return null;
   const match = FENCE_LINE.exec(line);
-  return match ? match[1].trim() : null;
+  if (!match) return null;
+  return match[1].trim().split(/\s+/)[0];
 }
 
 /** Steht an `loc.lineStart` wirklich eine Fence in der erwarteten Sprache? */
