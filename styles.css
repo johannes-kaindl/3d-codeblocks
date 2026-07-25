@@ -6,7 +6,10 @@
   margin: var(--size-4-2) 0;
 }
 
-.tdcb-block.tdcb-active .tdcb-stage {
+/* `tdcb-active` sitzt auf `containerEl` (block-child.ts), nicht auf `.tdcb-block` selbst —
+   `.tdcb-block` ist ein Kind-Div von `buildBox` (render-box.ts). Deshalb Nachfahren-Selektor,
+   kein Compound wie bei `.tdcb-block.tdcb-fill` (dort traegt dasselbe Element beide Klassen). */
+.tdcb-active .tdcb-stage {
   box-shadow: 0 0 0 2px var(--interactive-accent);
 }
 

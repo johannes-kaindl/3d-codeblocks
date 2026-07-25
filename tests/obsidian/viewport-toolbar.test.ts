@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { makeFakeEl } from "../__mocks__/obsidian";
 import { buildToolbar, toolbarVisible } from "../../src/obsidian/viewport-toolbar";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
-import type { ViewportController } from "../../src/core/active-viewport";
+import { MODEL_LOADING_REASON, type ViewportController } from "../../src/core/active-viewport";
 
 function controller(overrides: Partial<ViewportController> = {}): ViewportController {
   return {
@@ -54,5 +54,19 @@ describe("buildToolbar", () => {
     expect(bar.children[0].disabled).toBe(true);
     expect(bar.children[1].disabled).toBe(true);
     expect(bar.children[2].disabled).toBe(false);
+  });
+
+  // Regressionstest fuer die Abweichung vom Brief: Save braucht MEHR als Clear (Block UND
+  // geladenes Modell). Ein Controller mit Block aber ohne Kamera (Modell laedt noch) muss
+  // Save sperren, Clear aber weiter erlauben — genau die Asymmetrie, die die Sidebar schon
+  // einmal reparieren musste (siehe `control-panel.ts` / `panelModel`).
+  it("disables only saving while the model is still loading (block writable, no view yet)", () => {
+    const bar: any = buildToolbar(
+      makeFakeEl(),
+      controller({ canSave: () => true, getView: () => null }),
+    );
+    expect(bar.children[0].disabled).toBe(true);
+    expect(bar.children[0].title).toBe(MODEL_LOADING_REASON);
+    expect(bar.children[1].disabled).toBe(false);
   });
 });

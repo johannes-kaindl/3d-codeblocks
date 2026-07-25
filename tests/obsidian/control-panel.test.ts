@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { ControlPanelView, panelModel } from "../../src/obsidian/control-panel";
-import { ActiveViewport, NO_BLOCK_REASON, type ViewportController } from "../../src/core/active-viewport";
+import {
+  ActiveViewport,
+  MODEL_LOADING_REASON,
+  NO_BLOCK_REASON,
+  type ViewportController,
+} from "../../src/core/active-viewport";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
-
-const LOADING_REASON = "The model is still loading";
 
 function controller(overrides: Partial<ViewportController> = {}): ViewportController {
   return {
@@ -46,7 +49,7 @@ describe("panelModel", () => {
     // des Ladens passieren, bevor `getView()` etwas liefert (siehe Review Task 10).
     const model = panelModel(controller({ getView: () => null }));
     expect(model.canSave).toBe(false);
-    expect(model.saveDisabledReason).toBe(LOADING_REASON);
+    expect(model.saveDisabledReason).toBe(MODEL_LOADING_REASON);
     expect(model.canClear).toBe(true);
     expect(model.clearDisabledReason).toBeNull();
   });
@@ -115,7 +118,7 @@ describe("ControlPanelView", () => {
     const save = findByText(view.contentEl, "Save view");
     const clear = findByText(view.contentEl, "Clear view");
     expect(save.disabled).toBe(true);
-    expect(save.title).toBe(LOADING_REASON);
+    expect(save.title).toBe(MODEL_LOADING_REASON);
     expect(clear.disabled).toBe(false);
   });
 
