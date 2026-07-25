@@ -44,7 +44,17 @@ export class ActiveViewport {
   set(controller: ViewportController | null): void {
     if (this.current === controller) return;
     this.current = controller;
-    for (const listener of this.listeners) listener(controller);
+    // Jeden Listener isoliert aufrufen — Sidebar und jeder Block/Embed/gltf-Block
+    // haengen am selben Set. Ohne den try/catch stoppt ein werfender Listener JEDE
+    // nachfolgende Benachrichtigung in dieser Runde (z. B. bekaeme die Sidebar nie
+    // mit, dass ein Block aktiv wurde, nur weil ein anderer Listener vorher warf).
+    for (const listener of this.listeners) {
+      try {
+        listener(controller);
+      } catch (error) {
+        console.error("[three-d-codeblocks] active-viewport listener threw", error);
+      }
+    }
   }
 
   /** Beim Entladen eines Blocks — raeumt nur auf, wenn er auch der aktive war. */

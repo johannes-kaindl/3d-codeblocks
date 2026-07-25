@@ -17,7 +17,12 @@ import { buildBox, type BoxParts } from "./render-box";
 import { readModel } from "./file-source";
 import { readOnlyController } from "./read-only-controller";
 import type { TrackedView } from "./tracked-view";
-import { ViewerHost, needsContainerInspection, type HostBaseDeps } from "./viewer-host";
+import {
+  ViewerHost,
+  needsContainerInspection,
+  wrapBudgetWithActive,
+  type HostBaseDeps,
+} from "./viewer-host";
 
 export type { TrackedView } from "./tracked-view";
 
@@ -107,14 +112,7 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
       this.host = new ViewerHost(this.parts.stage, this.parts.message, {
         ...this.deps,
         managed: true,
-        budget: {
-          register: (id, release) => this.deps.budget.register(id, release),
-          unregister: (id) => this.deps.budget.unregister(id),
-          touch: (id) => {
-            this.deps.active.set(this.controller);
-            this.deps.budget.touch(id);
-          },
-        },
+        budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this.controller),
       });
     }
     if (!this.host) return;

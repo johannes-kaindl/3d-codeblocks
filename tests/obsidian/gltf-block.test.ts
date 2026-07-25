@@ -2,19 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { makeFakeEl } from "../__mocks__/obsidian";
 import { GltfBlock } from "../../src/obsidian/gltf-block";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
+import { ActiveViewport } from "../../src/core/active-viewport";
 
 function makeDeps() {
   const created: any[] = [];
   const loadModel = vi.fn().mockResolvedValue({});
+  const budget = { register: vi.fn(), touch: vi.fn(), unregister: vi.fn() };
+  const active = new ActiveViewport();
   return {
     created,
     loadModel,
+    budget,
+    active,
     deps: {
       settings: () => DEFAULT_SETTINGS,
       factory: {
         isWebGLAvailable: () => true,
-        create: () => {
+        create: (opts: any) => {
           const vp = {
+            opts,
             setModel: vi.fn(),
             setView: vi.fn(),
             getView: vi.fn(() => null),
@@ -28,9 +34,10 @@ function makeDeps() {
           return vp;
         },
       },
-      budget: { register: vi.fn(), touch: vi.fn(), unregister: vi.fn() },
+      budget,
       loadModel,
       readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
+      active,
     } as any,
   };
 }
@@ -73,5 +80,43 @@ describe("GltfBlock", () => {
     block.onunload();
 
     expect(created[0].dispose).toHaveBeenCalled();
+  });
+
+  // Regressionstest fuer Finding 5 (Whole-Branch-Review 2026-07-25): ein `gltf`-Block
+  // stand komplett ausserhalb der Aktiv-Verdrahtung -- Interaktion hier liess Sidebar/
+  // Toolbar/Befehle weiter auf das zuletzt aktive ANDERE Modell zeigen.
+  describe("active-viewport wiring", () => {
+    it("becomes the active viewport when the user interacts", async () => {
+      const { deps, created, active } = makeDeps();
+      const block = new GltfBlock(makeFakeEl(), VALID_GLTF, deps);
+
+      block.onload();
+      await block.rendering;
+      created[0].opts.onInteract();
+
+      expect(active.get()).toBe(block.controller);
+    });
+
+    it("is honestly read-only -- cannot save, even after interaction", async () => {
+      const { deps } = makeDeps();
+      const block = new GltfBlock(makeFakeEl(), VALID_GLTF, deps);
+
+      block.onload();
+      await block.rendering;
+
+      expect(block.controller.canSave()).toBe(false);
+    });
+
+    it("clears itself from the registry on unload", async () => {
+      const { deps, created, active } = makeDeps();
+      const block = new GltfBlock(makeFakeEl(), VALID_GLTF, deps);
+
+      block.onload();
+      await block.rendering;
+      created[0].opts.onInteract();
+      block.onunload();
+
+      expect(active.get()).toBeNull();
+    });
   });
 });

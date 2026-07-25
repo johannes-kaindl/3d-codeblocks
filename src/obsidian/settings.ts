@@ -83,6 +83,10 @@ export class SettingsTab extends PluginSettingTab {
           .setValue(this.plugin.settings.panelPlacement)
           .onChange(async (value) => {
             await this.persist({ panelPlacement: value });
+            // Sonst wirkt die neue Wahl erst nach einem Reload -- bereits offene
+            // Bloecke behalten sonst ihre alte Leiste (oder keine), bis irgendein
+            // anderer Grund sie neu zeichnet.
+            this.plugin.syncAllToolbars();
           }),
       );
   }

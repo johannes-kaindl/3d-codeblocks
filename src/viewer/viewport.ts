@@ -48,7 +48,6 @@ export class Viewport {
   private needsRender = true;
   private frame: number | null = null;
   private disposed = false;
-  private baseDistance = 0;
   /** Gewuenschte Ansicht, gesetzt bevor ein Modell da ist — angewendet sobald `setModel` Bounds liefert. */
   private pendingView: ViewSpec | null = null;
 
@@ -103,7 +102,6 @@ export class Viewport {
 
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
-    this.baseDistance = fitCamera(box.min, box.max, FOV_DEG, this.aspect()).distance;
     this.updateGrid();
     this.setView(this.pendingView);
   }
@@ -162,10 +160,18 @@ export class Viewport {
     this.requestRender();
   }
 
-  /** Aktuelle Kamera als Spec — `null`, solange kein Modell geladen ist. */
+  /** Aktuelle Kamera als Spec — `null`, solange kein Modell geladen ist.
+      Die Basisdistanz wird HIER neu berechnet (nicht beim Laden zwischengespeichert):
+      `setView()` → `viewToCamera()` passt `fitCamera(...)` immer ans AKTUELLE
+      Seitenverhaeltnis an. Ein beim Laden eingefrorener Wert waere bei aspect < 1
+      (schmaler Bereich, hohe Blöcke, Handy quer→hoch) nicht mehr derselbe wie beim
+      Speichern — bis zu ~1.6x daneben bei fov 50 — und die gespeicherte `view:`-Zeile
+      wuerde beim naechsten Oeffnen zu nah/zu weit einrasten. Beide Richtungen muessen
+      dasselbe Seitenverhaeltnis benutzen. */
   getView(): ViewSpec | null {
-    if (this.disposed || !this.bounds || this.baseDistance <= 0) return null;
-    return cameraToView(this.camera.position, this.controls.target, this.baseDistance);
+    if (this.disposed || !this.bounds) return null;
+    const base = fitCamera(this.bounds.min, this.bounds.max, FOV_DEG, this.aspect()).distance;
+    return cameraToView(this.camera.position, this.controls.target, base);
   }
 
   /** Aktuellen Frame als Data-URL — Grundlage des Poster-Modus. */

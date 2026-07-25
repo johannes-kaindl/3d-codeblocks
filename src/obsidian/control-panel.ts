@@ -91,7 +91,11 @@ export class ControlPanelView extends ItemView {
     const presets = root.createDiv({ cls: "tdcb-panel-presets" });
     for (const name of Object.keys(NAMED_VIEWS)) {
       const button = presets.createEl("button", { text: name });
-      button.addEventListener("click", () => controller.applyView(NAMED_VIEWS[name]));
+      // Kopie, nicht die geteilte Konstante selbst — `applyView` reicht das Objekt an
+      // den Viewport weiter, der es als `pendingView` haelt. Ohne Kopie koennte eine
+      // spaetere Mutation dort (es gibt derzeit keine, aber der Typ erlaubt es) die
+      // Konstante fuer ALLE Viewports gleichzeitig veraendern.
+      button.addEventListener("click", () => controller.applyView({ ...NAMED_VIEWS[name] }));
     }
 
     const actions = root.createDiv({ cls: "tdcb-panel-actions" });

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import * as obsidian from "obsidian";
 import { TFile, makeFakeApp, makeFakeEl } from "../__mocks__/obsidian";
 import { ModelBlock } from "../../src/obsidian/block-child";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
@@ -356,7 +357,98 @@ describe("as a ViewportController", () => {
     await block.save(NAMED_VIEWS.top);
     expect(written[0]).toBe("file: model.glb\nview: top");
   });
+
+  it("shows a notice instead of silently doing nothing when the view is unchanged", async () => {
+    const { block, written } = await loadedBlock("file: model.glb\nview: top");
+    const notices: string[] = [];
+    // `mockImplementation` gegen die ECHTEN obsidian-Typen (typecheck:test prueft
+    // dagegen, PROF-OBS-08) -- `Notice` ist dort eine Klasse mit Instanzfeldern, die
+    // dieser Test-Stub nicht braucht. `as any` ist hier bewusst, nicht Nachlaessigkeit.
+    const spy = vi.spyOn(obsidian, "Notice").mockImplementation(((message: string) => {
+      notices.push(message);
+    }) as any);
+
+    await block.save(NAMED_VIEWS.top);
+
+    expect(written).toEqual([]);
+    expect(notices).toContain("View already up to date");
+    spy.mockRestore();
+  });
 });
+
+// Regressionstest fuer Finding 1 (Whole-Branch-Review 2026-07-25): `buildToolbar()`
+// friert `getView()` beim BAU der Leiste ein. `syncToolbar()` lief bisher nur aus
+// `onload()` -- also BEVOR das Modell (asynchron ueber `loadNow()`/IntersectionObserver)
+// ueberhaupt geladen ist. In der Default-Konfiguration (Toolbar statt Sidebar, frische
+// Installation) blieb der Save-Button dadurch fuer immer deaktiviert.
+describe("toolbar state after load (regression)", () => {
+  it("enables the Save button once loadNow() has actually finished, not just onload()", async () => {
+    const { deps, created, app } = makeDeps({ panelVisible: () => false });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());
+
+    // Simuliert ein fertig geladenes Modell: die echte Viewport-Klasse liefert nach
+    // `setModel`+`setView` eine Kamera zurueck, der Test-Stub liefert `null` per
+    // Default (siehe `makeFactory`) -- hier ueberschrieben, um genau den Zustand
+    // "Modell ist fertig geladen" nachzustellen.
+    const originalCreate = deps.factory.create;
+    deps.factory.create = (opts: any) => {
+      const viewport = originalCreate(opts);
+      viewport.getView = vi.fn(() => NAMED_VIEWS.top);
+      return viewport;
+    };
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+
+    block.onload();
+    const toolbarAfterOnload = findToolbar(el);
+    expect(toolbarAfterOnload).toBeTruthy();
+    // Vor dem Laden: Save MUSS deaktiviert sein (kein Modell da) -- das ist kein Bug.
+    expect(toolbarAfterOnload.children[0].disabled).toBe(true);
+
+    await block.loadNow();
+
+    const toolbarAfterLoad = findToolbar(el);
+    expect(toolbarAfterLoad).toBeTruthy();
+    expect(created).toHaveLength(1);
+    // Der eigentliche Regressionsfall: nach dem Laden muss Save aktiv sein.
+    expect(toolbarAfterLoad.children[0].disabled).toBe(false);
+  });
+
+  it("rebuilds the toolbar exactly once after load, without leaving a duplicate behind", async () => {
+    const { deps, app } = makeDeps({ panelVisible: () => false });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    const stage = findStage(el);
+    const toolbars = stage.children.filter((c: any) => String(c.className).includes("tdcb-toolbar"));
+    expect(toolbars).toHaveLength(1);
+  });
+});
+
+/** Rekursiv nach `.tdcb-toolbar` suchen -- die Leiste haengt inzwischen an `.tdcb-stage`,
+    nicht mehr an `.tdcb-block` (Finding 6, Anker-Fix). */
+function findToolbar(el: any): any {
+  if (String(el.className).includes("tdcb-toolbar")) return el;
+  for (const child of el.children ?? []) {
+    const found = findToolbar(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findStage(el: any): any {
+  if (String(el.className).includes("tdcb-stage")) return el;
+  for (const child of el.children ?? []) {
+    const found = findStage(child);
+    if (found) return found;
+  }
+  return null;
+}
 
 function makeDracoGlb(): ArrayBuffer {
   return makeGlb({ extensionsRequired: ["KHR_draco_mesh_compression"] });

@@ -24,6 +24,7 @@ import {
   ViewerHost,
   describeError,
   needsContainerInspection,
+  wrapBudgetWithActive,
   type ContextBudget,
   type ViewportFactory,
 } from "./viewer-host";
@@ -87,14 +88,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: true,
-      budget: {
-        register: (id, release) => this.deps.budget.register(id, release),
-        unregister: (id) => this.deps.budget.unregister(id),
-        touch: (id) => {
-          this.deps.active.set(this);
-          this.deps.budget.touch(id);
-        },
-      },
+      budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this),
     });
 
     // Klasse aus der Registry ableiten statt einweg zu setzen — sonst bleibt
@@ -153,7 +147,12 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // geschriebene Rumpf eine Leerzeile vor der schliessenden Fence bekommen.
     const body = stripTrailingNewline(this.source);
     const next = applyViewKey(body, spec);
-    if (next === body) return;
+    if (next === body) {
+      // Ohne Feedback wirkt der Save-/Clear-Button hier tot — er tut ja etwas,
+      // nur ist das Ergebnis mit dem Ist-Zustand identisch.
+      new Notice("View already up to date");
+      return;
+    }
 
     try {
       await writeBlockBody(
@@ -200,6 +199,12 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       label: this.config.title ?? file.path,
       view: this.config.view,
     });
+
+    // `buildToolbar()` friert `getView()` beim Bau ein — das Modell laedt aber erst
+    // HIER (asynchron ueber `render`) fertig. Ohne dieses Nachziehen bliebe der
+    // Save-Button in der Default-Konfiguration (Toolbar statt Sidebar) fuer immer
+    // deaktiviert, weil `syncToolbar()` in `onload()` noch vor jedem Modell laeuft.
+    this.syncToolbar();
   }
 
   /** Reagiert auf Regenerierung durch den Erzeuger-Loop (gleicher Pfad, neuer Inhalt). */
@@ -223,7 +228,11 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     const { panelPlacement } = this.deps.settings();
     if (!toolbarVisible(panelPlacement, this.deps.panelVisible())) return;
 
-    this.toolbar = buildToolbar(this.parts.root, this);
+    // In die Buehne haengen (nicht `root`, das auch den `title:`-Caption traegt) —
+    // sonst positioniert das CSS die Leiste oben rechts ueber dem Titel statt ueber
+    // dem Viewport, weil `.tdcb-toolbar` sich am naechsten `position: relative`-
+    // Vorfahren (`.tdcb-stage`) orientiert.
+    this.toolbar = buildToolbar(this.parts.stage, this);
   }
 
   private observeVisibility(): void {

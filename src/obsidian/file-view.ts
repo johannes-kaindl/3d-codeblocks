@@ -10,7 +10,12 @@ import type { ActiveViewport } from "../core/active-viewport";
 import { detectFormat } from "../core/format";
 import { buildBox, type BoxParts } from "./render-box";
 import { readOnlyController } from "./read-only-controller";
-import { ViewerHost, needsContainerInspection, type HostBaseDeps } from "./viewer-host";
+import {
+  ViewerHost,
+  needsContainerInspection,
+  wrapBudgetWithActive,
+  type HostBaseDeps,
+} from "./viewer-host";
 
 export const VIEW_TYPE_3D = "tdcb-3d-model";
 
@@ -54,14 +59,7 @@ export class ModelFileView extends FileView {
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: false,
-      budget: {
-        register: (id, release) => this.deps.budget.register(id, release),
-        unregister: (id) => this.deps.budget.unregister(id),
-        touch: (id) => {
-          this.deps.active.set(this.controller);
-          this.deps.budget.touch(id);
-        },
-      },
+      budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this.controller),
     });
 
     const format = detectFormat(file.path);
@@ -79,6 +77,10 @@ export class ModelFileView extends FileView {
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
+    // Ohne das bleibt die Registry beim Dateiwechsel im selben Pane auf diesem
+    // Controller stehen, obwohl der Host schon weg ist (bis `onLoadFile` einen neuen
+    // baut) — `clearIf` raeumt nur auf, wenn dieser Controller auch der aktive war.
+    this.deps.active.clearIf(this.controller);
     this.teardown();
   }
 

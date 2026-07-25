@@ -144,6 +144,22 @@ describe("ControlPanelView", () => {
     expect(c.applyView).toHaveBeenCalledWith(null);
   });
 
+  it("passes a copy of a named preset, never the shared constant itself", () => {
+    // Ohne die Kopie koennte eine spaetere Mutation des an `applyView` durchgereichten
+    // Objekts (dort landet es als `pendingView`) die Konstante fuer ALLE Viewports
+    // gleichzeitig veraendern.
+    const { view, active } = makeView();
+    view.onload();
+    const c = controller();
+    active.set(c);
+
+    click(findByText(view.contentEl, "front"));
+
+    expect(c.applyView).toHaveBeenCalledWith(NAMED_VIEWS.front);
+    const passed = (c.applyView as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(passed).not.toBe(NAMED_VIEWS.front);
+  });
+
   it("redraws when the active viewport changes and when it becomes none", () => {
     const { view, active } = makeView();
     view.onload();

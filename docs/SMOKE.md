@@ -4,7 +4,7 @@ Manuelle Prüfung in einem echten Vault. Unit-Tests decken die Rechenlogik und d
 Lebenszyklus ab, aber nicht WebGL, nicht Obsidians Live-Preview-Verhalten und nicht das
 Theme — das hier ist das Gate dafür (vault-crews-Lesson: Live-Smoke ist Pflicht).
 
-**Datum:** ______  **Obsidian-Version:** ______  **Plugin-Version:** 0.1.0
+**Datum:** ______  **Obsidian-Version:** ______  **Plugin-Version:** Unreleased (view memory, auf 0.1.2)
 
 ## Vorbereitung
 

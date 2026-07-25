@@ -21,6 +21,7 @@ export function makeFakeEl(): any {
     getAttr: (name: string) => (name in attrs ? attrs[name] : null),
     createDiv: (opts?: any) => {
       const child = makeFakeEl();
+      setParent(child, el);
       children.push(child);
       if (typeof opts === "string") child.className = opts;
       else if (opts) {
@@ -31,6 +32,7 @@ export function makeFakeEl(): any {
     },
     createEl: (tag: string, opts?: any) => {
       const child = makeFakeEl();
+      setParent(child, el);
       children.push(child);
       child.tagName = tag.toUpperCase();
       if (opts?.text) child.textContent = opts.text;
@@ -39,6 +41,7 @@ export function makeFakeEl(): any {
     },
     createSpan: (opts?: any) => el.createEl("span", opts),
     empty: () => {
+      for (const child of children) setParent(child, null);
       children.length = 0;
     },
     setText: (text: string) => {
@@ -58,19 +61,39 @@ export function makeFakeEl(): any {
     }),
     removeEventListener: vi.fn(),
     appendChild: (child: any) => {
+      setParent(child, el);
       children.push(child);
     },
     detach: () => {
+      for (const child of children) setParent(child, null);
       children.length = 0;
     },
     click: () => {
       for (const fn of handlers.click ?? []) fn({ stopPropagation: () => {} });
     },
+    // Muss sich wirklich aus `parentEl.children` austragen — sonst kann kein Test
+    // eine liegen gebliebene oder doppelte Toolbar erkennen (nur das `removed`-Flag
+    // zu setzen liess eine "entfernte" Leiste im DOM-Baum der Eltern zurueck).
     remove: () => {
       el.removed = true;
+      const parent = el.parentEl;
+      if (parent) {
+        const siblings = parent.children as any[];
+        const idx = siblings.indexOf(el);
+        if (idx !== -1) siblings.splice(idx, 1);
+        setParent(el, null);
+      }
     },
   };
+  // Nicht-aufzaehlbar: `JSON.stringify(el.children)` (viele bestehende Tests) durchsucht
+  // Text im Baum -- ein sichtbares `parentEl` machte den Baum zirkulaer und liess genau
+  // diese Tests mit "Converting circular structure to JSON" abstuerzen.
+  Object.defineProperty(el, "parentEl", { value: null, writable: true, enumerable: false });
   return el;
+}
+
+function setParent(el: any, parent: any): void {
+  el.parentEl = parent;
 }
 
 export class TFile {

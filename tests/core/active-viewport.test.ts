@@ -62,4 +62,25 @@ describe("ActiveViewport", () => {
     active.set(makeController("a"));
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("keeps notifying later subscribers even when an earlier one throws", () => {
+    // Sidebar und jeder Block/Embed/gltf-Block haengen am selben Listener-Set. Ohne
+    // Isolation stoppt ein werfender Listener alle NACHFOLGENDEN Benachrichtigungen
+    // in dieser Runde -- z. B. bekaeme die Sidebar nie mit, dass ein Block aktiv
+    // wurde, nur weil ein anderer (fehlerhafter) Listener vorher warf.
+    const active = new ActiveViewport();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const healthy = vi.fn();
+    active.subscribe(broken);
+    active.subscribe(healthy);
+
+    active.set(makeController("a"));
+
+    expect(broken).toHaveBeenCalled();
+    expect(healthy).toHaveBeenCalledWith(expect.objectContaining({ label: expect.any(Function) }));
+    errorSpy.mockRestore();
+  });
 });

@@ -118,14 +118,19 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
           // `setActiveLeaf` deckt denselben Zweck ab und ist seit 0.16.3 verfuegbar.
           // `revealLeaf` klappt zusaetzlich eine eingeklappte Seitenleiste auf — das
           // holen wir uns explizit zurueck, sonst wirkt der Befehl bei kollabierter
-          // rechter Leiste (Normalzustand) wie ein Nichts-Tun.
-          this.app.workspace.rightSplit.collapsed = false;
+          // rechter Leiste (Normalzustand) wie ein Nichts-Tun. WICHTIG: `.expand()`
+          // aufrufen, nicht `.collapsed = false` zuweisen — `collapsed` ist nur ein
+          // Statusfeld, die eigentliche DOM-Arbeit (und der Abgleich mit Obsidians
+          // eigenem Zustand) steckt in `.expand()`. Eine blosse Feldzuweisung liess
+          // die Leiste optisch eingeklappt UND kippte beim naechsten Toggle die Logik.
+          this.app.workspace.rightSplit.expand();
           this.app.workspace.setActiveLeaf(existing[0], { focus: true });
           return;
         }
         const leaf = this.app.workspace.getRightLeaf(false);
-        this.app.workspace.rightSplit.collapsed = false;
-        await leaf?.setViewState({ type: VIEW_TYPE_3D_CONTROLS, active: true });
+        if (!leaf) return;
+        await leaf.setViewState({ type: VIEW_TYPE_3D_CONTROLS, active: true });
+        this.app.workspace.rightSplit.expand();
       },
     });
 
@@ -179,11 +184,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // Sidebar auf/zu (oder sonst ein Layout-Wechsel) aendert `panelVisible()` — ohne
     // dieses Nachziehen bliebe die Hover-Leiste stehen, nachdem die Sidebar geoeffnet
     // wurde, bis der Block aus einem anderen Grund neu zeichnet.
-    this.registerEvent(
-      this.app.workspace.on("layout-change", () => {
-        for (const view of this.views) view.syncToolbar?.();
-      }),
-    );
+    this.registerEvent(this.app.workspace.on("layout-change", () => this.syncAllToolbars()));
   }
 
   onunload(): void {
@@ -205,9 +206,32 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     view.register(() => this.views.delete(view));
   }
 
+  /** Alle Hover-Toolbars neu aufbauen — bei Layout-Wechseln (s. o.) UND wenn sich
+      "Controls placement" in den Einstellungen aendert, damit die neue Wahl sofort
+      auf bereits offene Bloecke wirkt statt erst nach einem Reload. */
+  syncAllToolbars(): void {
+    for (const view of this.views) view.syncToolbar?.();
+  }
+
   /** Ob die Sidebar (Task 10) gerade offen ist — entscheidet mit, ob ein Block
       seine Hover-Toolbar zeigt. Das Nachziehen bei Layout-Wechseln kommt in Task 13. */
   private panelVisible(): boolean {
-    return this.app.workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS).length > 0;
+    return isPanelVisible(this.app.workspace);
   }
+}
+
+/** Adapter-Praedikat, herausgeloest fuer einen direkten Test: ein Leaf allein reicht
+    nicht. Sidebar-Leaves ueberleben in Obsidians Layout auch ueber Neustarts hinweg —
+    auch wenn die rechte Leiste eingeklappt ist. Ohne die Collapsed-Pruefung galt die
+    Sidebar nach dem ERSTEN Oeffnen fuer immer als "offen": `resolvePanelTarget("auto", true)`
+    liefert dann dauerhaft `"panel"`, die Toolbar (die Ausweichloesung bei geschlossener
+    Sidebar) erscheint nie wieder — waehrend das Panel selbst unsichtbar bleibt. Ergebnis:
+    keine Bedienung mehr, in keiner der beiden Flaechen. */
+export function isPanelVisible(workspace: {
+  getLeavesOfType(viewType: string): unknown[];
+  rightSplit: { collapsed: boolean };
+}): boolean {
+  return (
+    workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS).length > 0 && !workspace.rightSplit.collapsed
+  );
 }

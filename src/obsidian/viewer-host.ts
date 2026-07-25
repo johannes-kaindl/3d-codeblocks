@@ -7,6 +7,7 @@
 //
 // `loadModel`/`readColors`/`factory` kommen als Dependency herein, damit der Kern ohne
 // echtes three.js/WebGL testbar bleibt.
+import type { ActiveViewport, ViewportController } from "../core/active-viewport";
 import { detectFormat, type ModelFormat } from "../core/format";
 import { inspectGlb, unsupportedRequired } from "../core/gltf-inspect";
 import type { PluginSettings } from "../core/settings-types";
@@ -44,6 +45,27 @@ export interface ContextBudget {
   register(id: string, release: () => void): void;
   touch(id: string): void;
   unregister(id: string): void;
+}
+
+/** Budget-Wrapper, den alle vier Wege (Block, gltf-Block, Embed, FileView) brauchen:
+    `register`/`unregister` reichen unveraendert durch, `touch` markiert zusaetzlich
+    den uebergebenen Controller als aktiv. `budget.touch` ist der einzige Ort, der
+    echte Nutzerinteraktion meldet (siehe `onInteract` in `ViewportOptions`) — Autorotate
+    zaehlt bewusst nicht. War vorher an vier Stellen wortgleich dupliziert; ein `gltf`-
+    Block, der das ausliess, blieb dadurch komplett aus der Aktiv-Verdrahtung raus. */
+export function wrapBudgetWithActive(
+  budget: ContextBudget,
+  active: ActiveViewport,
+  controller: ViewportController,
+): ContextBudget {
+  return {
+    register: (id, release) => budget.register(id, release),
+    unregister: (id) => budget.unregister(id),
+    touch: (id) => {
+      active.set(controller);
+      budget.touch(id);
+    },
+  };
 }
 
 /** Alles, was jeder Weg zum Rendern braucht — ohne den weg-spezifischen `managed`-Schalter. */
