@@ -6,7 +6,7 @@ import {
   type WorkspaceLeaf,
 } from "obsidian";
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
-import { ActiveViewport } from "./core/active-viewport";
+import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
@@ -129,6 +129,38 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       },
     });
 
+    // Dieselben drei Aktionen wie Sidebar/Toolbar, aber per Befehlspalette — ohne
+    // aktives Modell gibt es nichts zu tun, dann nur die Meldung statt eines Fehlers.
+    const withActive = (run: (controller: ViewportController) => void) => () => {
+      const controller = this.active.get();
+      if (!controller) {
+        new Notice("No active 3D model");
+        return;
+      }
+      run(controller);
+    };
+
+    this.addCommand({
+      id: "save-view",
+      name: "Save current view to block",
+      callback: withActive((controller) => {
+        const spec = controller.getView();
+        if (spec !== null) void controller.save(spec);
+      }),
+    });
+
+    this.addCommand({
+      id: "clear-view",
+      name: "Clear saved view",
+      callback: withActive((controller) => void controller.save(null)),
+    });
+
+    this.addCommand({
+      id: "fit-view",
+      name: "Fit camera to model",
+      callback: withActive((controller) => controller.applyView(null)),
+    });
+
     // Regenerierte Dateien (gleicher Pfad, neuer Inhalt) sollen ohne Neustart neu laden.
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
@@ -141,6 +173,15 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("css-change", () => {
         for (const view of this.views) view.refreshColors();
+      }),
+    );
+
+    // Sidebar auf/zu (oder sonst ein Layout-Wechsel) aendert `panelVisible()` — ohne
+    // dieses Nachziehen bliebe die Hover-Leiste stehen, nachdem die Sidebar geoeffnet
+    // wurde, bis der Block aus einem anderen Grund neu zeichnet.
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => {
+        for (const view of this.views) view.syncToolbar?.();
       }),
     );
   }

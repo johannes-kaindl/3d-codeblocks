@@ -61,9 +61,26 @@ language instead of failing with a parser error — export uncompressed.
 | `file:` | yes | Path to the model. Resolved like a wikilink (relative, vault-absolute or short form) |
 | `height:` | no | Viewport height in pixels; falls back to the setting |
 | `title:` | no | Caption above the viewport |
+| `view:` | no | Saved camera angle — a name (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`) or three numbers `azimuth,elevation,distance` |
 
 Unknown keys are reported below the viewport rather than silently ignored — a typo like
 `heigth:` should not look like a plugin bug.
+
+## Saving a camera angle
+
+Turn the model to the angle you want, then press **Save view** — in the sidebar (open it
+with the **Open 3D view controls** command) or the pin button that appears when you hover
+the model. The angle is stored in the code block as `view:`, so it travels with your note
+and shows up in git diffs. The model file itself is never modified.
+
+**Clear view** removes the `view:` key again; **Fit** resets the camera without touching
+it. The same three actions are also available as commands (**Save current view to
+block**, **Clear saved view**, **Fit camera to model**) for whichever model you last
+interacted with. Embeds and opened files can be aimed and fitted the same way, but have
+no code block to save into.
+
+The **Controls placement** setting decides where the buttons show up: the sidebar when
+it is open, the hover toolbar otherwise (default), or always just one of the two.
 
 ## Settings
 
@@ -74,6 +91,7 @@ Unknown keys are reported below the viewport rather than silently ignored — a 
 | Auto-rotate | off | Spin until you interact |
 | Show ground grid | off | Reference grid under the model |
 | Maximum live 3D views | 6 (slider 0–12) | Older inline views become still images beyond this; 0 turns the limit off |
+| Controls placement | Sidebar when open, toolbar otherwise | Where the Save/Clear/Fit buttons appear |
 
 The last setting exists because browsers cap simultaneous WebGL contexts (around 8–16)
 and silently kill the oldest ones. Rather than let that happen at random, the plugin

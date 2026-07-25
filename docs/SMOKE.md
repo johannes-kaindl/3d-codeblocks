@@ -65,6 +65,38 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 - [ ] **Theme im Embed/gltf-Block** — hell↔dunkel wechseln → Hintergrund folgt auch
       in Embeds und gltf-Blöcken.
 
+## Ansicht merken (2026-07-25)
+
+- [ ] **1. Ansicht speichern und wiederfinden** — Modell drehen, **Save view** drücken
+      (Sidebar oder Pin-Button in der Hover-Leiste) → `view:`-Zeile erscheint im Block,
+      das Bild bleibt nach dem Neuaufbau gleich. Notiz schließen und neu öffnen → dieselbe
+      Ansicht.
+- [ ] **2. Namens-Schreibweise** — nahe an `top` drehen und speichern → im Block steht
+      `view: top`, nicht drei Zahlen wie `0,88,1.01`.
+- [ ] **3. Undo im Editor** — im Quelltext-Editor speichern → Strg+Z (Cmd+Z) macht die
+      `view:`-Zeile rückgängig.
+- [ ] **4. Lesemodus** — im Lesemodus speichern → funktioniert; **Clear view** entfernt
+      die Zeile wieder.
+- [ ] **5. Fünf Etagen mit Aktiv-Rahmen** — Notiz mit fünf `3d`-Blöcken → der `tdcb-active`-
+      Rahmen folgt dem zuletzt bedienten Modell, Sidebar/Toolbar beziehen sich sichtbar
+      darauf.
+- [ ] **6. Sidebar auf/zu** — Sidebar schließen → Hover-Leiste erscheint auf dem Modell;
+      Sidebar öffnen → Leiste verschwindet wieder, ohne die Notiz neu zu laden (prüft das
+      `layout-change`-Nachziehen aus Task 13).
+- [ ] **7. Embed/FileView deaktiviert** — `![[haus.glb]]`-Embed und geöffnete Datei →
+      **Save view**/**Clear view** deaktiviert mit Tooltip „The view can only be saved in
+      a \`3d\` code block", **Fit** funktioniert trotzdem.
+- [ ] **8. `view: quatsch`** — von Hand eintippen → Hinweiszeile unter dem Viewport,
+      Modell trotzdem sichtbar.
+- [ ] **9. Fremdänderung während offener Notiz** — Notiz in einem zweiten Fenster ändern,
+      dann in der ersten speichern → Abbruch mit „Note changed — view not saved", Notiz
+      bleibt unbeschädigt (unveränderter Blockrumpf).
+- [ ] **10. Offene Frage: trailing newline** — beobachten (z. B. kurz Devtools/Konsole
+      oder den geschriebenen Block genau ansehen), ob Obsidian den Codeblock-`source` mit
+      oder ohne abschließendes `\n` an den Prozessor übergibt. Der Schreibweg toleriert
+      beides (`stripTrailingNewline` in `block-child.ts`) — hier nur festhalten, welcher
+      Fall in der Praxis tatsächlich auftritt, damit das nicht länger offen ist.
+
 ## Befunde
 
 _Hier notieren, was auffällt._
