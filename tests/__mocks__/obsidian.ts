@@ -5,12 +5,15 @@ import { vi } from "vitest";
 export function makeFakeEl(): any {
   const children: any[] = [];
   const attrs: Record<string, string> = {};
+  const handlers: Record<string, ((event?: any) => void)[]> = {};
   const el: any = {
     children,
     className: "",
     textContent: "",
     style: {},
     dataset: {},
+    disabled: false,
+    title: "",
     getAttribute: (name: string) => (name in attrs ? attrs[name] : null),
     setAttribute: (name: string, value: string) => {
       attrs[name] = value;
@@ -48,13 +51,23 @@ export function makeFakeEl(): any {
       el.className = el.className.replace(cls, "").trim();
     },
     toggleClass: (cls: string, on: boolean) => (on ? el.addClass(cls) : el.removeClass(cls)),
-    addEventListener: vi.fn(),
+    // Registriert weiterhin ueber vi.fn (bestehende Tests lesen `.mock.calls`), fuehrt
+    // den Handler aber auch wirklich aus — sonst bleibt `click()` unten wirkungslos.
+    addEventListener: vi.fn((type: string, fn: (event?: any) => void) => {
+      (handlers[type] ??= []).push(fn);
+    }),
     removeEventListener: vi.fn(),
     appendChild: (child: any) => {
       children.push(child);
     },
     detach: () => {
       children.length = 0;
+    },
+    click: () => {
+      for (const fn of handlers.click ?? []) fn({ stopPropagation: () => {} });
+    },
+    remove: () => {
+      el.removed = true;
     },
   };
   return el;

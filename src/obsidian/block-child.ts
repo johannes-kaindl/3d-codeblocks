@@ -27,6 +27,7 @@ import {
   type ContextBudget,
   type ViewportFactory,
 } from "./viewer-host";
+import { buildToolbar, toolbarVisible } from "./viewport-toolbar";
 
 // Re-Export, damit bestehende Importe (main.ts, Tests) stabil bleiben.
 export type { ViewportFactory, ContextBudget, ViewportLike, ViewportCreateOptions } from "./viewer-host";
@@ -42,6 +43,8 @@ export interface BlockDeps {
   writePorts: WritePorts;
   /** Zeilen dieses Blocks — `null`, wenn Obsidian sie nicht kennt (Popover, Export). */
   sectionInfo: () => { lineStart: number; lineEnd: number } | null;
+  /** Ist die Sidebar (Task 10) gerade offen? Entscheidet mit, ob die Toolbar erscheint. */
+  panelVisible: () => boolean;
 }
 
 export class ModelBlock extends MarkdownRenderChild implements ViewportController {
@@ -56,6 +59,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   private loadedMtime: number | null = null;
   private observer: IntersectionObserver | null = null;
   private unsubscribeActive: (() => void) | null = null;
+  private toolbar: HTMLElement | null = null;
   private unloaded = false;
 
   constructor(containerEl: HTMLElement, source: string, sourcePath: string, deps: BlockDeps) {
@@ -101,6 +105,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       this.containerEl.toggleClass("tdcb-active", controller === this);
     });
 
+    this.syncToolbar();
     this.observeVisibility();
   }
 
@@ -206,6 +211,19 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
 
   refreshColors(): void {
     this.host?.refreshColors();
+  }
+
+  /** Leiste an- oder abhaengen, je nach Einstellung und Sichtbarkeit der Sidebar. */
+  syncToolbar(): void {
+    if (!this.parts || this.unloaded) return;
+
+    this.toolbar?.remove();
+    this.toolbar = null;
+
+    const { panelPlacement } = this.deps.settings();
+    if (!toolbarVisible(panelPlacement, this.deps.panelVisible())) return;
+
+    this.toolbar = buildToolbar(this.parts.root, this);
   }
 
   private observeVisibility(): void {

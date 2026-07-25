@@ -63,6 +63,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
             const info = ctx.getSectionInfo(el);
             return info ? { lineStart: info.lineStart, lineEnd: info.lineEnd } : null;
           },
+          panelVisible: () => this.panelVisible(),
         });
         this.track(block);
         ctx.addChild(block);
@@ -158,5 +159,11 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   private track(view: TrackedView): void {
     this.views.add(view);
     view.register(() => this.views.delete(view));
+  }
+
+  /** Ob die Sidebar (Task 10) gerade offen ist — entscheidet mit, ob ein Block
+      seine Hover-Toolbar zeigt. Das Nachziehen bei Layout-Wechseln kommt in Task 13. */
+  private panelVisible(): boolean {
+    return this.app.workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS).length > 0;
   }
 }

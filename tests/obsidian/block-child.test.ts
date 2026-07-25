@@ -71,6 +71,7 @@ function makeDeps(overrides: Partial<Record<string, unknown>> = {}) {
         },
       },
       sectionInfo: () => ({ lineStart: 0, lineEnd: 2 }),
+      panelVisible: () => false,
       ...overrides,
     } as any,
   };

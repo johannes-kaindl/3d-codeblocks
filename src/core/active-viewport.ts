@@ -11,6 +11,12 @@ import type { ViewSpec } from "./view-spec";
  */
 export const NO_BLOCK_REASON = "The view can only be saved in a `3d` code block";
 
+/**
+ * Begruendung, wenn Save zwar einen Block hat, aber `getView()` noch `null` liefert
+ * (Modell laedt noch). Save braucht mehr als Clear — Clear entfernt nur den Key.
+ */
+export const MODEL_LOADING_REASON = "The model is still loading";
+
 /** Was Sidebar und Toolbar von einem Viewport brauchen — three.js sehen sie nie. */
 export interface ViewportController {
   /** Aktuelle Kamera als Spec, oder `null`, wenn (noch) kein Modell geladen ist. */

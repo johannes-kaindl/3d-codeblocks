@@ -4,6 +4,7 @@
 // zeichnet nur — UI-STANDARD §6. DOM ausschliesslich ueber createEl/createDiv.
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
 import {
+  MODEL_LOADING_REASON,
   NO_BLOCK_REASON,
   type ActiveViewport,
   type ViewportController,
@@ -11,9 +12,6 @@ import {
 import { NAMED_VIEWS } from "../core/view-spec";
 
 export const VIEW_TYPE_3D_CONTROLS = "three-d-controls";
-
-/** Save braucht mehr als Clear: ohne geladenes Modell gibt es keine Kamera zum Schreiben. */
-const MODEL_LOADING_REASON = "The model is still loading";
 
 export interface PanelModel {
   empty: boolean;
