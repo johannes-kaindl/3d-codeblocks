@@ -37,7 +37,8 @@ function insert(lines: string[], viewLine: string): string[] {
 
   // Wenn Vorgängerzeile mit \r endet, auch die eingefügte Zeile mit \r beenden,
   // um die Zeilenumbruch-Grenzen buchstabengetreu zu bewahren.
-  if (anchor !== -1 && lines[anchor].endsWith("\r")) {
+  const precedingLineIndex = anchor !== -1 ? anchor : lines.length - 1;
+  if (precedingLineIndex >= 0 && lines[precedingLineIndex].endsWith("\r")) {
     viewLine = `${viewLine}\r`;
   }
 

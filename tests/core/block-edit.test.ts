@@ -90,4 +90,12 @@ describe("applyViewKey", () => {
     expect(result).toBe("file: a.glb\r\nview: top\r\n");
     expect(result).toContain("file: a.glb\r\nview: top\r\n");
   });
+
+  it("appends with CRLF boundary when no anchor found in CRLF source", () => {
+    const source = "height: 300\r\nwidth: 10\r\n";
+    const result = applyViewKey(source, TOP);
+    // The appended line should inherit \r from the last line
+    expect(result).toBe("height: 300\r\nwidth: 10\r\nview: top\r\n");
+    expect(result).toContain("width: 10\r\nview: top\r\n");
+  });
 });
