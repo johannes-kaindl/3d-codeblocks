@@ -49,4 +49,10 @@ describe("fitCamera", () => {
     expect(f.near).toBeGreaterThan(0);
     expect(f.far).toBeGreaterThan(f.near);
   });
+
+  it("reports the distance and radius it used", () => {
+    const f = fitCamera(v(-1, -1, -1), v(1, 1, 1), 50, 1.5);
+    expect(f.distance).toBeCloseTo(dist(f), 6);
+    expect(f.radius).toBeGreaterThan(0);
+  });
 });

@@ -4,6 +4,8 @@
 // automatischen Einpass-Distanz, deshalb bleibt eine gespeicherte Ansicht sinnvoll,
 // wenn dasselbe Modell in anderer Groesse neu generiert wird.
 
+import { directionFromAngles, fitCamera, type CameraFit, type Vec3 } from "./camera-fit";
+
 export interface ViewSpec {
   /** Drehung um die Hochachse, 0..359. 0 = von vorn (+Z), wachsend nach rechts. */
   azimuth: number;
@@ -96,4 +98,50 @@ function angleDelta(a: number, b: number): number {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/** ViewSpec → Kameraposition. Ziel und Basisdistanz kommen aus dem Einpassen. */
+export function viewToCamera(
+  spec: ViewSpec,
+  min: Vec3,
+  max: Vec3,
+  fovDeg: number,
+  aspect: number,
+): CameraFit {
+  const fit = fitCamera(min, max, fovDeg, aspect);
+  const distance = fit.distance * spec.distance;
+  const dir = directionFromAngles(spec.azimuth, spec.elevation);
+
+  return {
+    position: {
+      x: fit.target.x + dir.x * distance,
+      y: fit.target.y + dir.y * distance,
+      z: fit.target.z + dir.z * distance,
+    },
+    target: fit.target,
+    near: Math.max(distance / 1000, 1e-3),
+    far: distance + fit.radius * 10,
+    distance,
+    radius: fit.radius,
+  };
+}
+
+/** Ist-Kamera → ViewSpec. `baseDistance` ist `fitCamera(...).distance` desselben Modells. */
+export function cameraToView(position: Vec3, target: Vec3, baseDistance: number): ViewSpec {
+  const dx = position.x - target.x;
+  const dy = position.y - target.y;
+  const dz = position.z - target.z;
+  const length = Math.hypot(dx, dy, dz);
+
+  // Kamera exakt auf dem Ziel: keine Richtung ableitbar → Auto-Blick zurueckgeben.
+  if (length < 1e-6 || baseDistance <= 0) return { ...NAMED_VIEWS.iso };
+
+  const azimuth = (Math.atan2(dx, dz) * 180) / Math.PI;
+  const elevation = (Math.asin(dy / length) * 180) / Math.PI;
+
+  return {
+    azimuth: wrapAzimuth(azimuth),
+    elevation: clampElevation(elevation),
+    distance: Math.max(round2(length / baseDistance), 0.01),
+  };
 }
