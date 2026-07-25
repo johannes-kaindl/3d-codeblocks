@@ -46,7 +46,17 @@ export class BlockChangedError extends Error {
 /** Zeilen zwischen den Fences, oder `null`, wenn die Stelle nicht mehr passt. */
 function bodyAt(content: string, loc: BlockLocation): string | null {
   const lines = content.split("\n");
-  if (loc.lineEnd >= lines.length || loc.lineStart >= loc.lineEnd) return null;
+  // Negative oder nicht-ganzzahlige Indizes wuerden Array.slice stillschweigend
+  // vom Ende her interpretieren (bzw. bei anderen Werten abstuerzen) statt die
+  // Stelle abzulehnen — das genaue Gegenteil dessen, was diese Funktion soll.
+  if (
+    !Number.isInteger(loc.lineStart) ||
+    !Number.isInteger(loc.lineEnd) ||
+    loc.lineStart < 0 ||
+    loc.lineEnd >= lines.length ||
+    loc.lineStart >= loc.lineEnd
+  )
+    return null;
   return lines.slice(loc.lineStart + 1, loc.lineEnd).join("\n");
 }
 
@@ -62,6 +72,45 @@ function normalizeLineEndings(text: string): string {
 
 function bodyMatches(content: string, loc: BlockLocation, expectedBody: string): boolean {
   return bodyAt(normalizeLineEndings(content), loc) === normalizeLineEndings(expectedBody);
+}
+
+// Schreibt `nextBody` (immer \n) nicht einfach so in eine CRLF-Notiz — sonst blieben
+// die Zeilen des Blocks \n-terminiert, waehrend der Rest der Notiz \r\n behaelt. Das
+// widerspricht dem Prinzip, das `block-edit.ts` fuer die view-Zeile schon durchzieht:
+// Zeilenumbrueche bleiben innerhalb einer Notiz einheitlich.
+//
+// "crlf" | "lf" | null — null heisst: an dieser Stelle kein Signal (leerer Text).
+type LineEndingStyle = "crlf" | "lf";
+
+function lineEndingSignal(text: string): LineEndingStyle | null {
+  if (text.includes("\r\n")) return "crlf";
+  // Der Rumpf wird per `split("\n")` + `slice` + `join("\n")` aus dem Rohtext
+  // gewonnen. Dabei verliert nur die letzte Zeile ihr `\n` (war der Trenner),
+  // das zugehoerige `\r` bleibt aber als Suffix erhalten — genau daran erkennt
+  // man CRLF bei einem einzeiligen Rumpf.
+  if (text.endsWith("\r")) return "crlf";
+  if (text.includes("\n")) return "lf";
+  return null;
+}
+
+/** Stil an der Stelle selbst, sonst Stil der ganzen Notiz, sonst LF. */
+function resolveLineEndingStyle(content: string, loc: BlockLocation): LineEndingStyle {
+  const rawBody = bodyAt(content, loc);
+  return (rawBody !== null ? lineEndingSignal(rawBody) : null) ?? lineEndingSignal(content) ?? "lf";
+}
+
+// Erst auf \n normalisieren, DANN den Zielstil anwenden — sonst wuerde ein bereits
+// CRLF-artiger `nextBody` zu \r\r\n. Bei CRLF bekommt JEDE Zeile (auch die letzte)
+// ein eigenes trailing \r, weil `replaceBody` die Zeilen anschliessend nur mit
+// einem schlichten "\n" zusammenfuegt (siehe unten) — das \r muss also Teil der
+// Zeile selbst sein, nicht des Trenners.
+function applyLineEndingStyle(text: string, style: LineEndingStyle): string {
+  const lf = normalizeLineEndings(text);
+  if (style === "lf") return lf;
+  return lf
+    .split("\n")
+    .map((line) => `${line}\r`)
+    .join("\n");
 }
 
 function replaceBody(content: string, loc: BlockLocation, nextBody: string): string {
@@ -85,10 +134,26 @@ export async function writeBlockBody(
     const content = editor.getValue();
     if (!bodyMatches(content, loc, expectedBody)) throw new BlockChangedError();
 
+    const styledNextBody = applyLineEndingStyle(nextBody, resolveLineEndingStyle(content, loc));
+
+    if (loc.lineEnd === loc.lineStart + 1) {
+      // Leerer Rumpf: Die Fences liegen direkt aneinander, es gibt keine Zeile
+      // zwischen ihnen zu ersetzen. `lastBodyLine` waere dann `loc.lineStart`,
+      // also VOR `loc.lineStart + 1` — ein invertierter Bereich (from nach to).
+      // Statt zu ersetzen, an der Stelle einfuegen; das \n ist Teil des Einfuegens,
+      // nicht optional (sonst verschmilzt der Rumpf mit der schliessenden Fence).
+      editor.replaceRange(
+        `${styledNextBody}\n`,
+        { line: loc.lineStart + 1, ch: 0 },
+        { line: loc.lineStart + 1, ch: 0 },
+      );
+      return;
+    }
+
     const lines = content.split("\n");
     const lastBodyLine = loc.lineEnd - 1;
     editor.replaceRange(
-      nextBody,
+      styledNextBody,
       { line: loc.lineStart + 1, ch: 0 },
       { line: lastBodyLine, ch: lines[lastBodyLine].length },
     );
@@ -101,6 +166,7 @@ export async function writeBlockBody(
   await ports.vault.process(loc.path, (current) => {
     // Zwischen `read` und `process` kann sich die Datei geaendert haben — erneut pruefen.
     if (!bodyMatches(current, loc, expectedBody)) throw new BlockChangedError();
-    return replaceBody(current, loc, nextBody);
+    const styledNextBody = applyLineEndingStyle(nextBody, resolveLineEndingStyle(current, loc));
+    return replaceBody(current, loc, styledNextBody);
   });
 }
