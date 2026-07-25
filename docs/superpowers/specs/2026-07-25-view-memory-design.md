@@ -58,7 +58,11 @@ Missionen und `editorElFor(notePath)`.
 
 Eine neue `ItemView` in der rechten Leiste (Icon `box`) zeigt die Bedienelemente für den
 **aktiven Viewport**. Ohne aktives Modell zeigt sie einen Empty-State nach
-UI-STANDARD §8 („Klicke auf ein 3D-Modell").
+UI-STANDARD §8 („Click a 3D model to control it here.").
+
+**Die Oberfläche ist durchgängig englisch**, wie der gesamte Bestand („View mode",
+„Default height"). Kein i18n — das Plugin nutzt die Kit-i18n-Engine bislang nicht, und
+sie hier einzuführen wäre eine eigene Entscheidung außerhalb dieses Teilprojekts.
 
 ### 2.2 Aktiver Viewport
 
@@ -93,11 +97,11 @@ Kasten und verdeckt nichts Fremdes.
 
 ### 2.4 Aktionen
 
-| Aktion | Wirkung | Icon | Befehl |
-|---|---|---|---|
-| Ansicht übernehmen | schreibt `view:` in den Codeblock | `pin` | ja |
-| Ansicht zurücksetzen | entfernt `view:` wieder | `pin-off` | ja |
-| Einpassen | Kamera auf den Auto-Blick, ohne zu schreiben | `maximize` | ja |
+| Aktion | Beschriftung | Wirkung | Icon | Befehl |
+|---|---|---|---|---|
+| Ansicht übernehmen | `Save view` | schreibt `view:` in den Codeblock | `pin` | „Save current view to block" |
+| Ansicht zurücksetzen | `Clear view` | entfernt `view:` wieder | `pin-off` | „Clear saved view" |
+| Einpassen | `Fit` | Kamera auf den Auto-Blick, ohne zu schreiben | `maximize` | „Fit camera to model" |
 
 Alle drei zusätzlich als hotkey-fähige Befehle in der Command Palette, wirkend auf den
 aktiven Viewport. Icon-Buttons tragen `aria-label` (UI-STANDARD §2), Icons kommen über
@@ -106,8 +110,8 @@ aktiven Viewport. Icon-Buttons tragen `aria-label` (UI-STANDARD §2), Icons komm
 ### 2.5 Wege ohne Block
 
 `![[…]]`-Embed und `FileView` haben keinen Blocktext, in den geschrieben werden könnte.
-Dort sind „Übernehmen" und „Zurücksetzen" **deaktiviert** mit erklärendem Tooltip
-(„Ansicht lässt sich nur in einem `3d`-Codeblock speichern"); „Einpassen" bleibt
+Dort sind „Save view" und „Clear view" **deaktiviert** mit erklärendem Tooltip
+(„The view can only be saved in a `3d` code block"); „Fit" bleibt
 nutzbar. Der Zustand ist dort bewusst flüchtig — das ist die ehrliche Auflösung der
 Asymmetrie der vier Wege, kein Versehen.
 
@@ -193,7 +197,7 @@ wird **nichts** geschrieben und eine `Notice` erklärt warum.
 
 ### 4.4 Was der Nutzer erlebt
 
-Nach dem Übernehmen erscheint „Ansicht gespeichert", und der Block baut sich einmal
+Nach dem Übernehmen erscheint die Notice „View saved", und der Block baut sich einmal
 kurz neu auf — unvermeidlich, weil sich die Blockquelle geändert hat. Die Modelldatei
 kommt dabei aus dem Cache, es wird nichts neu geladen.
 
@@ -205,10 +209,10 @@ sondern die Rückfahrkarte.
 | Fall | Verhalten |
 |---|---|
 | `getSectionInfo` liefert `null` (Popover, PDF-Export, verschachtelter Kontext) | Speicher-Knöpfe deaktiviert, Tooltip nennt den Grund |
-| Notiz hat sich seit dem Rendern geändert | Abbruch, nichts geschrieben, `Notice` |
+| Notiz hat sich seit dem Rendern geändert | Abbruch, nichts geschrieben, Notice „Note changed — view not saved" |
 | Datei schreibgeschützt / IO-Fehler | `Notice` mit der Fehlermeldung, Viewer läuft weiter |
-| Kein aktiver Viewport | Sidebar zeigt Empty-State; Befehle melden „Kein 3D-Modell aktiv" |
-| `view:` unlesbar (von Hand getippt) | Hinweiszeile über den bestehenden `warnings`-Weg, automatische Einpassung |
+| Kein aktiver Viewport | Sidebar zeigt Empty-State; Befehle melden „No active 3D model" |
+| `view:` unlesbar (von Hand getippt) | Hinweiszeile über den bestehenden `warnings`-Weg („`view`: unknown view — use front, back, left, right, top, bottom, iso or three numbers"), automatische Einpassung |
 | Embed / FileView (kein Block) | Speichern deaktiviert, Einpassen bleibt |
 
 Grundsatz aus Stufe 1 bleibt: **Eine kaputte Ansichtsangabe darf nie ein leeres
@@ -223,6 +227,7 @@ Kästchen erzeugen** — das Modell ist immer zu sehen.
 | `view-spec.ts` | `ViewSpec`, `NAMED_VIEWS`, `parseView`, `formatView`, `viewToCamera`, `cameraToView` |
 | `block-edit.ts` | `applyViewKey` |
 | `panel-target.ts` | `resolvePanelTarget` (übernommen von `vim-dojo/hudPlacement.ts`) |
+| `active-viewport.ts` | `ViewportController`-Interface + Registry: wer ist aktiv, wer wird benachrichtigt — gespeist aus `onInteract`. Liegt in `core/`, weil es keine Obsidian-API braucht und `check-pure` es dort bewacht |
 
 **Erweitert:** `block-config.ts` (`view`-Key + Warnung), `settings-types.ts`
 (`panelPlacement`, validiert nach dem bestehenden Einzelfeld-Muster statt per Spread),
@@ -232,7 +237,6 @@ Kästchen erzeugen** — das Modell ist immer zu sehen.
 
 | Datei | Inhalt |
 |---|---|
-| `active-viewport.ts` | Registry: wer ist aktiv, wer wird benachrichtigt — gespeist aus `onInteract` |
 | `control-panel.ts` | Sidebar-`ItemView` |
 | `viewport-toolbar.ts` | Hover-Leiste im Stage |
 | `block-writer.ts` | Hybrid-Transport plus Text-Übereinstimmungsprüfung |
