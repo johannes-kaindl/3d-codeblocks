@@ -43,4 +43,30 @@ describe("applyViewKey", () => {
   it("preserves a trailing newline", () => {
     expect(applyViewKey("file: a.glb\n", TOP)).toBe("file: a.glb\nview: top\n");
   });
+
+  it("preserves CRLF line endings in round-trip", () => {
+    const source = "file: a.glb\r\nheight: 300\r\n";
+    const result = applyViewKey(source, TOP);
+    expect(result).toBe("file: a.glb\r\nview: top\r\nheight: 300\r\n");
+    // Verify all line separators are CRLF, not mixed
+    expect(result).not.toContain("\n\r");
+    const lines = result.split("\r\n");
+    expect(lines.length).toBe(4); // file, view, height, and empty string after trailing CRLF
+  });
+
+  it("keeps pure LF when source uses LF", () => {
+    const source = "file: a.glb\nheight: 300\n";
+    const result = applyViewKey(source, TOP);
+    expect(result).toBe("file: a.glb\nview: top\nheight: 300\n");
+    // Verify no CRLF crept in
+    expect(result).not.toContain("\r\n");
+  });
+
+  it("handles empty source by returning just the view line", () => {
+    expect(applyViewKey("", TOP)).toBe("view: top");
+  });
+
+  it("returns empty string when removing view from empty source", () => {
+    expect(applyViewKey("", null)).toBe("");
+  });
 });
