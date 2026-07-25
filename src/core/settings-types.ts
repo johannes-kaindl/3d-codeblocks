@@ -4,6 +4,8 @@
 // ein Spread wuerde Muellwerte aus einer alten oder handgeschriebenen data.json
 // unbesehen durchreichen.
 
+import type { PanelPlacement } from "./panel-target";
+
 export type ViewMode = "immediate" | "on-click";
 
 export interface PluginSettings {
@@ -12,6 +14,7 @@ export interface PluginSettings {
   autoRotate: boolean;
   showGrid: boolean;
   maxContexts: number;
+  panelPlacement: PanelPlacement;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -20,6 +23,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   autoRotate: false,
   showGrid: false,
   maxContexts: 6,
+  panelPlacement: "auto",
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;
@@ -56,5 +60,11 @@ export function mergeSettings(loaded: unknown): PluginSettings {
     // Anders als `defaultHeight`: eine vorhandene Zahl wird geklemmt, nicht verworfen —
     // wer 0 oder 999 eintraegt, meint "so wenig/viel wie moeglich".
     maxContexts: clampContexts(raw.maxContexts),
+    panelPlacement:
+      raw.panelPlacement === "sidebar" ||
+      raw.panelPlacement === "toolbar" ||
+      raw.panelPlacement === "auto"
+        ? raw.panelPlacement
+        : DEFAULT_SETTINGS.panelPlacement,
   };
 }
