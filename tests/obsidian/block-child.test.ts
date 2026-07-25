@@ -428,6 +428,79 @@ describe("toolbar state after load (regression)", () => {
     expect(findAllToolbars(el)).toHaveLength(1);
   });
 
+  // Regressionstest fuer den GUI-Smoke 2026-07-25: bei "auto" erschien die Leiste
+  // nach dem ersten Aufklappen der Sidebar nie wieder. Ursache war das fehlende
+  // `resize`-Event in main.ts; damit das nachgezogene Event nicht bei jedem Pixel
+  // eines Pane-Drags DOM wegwirft, muss `syncToolbar()` ohne `force` idempotent sein.
+  describe("syncToolbar idempotency", () => {
+    it("keeps the very same toolbar element when nothing about visibility changed", async () => {
+      const { deps, app } = makeDeps({ panelVisible: () => false });
+      app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());
+
+      const el = makeFakeEl();
+      const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+      block.onload();
+      await block.loadNow();
+
+      const before = findToolbar(el);
+      block.syncToolbar();
+      block.syncToolbar();
+
+      // Objekt-Identitaet, nicht nur Anzahl: ein Neubau wuerde ein neues Element
+      // liefern und einen laufenden Klick auf einem Button ins Leere greifen lassen.
+      expect(findToolbar(el)).toBe(before);
+      expect(findAllToolbars(el)).toHaveLength(1);
+    });
+
+    it("adds the toolbar when the sidebar gets collapsed", () => {
+      let visible = true;
+      const { deps } = makeDeps({ panelVisible: () => visible });
+
+      const el = makeFakeEl();
+      const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+      block.onload();
+      // Sidebar offen, Einstellung "auto" (Default) → Panel zustaendig, keine Leiste.
+      expect(findAllToolbars(el)).toHaveLength(0);
+
+      visible = false;
+      block.syncToolbar();
+
+      expect(findAllToolbars(el)).toHaveLength(1);
+    });
+
+    it("removes the toolbar when the sidebar gets expanded again", () => {
+      let visible = false;
+      const { deps } = makeDeps({ panelVisible: () => visible });
+
+      const el = makeFakeEl();
+      const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+      block.onload();
+      expect(findAllToolbars(el)).toHaveLength(1);
+
+      visible = true;
+      block.syncToolbar();
+
+      expect(findAllToolbars(el)).toHaveLength(0);
+    });
+
+    it("rebuilds on force even when visibility is unchanged", async () => {
+      const { deps, app } = makeDeps({ panelVisible: () => false });
+      app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());
+
+      const el = makeFakeEl();
+      const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+      block.onload();
+      const before = findToolbar(el);
+
+      block.syncToolbar(true);
+
+      // `force` ist der Weg, ueber den der Save-Button nach dem Laden aktiv wird —
+      // er MUSS ein frisches Element erzeugen, sonst bleiben die Zustaende eingefroren.
+      expect(findToolbar(el)).not.toBe(before);
+      expect(findAllToolbars(el)).toHaveLength(1);
+    });
+  });
+
   // Regressionstest fuer die zweite Review-Runde (Wrapper-Fix): der Anker-Fix aus
   // Finding 6 haengte die Toolbar in `.tdcb-stage` -- genau dort, wo `ViewerHost` in
   // drei Pfaden `stage.empty()` aufruft (Poster-Modus, Reaktivierung, Fehler-Reload).

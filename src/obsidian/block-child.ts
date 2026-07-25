@@ -204,7 +204,9 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // HIER (asynchron ueber `render`) fertig. Ohne dieses Nachziehen bliebe der
     // Save-Button in der Default-Konfiguration (Toolbar statt Sidebar) fuer immer
     // deaktiviert, weil `syncToolbar()` in `onload()` noch vor jedem Modell laeuft.
-    this.syncToolbar();
+    // `force`, weil sich nur der Button-Zustand geaendert hat, nicht die Sichtbarkeit —
+    // der idempotente Pfad wuerde hier sonst genau das Noetige ueberspringen.
+    this.syncToolbar(true);
   }
 
   /** Reagiert auf Regenerierung durch den Erzeuger-Loop (gleicher Pfad, neuer Inhalt). */
@@ -218,15 +220,30 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     this.host?.refreshColors();
   }
 
-  /** Leiste an- oder abhaengen, je nach Einstellung und Sichtbarkeit der Sidebar. */
-  syncToolbar(): void {
+  /** Leiste an- oder abhaengen, je nach Einstellung und Sichtbarkeit der Sidebar.
+   *
+   *  `force` erzwingt den Neubau, auch wenn die Leiste schon im richtigen Zustand
+   *  ist: `buildToolbar()` friert den Aktiv/Inaktiv-Zustand der Buttons beim Bauen
+   *  ein, nach dem Laden eines Modells muss sie also neu gezeichnet werden, obwohl
+   *  sich ihre Sichtbarkeit nicht geaendert hat.
+   *
+   *  Ohne `force` ist der Aufruf idempotent — noetig, weil `resize` beim Ziehen
+   *  einer Pane-Grenze im Sekundentakt feuert. Ein bedingungsloser Neubau wuerde
+   *  dabei jedes Mal DOM wegwerfen und neu aufbauen, und ein Klick auf einen
+   *  Toolbar-Button ginge verloren, wenn er den Neubau ausloest, bevor sein
+   *  Handler laeuft (dieselbe Fehlerklasse wie der Re-Render-Gotcha aus
+   *  epub-exporter in REGISTRY.md). */
+  syncToolbar(force = false): void {
     if (!this.parts || this.unloaded) return;
+
+    const { panelPlacement } = this.deps.settings();
+    const wanted = toolbarVisible(panelPlacement, this.deps.panelVisible());
+    if (!force && wanted === (this.toolbar !== null)) return;
 
     this.toolbar?.remove();
     this.toolbar = null;
 
-    const { panelPlacement } = this.deps.settings();
-    if (!toolbarVisible(panelPlacement, this.deps.panelVisible())) return;
+    if (!wanted) return;
 
     // In den Viewport-Wrapper haengen (nicht `root`, das auch den `title:`-Caption
     // traegt, und NICHT `stage` selbst): `root` wuerde die Leiste ueber den Titel statt
