@@ -67,9 +67,48 @@ describe("obsidianWritePorts", () => {
       const { app, file } = makeApp("A");
       const view = new MarkdownView();
       view.file = file;
+      view.mode = "source";
       const editor = { getValue: () => "" };
       view.editor = editor as any;
       app.workspace.getLeavesOfType = vi.fn().mockReturnValue([{ view }]);
+      const ports = obsidianWritePorts(app);
+
+      expect(ports.editorFor("note.md")).toBe(editor);
+    });
+
+    // Der teuerste Fehler dieses Adapters: im Lesemodus existiert `view.editor`,
+    // ist aber nicht der Puffer, den Obsidian anzeigt und speichert. Ein
+    // `replaceRange` darauf verpufft LAUTLOS — kein Wurf, kein Fehler, und der
+    // Aufrufer meldet dem Nutzer "gespeichert", waehrend die Notiz unveraendert
+    // bleibt. Deshalb muss der Lesemodus hier auf `null` fallen: dann greift der
+    // `vault.process`-Pfad, der genau dafuer gebaut ist.
+    it("returns null for a note shown in reading mode, so the vault path is used", () => {
+      const { app, file } = makeApp("A");
+      const view = new MarkdownView();
+      view.file = file;
+      view.mode = "preview";
+      view.editor = { getValue: () => "" } as any;
+      app.workspace.getLeavesOfType = vi.fn().mockReturnValue([{ view }]);
+      const ports = obsidianWritePorts(app);
+
+      expect(ports.editorFor("note.md")).toBeNull();
+    });
+
+    // Dieselbe Notiz kann in zwei Blaettern offen sein — eins lesend, eins
+    // bearbeitend. Der Lesemodus-Treffer darf die Suche nicht abbrechen.
+    it("skips a reading-mode leaf and keeps looking for an editable one", () => {
+      const { app, file } = makeApp("A");
+      const reading = new MarkdownView();
+      reading.file = file;
+      reading.mode = "preview";
+      const editing = new MarkdownView();
+      editing.file = file;
+      editing.mode = "source";
+      const editor = { getValue: () => "" };
+      editing.editor = editor as any;
+      app.workspace.getLeavesOfType = vi
+        .fn()
+        .mockReturnValue([{ view: reading }, { view: editing }]);
       const ports = obsidianWritePorts(app);
 
       expect(ports.editorFor("note.md")).toBe(editor);
