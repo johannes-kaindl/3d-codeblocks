@@ -39,7 +39,10 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     this.settings = mergeSettings(await this.loadData());
     this.addSettingTab(new SettingsTab(this.app, this));
 
-    const hostDeps: HostBaseDeps = {
+    // `active` gehoert seit Task 12 mit dazu — Embed und FileView brauchen es, um sich
+    // bei Interaktion als aktiven Viewport zu melden; ModelBlock/GltfBlock nehmen
+    // einfach nur weniger von diesem Objekt.
+    const hostDeps: HostBaseDeps & { active: ActiveViewport } = {
       settings: () => this.settings,
       factory: {
         create: (options) => new Viewport(options),
@@ -48,6 +51,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       budget: this.contexts,
       loadModel,
       readColors: readSceneColors,
+      active: this.active,
     };
 
     // ```3d file: — Datei-Verweis mit Titel/Höhe (mehrere pro Notiz).
@@ -57,7 +61,6 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         const block = new ModelBlock(el, source, ctx.sourcePath, {
           ...hostDeps,
           app: this.app,
-          active: this.active,
           writePorts: obsidianWritePorts(this.app),
           sectionInfo: () => {
             const info = ctx.getSectionInfo(el);
