@@ -14,6 +14,12 @@ export interface BlockLocation {
   path: string;
   lineStart: number;
   lineEnd: number;
+  // Sprache der eroeffnenden Fence (z. B. "3d"). Zusatzpruefung neben dem Rumpf:
+  // bei einem leeren Rumpf ist der Fingerabdruck sonst fuer JEDEN Block an dieser
+  // Zeile identisch (die leere Zeichenkette) -- eine veraltete Position, die
+  // zufaellig auf einen fremden ```python- oder ```mermaid-Block zeigt, wuerde den
+  // Guard sonst passieren.
+  fence: string;
 }
 
 export interface EditorHandle {
@@ -66,12 +72,39 @@ function bodyAt(content: string, loc: BlockLocation): string | null {
 // fail-safe, aber dauerhaft nutzlos. \r\n → \n aendert die Zeilenzahl nicht, die
 // Positionen in `loc` bleiben also gueltig. Normalisiert wird nur fuer den Vergleich;
 // geschrieben wird immer der unveraenderte Text.
+//
+// Ein nach dem \r\n-Abgleich verbleibendes einzelnes \r ist der Rest eines \r\n,
+// dessen \n bereits anderswo als Trenner verbraucht wurde — typisch fuer ein aus
+// einer CRLF-Notiz extrahiertes Fragment mit einzeiligem Rumpf (`expectedBody` kommt
+// von Obsidian genauso zustande wie `bodyAt` unten: split("\n") + slice + join, nur
+// die letzte Zeile verliert dabei ihr \n, das \r bleibt haengen). Es einfach zu
+// entfernen (statt zu \n zu machen) haelt den Vergleich symmetrisch zu `bodyAt`, das
+// fuer denselben Rumpf nie ein trailing \n anhaengt — ein \r→\n wuerde die eine Seite
+// um ein Zeichen laenger machen und den Abgleich dauerhaft verfehlen.
 function normalizeLineEndings(text: string): string {
-  return text.replace(/\r\n/g, "\n");
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "");
+}
+
+const FENCE_LINE = /^\s*`{3,}(.*)$/;
+
+/** Sprache der eroeffnenden Fence in `line`, oder `null`, wenn dort keine Fence steht. */
+function fenceLanguage(line: string | undefined): string | null {
+  if (line === undefined) return null;
+  const match = FENCE_LINE.exec(line);
+  return match ? match[1].trim() : null;
+}
+
+/** Steht an `loc.lineStart` wirklich eine Fence in der erwarteten Sprache? */
+function fenceMatches(content: string, loc: BlockLocation): boolean {
+  if (!Number.isInteger(loc.lineStart) || loc.lineStart < 0) return false;
+  const lang = fenceLanguage(content.split("\n")[loc.lineStart]);
+  return lang !== null && lang.toLowerCase() === loc.fence.trim().toLowerCase();
 }
 
 function bodyMatches(content: string, loc: BlockLocation, expectedBody: string): boolean {
-  return bodyAt(normalizeLineEndings(content), loc) === normalizeLineEndings(expectedBody);
+  const normalized = normalizeLineEndings(content);
+  if (!fenceMatches(normalized, loc)) return false;
+  return bodyAt(normalized, loc) === normalizeLineEndings(expectedBody);
 }
 
 // Schreibt `nextBody` (immer \n) nicht einfach so in eine CRLF-Notiz — sonst blieben

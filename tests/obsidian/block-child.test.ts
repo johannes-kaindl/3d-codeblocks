@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { TFile, makeFakeApp, makeFakeEl } from "../__mocks__/obsidian";
 import { ModelBlock } from "../../src/obsidian/block-child";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
+import { ActiveViewport } from "../../src/core/active-viewport";
+import { NAMED_VIEWS } from "../../src/core/view-spec";
 
 function makeFactory() {
   const created: any[] = [];
@@ -58,6 +60,17 @@ function makeDeps(overrides: Partial<Record<string, unknown>> = {}) {
       budget,
       loadModel: vi.fn().mockResolvedValue({}),
       readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
+      // Fake-Defaults fuer Tests, denen die Schreib-Faehigkeit egal ist —
+      // spezifische ViewportController-Tests ueberschreiben sie via `loadedBlock`.
+      active: new ActiveViewport(),
+      writePorts: {
+        editorFor: () => null,
+        vault: {
+          read: async () => "",
+          process: async () => {},
+        },
+      },
+      sectionInfo: () => ({ lineStart: 0, lineEnd: 2 }),
       ...overrides,
     } as any,
   };
@@ -218,6 +231,91 @@ describe("ModelBlock", () => {
     await block.loadNow();
 
     expect(JSON.stringify(el.children)).toContain("Unknown key: `heigth`");
+  });
+});
+
+/** Ein geladener Block mit aktiver Registry und mitschreibenden Schreib-Ports. */
+async function loadedBlock(
+  source = "file: model.glb",
+  overrides: Record<string, unknown> = {},
+) {
+  const written: string[] = [];
+  const active = new ActiveViewport();
+  const writePorts = {
+    editorFor: () => null,
+    vault: {
+      read: async () => ["```3d", source, "```"].join("\n"),
+      process: async (_path: string, fn: (text: string) => string) => {
+        const next = fn(["```3d", source, "```"].join("\n"));
+        written.push(next.split("\n").slice(1, -1).join("\n"));
+      },
+    },
+  };
+
+  const { deps, created, app } = makeDeps({
+    active,
+    writePorts,
+    sectionInfo: () => ({ lineStart: 0, lineEnd: source.split("\n").length + 1 }),
+    panelVisible: () => false,
+    ...overrides,
+  });
+  app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.glb"));
+
+  const block = new ModelBlock(makeFakeEl(), source, "note.md", deps);
+  block.onload();
+  await block.loadNow();
+
+  return { block, created, active, written };
+}
+
+describe("as a ViewportController", () => {
+  it("becomes the active viewport when the user interacts", async () => {
+    const { block, created, active } = await loadedBlock();
+    created[0].opts.onInteract();
+    expect(active.get()).toBe(block);
+  });
+
+  it("clears itself from the registry on unload", async () => {
+    const { block, created, active } = await loadedBlock();
+    created[0].opts.onInteract();
+    block.onunload();
+    expect(active.get()).toBeNull();
+  });
+
+  it("leaves another block active when a different one unloads", async () => {
+    const first = await loadedBlock();
+    first.created[0].opts.onInteract();
+    const other = await loadedBlock();
+    other.block.onunload();
+    expect(first.active.get()).toBe(first.block);
+  });
+
+  it("can save when the section info is known", async () => {
+    const { block } = await loadedBlock();
+    expect(block.canSave()).toBe(true);
+  });
+
+  it("cannot save when the section info is missing", async () => {
+    const { block } = await loadedBlock("file: model.glb", { sectionInfo: () => null });
+    expect(block.canSave()).toBe(false);
+  });
+
+  it("writes the view key into the block body", async () => {
+    const { block, written } = await loadedBlock();
+    await block.save(NAMED_VIEWS.top);
+    expect(written[0]).toBe("file: model.glb\nview: top");
+  });
+
+  it("removes the view key when saving null", async () => {
+    const { block, written } = await loadedBlock("file: model.glb\nview: top");
+    await block.save(null);
+    expect(written[0]).toBe("file: model.glb");
+  });
+
+  it("writes nothing when the value would not change", async () => {
+    const { block, written } = await loadedBlock("file: model.glb\nview: top");
+    await block.save(NAMED_VIEWS.top);
+    expect(written).toEqual([]);
   });
 });
 

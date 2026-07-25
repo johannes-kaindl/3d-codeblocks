@@ -6,7 +6,7 @@ import {
 } from "../../src/obsidian/block-writer";
 
 const NOTE = ["# Note", "", "```3d", "file: a.glb", "```", "", "text below"].join("\n");
-const LOC: BlockLocation = { path: "note.md", lineStart: 2, lineEnd: 4 };
+const LOC: BlockLocation = { path: "note.md", lineStart: 2, lineEnd: 4, fence: "3d" };
 
 // {line, ch} → Zeichen-Offset im Gesamttext. Wichtig: eine Mock-Version, die
 // stattdessen ganze Zeilen spleisst und `ch` ignoriert, kann eine falsche
@@ -95,7 +95,12 @@ describe("writeBlockBody", () => {
   it("refuses to write when the location has a negative line number", async () => {
     const { state, ports } = makePorts();
     await expect(
-      writeBlockBody(ports, { path: "note.md", lineStart: -3, lineEnd: 1 }, "", "view: top"),
+      writeBlockBody(
+        ports,
+        { path: "note.md", lineStart: -3, lineEnd: 1, fence: "3d" },
+        "",
+        "view: top",
+      ),
     ).rejects.toBeInstanceOf(BlockChangedError);
     expect(state.content).toBe(NOTE);
   });
@@ -105,7 +110,7 @@ describe("writeBlockBody", () => {
     const { state, ports } = makePorts(note);
     await writeBlockBody(
       ports,
-      { path: "note.md", lineStart: 0, lineEnd: 4 },
+      { path: "note.md", lineStart: 0, lineEnd: 4, fence: "3d" },
       "file: a.glb\nview: front\ntitle: X",
       "file: a.glb\nview: top\ntitle: X",
     );
@@ -145,7 +150,7 @@ describe("writeBlockBody", () => {
   // kommen; der Editor-Weg darf dabei keinen invertierten Bereich bauen.
   describe("adjacent fences (empty body)", () => {
     const note = ["```3d", "```"].join("\n");
-    const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 1 };
+    const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 1, fence: "3d" };
 
     it("inserts the body through the vault", async () => {
       const { state, ports } = makePorts(note);
@@ -157,6 +162,56 @@ describe("writeBlockBody", () => {
       const { state, ports } = makePorts(note, true);
       await writeBlockBody(ports, loc, "", "view: top");
       expect(state.content).toBe(["```3d", "view: top", "```"].join("\n"));
+    });
+  });
+
+  // (a) Ein einzeiliger Rumpf aus einer CRLF-Notiz kommt bei Obsidian moeglicherweise
+  // mit einem einzelnen, nicht gepaarten \r am Ende an: das Fragment wird per
+  // split("\n") + slice + join gewonnen, nur die letzte Zeile verliert dabei ihr
+  // trennendes \n, das \r bleibt als Suffix haengen (siehe Kommentar bei `bodyAt`
+  // in block-writer.ts). Ohne Toleranz dafuer wuerde der Abgleich mit dem sauber
+  // normalisierten Inhalt der Notiz fuer immer scheitern -- Speichern waere auf
+  // CRLF-Notizen mit einzeiligem Rumpf dauerhaft tot.
+  it("tolerates a lone trailing \\r in expectedBody (CRLF fragment, unpaired \\r)", async () => {
+    const note = ["```3d", "file: a.glb", "```"].join("\n");
+    const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 2, fence: "3d" };
+    const { state, ports } = makePorts(note);
+    await writeBlockBody(ports, loc, "file: a.glb\r", "file: a.glb\nview: top");
+    expect(state.content).toBe(["```3d", "file: a.glb", "view: top", "```"].join("\n"));
+  });
+
+  // (b) Der Fingerabdruck darf sich nicht allein auf den Rumpf verlassen: bei einem
+  // leeren Rumpf ist er fuer JEDEN Block an dieser Zeile identisch (die leere
+  // Zeichenkette) -- eine veraltete Position, die zufaellig auf einen fremden
+  // ```python- oder ```mermaid-Block zeigt, wuerde sonst den Guard passieren.
+  describe("fence guard", () => {
+    it("writes when the fence language matches (case-insensitive, trimmed)", async () => {
+      const note = ["```3D ", "file: a.glb", "```"].join("\n");
+      const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 2, fence: "3d" };
+      const { state, ports } = makePorts(note);
+      await writeBlockBody(ports, loc, "file: a.glb", "file: a.glb\nview: top");
+      expect(state.content).toBe(["```3D ", "file: a.glb", "view: top", "```"].join("\n"));
+    });
+
+    it("refuses when the fence at that position is a different language, leaving the content unchanged", async () => {
+      const note = ["```python", "file: a.glb", "```"].join("\n");
+      const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 2, fence: "3d" };
+      const { state, ports } = makePorts(note);
+      await expect(
+        writeBlockBody(ports, loc, "file: a.glb", "file: a.glb\nview: top"),
+      ).rejects.toBeInstanceOf(BlockChangedError);
+      expect(state.content).toBe(note);
+    });
+
+    it("refuses through the editor path too, without touching the buffer", async () => {
+      const note = ["```mermaid", "file: a.glb", "```"].join("\n");
+      const loc: BlockLocation = { path: "note.md", lineStart: 0, lineEnd: 2, fence: "3d" };
+      const { state, editor, ports } = makePorts(note, true);
+      await expect(
+        writeBlockBody(ports, loc, "file: a.glb", "file: a.glb\nview: top"),
+      ).rejects.toBeInstanceOf(BlockChangedError);
+      expect(editor.replaceRange).not.toHaveBeenCalled();
+      expect(state.content).toBe(note);
     });
   });
 });

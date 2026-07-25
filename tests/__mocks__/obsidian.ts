@@ -133,6 +133,15 @@ export class Setting {
   }
 }
 
+export class MarkdownView {
+  file: TFile | null = null;
+  editor: any = {};
+  leaf: any;
+  constructor(leaf?: any) {
+    this.leaf = leaf;
+  }
+}
+
 export class MarkdownRenderChild {
   containerEl: any;
   constructor(containerEl: any) {
@@ -175,12 +184,15 @@ export function makeFakeApp(): any {
     vault: {
       readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
       getAbstractFileByPath: vi.fn().mockReturnValue(null),
+      read: vi.fn().mockResolvedValue(""),
+      process: vi.fn().mockResolvedValue(""),
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
     },
     workspace: {
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
+      getLeavesOfType: vi.fn().mockReturnValue([]),
     },
     metadataCache: {
       getFirstLinkpathDest: vi.fn().mockReturnValue(null),

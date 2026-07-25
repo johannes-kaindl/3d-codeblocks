@@ -107,7 +107,7 @@ export class ViewerHost {
     try {
       bytes = await source.provideBytes();
     } catch (error) {
-      this.show({ kind: "load-failed", detail: describe(error) });
+      this.show({ kind: "load-failed", detail: describeError(error) });
       return;
     }
     if (this.disposed) return;
@@ -175,7 +175,7 @@ export class ViewerHost {
       viewport.setView(source.view ?? null);
     } catch (error) {
       this.releaseViewport();
-      this.show({ kind: "load-failed", detail: describe(error) });
+      this.show({ kind: "load-failed", detail: describeError(error) });
       return;
     }
 
@@ -250,6 +250,7 @@ export function needsContainerInspection(path: string): boolean {
   return detectFormat(path) === "gltf" && path.toLowerCase().endsWith(".glb");
 }
 
-function describe(error: unknown): string {
+// Exportiert, damit `block-child.ts` dieselbe Fehlertext-Hilfe nutzt statt sie zu spiegeln.
+export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

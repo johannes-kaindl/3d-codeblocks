@@ -6,6 +6,7 @@ import {
   type WorkspaceLeaf,
 } from "obsidian";
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
+import { ActiveViewport } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
 import { ContextManager } from "./obsidian/context-manager";
 import { registerModelEmbeds, unregisterModelEmbeds } from "./obsidian/embed";
@@ -15,6 +16,7 @@ import { GltfBlock } from "./obsidian/gltf-block";
 import { SettingsTab } from "./obsidian/settings";
 import { readSceneColors } from "./obsidian/theme";
 import { isWebGLAvailable } from "./obsidian/webgl";
+import { obsidianWritePorts } from "./obsidian/write-ports";
 import { loadModel } from "./viewer/loaders";
 import { Viewport } from "./viewer/viewport";
 import type { HostBaseDeps } from "./obsidian/viewer-host";
@@ -28,6 +30,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     () => this.settings.maxContexts,
     () => Date.now(),
   );
+  // Welcher Viewport zuletzt vom Nutzer bedient wurde — Sidebar/Toolbar (Task 10/11)
+  // lesen und schreiben darueber, ohne den Block selbst zu kennen.
+  readonly active = new ActiveViewport();
 
   async onload(): Promise<void> {
     this.settings = mergeSettings(await this.loadData());
@@ -48,7 +53,16 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor(
       "3d",
       (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-        const block = new ModelBlock(el, source, ctx.sourcePath, { ...hostDeps, app: this.app });
+        const block = new ModelBlock(el, source, ctx.sourcePath, {
+          ...hostDeps,
+          app: this.app,
+          active: this.active,
+          writePorts: obsidianWritePorts(this.app),
+          sectionInfo: () => {
+            const info = ctx.getSectionInfo(el);
+            return info ? { lineStart: info.lineStart, lineEnd: info.lineEnd } : null;
+          },
+        });
         this.track(block);
         ctx.addChild(block);
       },

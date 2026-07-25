@@ -4,16 +4,25 @@
 //
 // Obsidian ruft `onunload()`, wenn es den Codeblock-DOM wegwirft (in Live Preview bei
 // jedem Tastendruck) — dort disposen wir den Host und damit den WebGL-Kontext.
-import { MarkdownRenderChild, type App, type TFile } from "obsidian";
+import { Notice, MarkdownRenderChild, type App, type TFile } from "obsidian";
+import {
+  NO_BLOCK_REASON,
+  type ActiveViewport,
+  type ViewportController,
+} from "../core/active-viewport";
+import { applyViewKey } from "../core/block-edit";
 import { parseBlockConfig, type BlockConfig } from "../core/block-config";
 import { detectFormat, type ModelFormat } from "../core/format";
 import type { PluginSettings } from "../core/settings-types";
+import type { ViewSpec } from "../core/view-spec";
 import { toViewModel } from "../core/view-model";
 import type { SceneColors } from "../viewer/scene";
+import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
 import { readModel, resolveModelPath } from "./file-source";
 import { buildBox, renderHint, renderMessage, type BoxParts } from "./render-box";
 import {
   ViewerHost,
+  describeError,
   needsContainerInspection,
   type ContextBudget,
   type ViewportFactory,
@@ -29,9 +38,13 @@ export interface BlockDeps {
   budget: ContextBudget;
   loadModel(buffer: ArrayBuffer, format: ModelFormat, materialColor: string): Promise<unknown>;
   readColors(el: HTMLElement): SceneColors;
+  active: ActiveViewport;
+  writePorts: WritePorts;
+  /** Zeilen dieses Blocks — `null`, wenn Obsidian sie nicht kennt (Popover, Export). */
+  sectionInfo: () => { lineStart: number; lineEnd: number } | null;
 }
 
-export class ModelBlock extends MarkdownRenderChild {
+export class ModelBlock extends MarkdownRenderChild implements ViewportController {
   private readonly deps: BlockDeps;
   private readonly source: string;
   private readonly sourcePath: string;
@@ -69,6 +82,15 @@ export class ModelBlock extends MarkdownRenderChild {
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: true,
+      budget: {
+        register: (id, release) => this.deps.budget.register(id, release),
+        unregister: (id) => this.deps.budget.unregister(id),
+        touch: (id) => {
+          this.deps.active.set(this);
+          this.containerEl.addClass("tdcb-active");
+          this.deps.budget.touch(id);
+        },
+      },
     });
 
     this.observeVisibility();
@@ -76,10 +98,56 @@ export class ModelBlock extends MarkdownRenderChild {
 
   onunload(): void {
     this.unloaded = true;
+    this.deps.active.clearIf(this);
     this.observer?.disconnect();
     this.observer = null;
     this.host?.dispose();
     this.host = null;
+  }
+
+  // --- ViewportController -----------------------------------------------------
+
+  label(): string {
+    return this.config?.title ?? this.config?.file ?? "3D model";
+  }
+
+  getView(): ViewSpec | null {
+    return this.host?.currentView() ?? null;
+  }
+
+  applyView(spec: ViewSpec | null): void {
+    this.host?.applyView(spec);
+  }
+
+  canSave(): boolean {
+    return this.deps.sectionInfo() !== null;
+  }
+
+  async save(spec: ViewSpec | null): Promise<void> {
+    const info = this.deps.sectionInfo();
+    if (info === null) {
+      new Notice(NO_BLOCK_REASON);
+      return;
+    }
+
+    const next = applyViewKey(this.source, spec);
+    if (next === this.source) return;
+
+    try {
+      await writeBlockBody(
+        this.deps.writePorts,
+        { path: this.sourcePath, lineStart: info.lineStart, lineEnd: info.lineEnd, fence: "3d" },
+        this.source,
+        next,
+      );
+      new Notice(spec === null ? "View cleared" : "View saved");
+    } catch (error) {
+      new Notice(
+        error instanceof BlockChangedError
+          ? error.message
+          : `Could not save view: ${describeError(error)}`,
+      );
+    }
   }
 
   /** Oeffentlich, damit Tests den Ladeweg ohne IntersectionObserver anstossen koennen. */
