@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint src",
+    "lint": "eslint src --max-warnings 0",
     "deploy": "npm run build && cp main.js manifest.json styles.css \"${OBSIDIAN_PLUGIN_DIR:?set OBSIDIAN_PLUGIN_DIR}\"/",
     "check:pure": "node scripts/check-pure.mjs",
     "check:bundle": "node esbuild.config.mjs --production && node scripts/check-bundle.mjs",

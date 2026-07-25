@@ -43,6 +43,9 @@ export function makeFakeEl(): any {
     empty: () => {
       for (const child of children) setParent(child, null);
       children.length = 0;
+      // Aufgezeichnete Setting-Zeilen (s. class Setting) gehoeren zum Inhalt —
+      // sonst zaehlt ein Test nach dem Neuzeichnen die alten Zeilen mit.
+      if (Array.isArray(el.settings)) el.settings.length = 0;
     },
     setText: (text: string) => {
       el.textContent = text;
@@ -144,27 +147,80 @@ export class PluginSettingTab {
   display() {}
 }
 
+// Zeichnet auf, was gezeichnet wurde: Name/Desc und pro Widget Typ, gesetzter Wert,
+// Optionen/Limits und der onChange-Handler. Dadurch ist der imperative Fallback-Pfad
+// (Obsidian < 1.13) testbar, ohne echtes DOM — inklusive "was passiert beim Aendern".
+// Jede Instanz haengt sich in `containerEl.settings`, damit ein Test die gezeichnete
+// Liste in Reihenfolge lesen kann.
 export class Setting {
-  constructor(public containerEl: any) {}
-  setName(_n: string) {
+  name = "";
+  desc = "";
+  heading = false;
+  widgets: any[] = [];
+  settingEl = makeFakeEl();
+
+  constructor(public containerEl: any) {
+    (containerEl.settings ??= []).push(this);
+  }
+
+  setName(n: string) {
+    this.name = n;
     return this;
   }
-  setDesc(_d: string) {
+  setDesc(d: string) {
+    this.desc = d;
     return this;
   }
   setHeading() {
+    this.heading = true;
     return this;
   }
+
+  private widget(type: string, extra: Record<string, any> = {}) {
+    const w: any = {
+      type,
+      value: undefined as unknown,
+      onChangeHandler: undefined as ((v: any) => void) | undefined,
+      ...extra,
+      setValue(v: unknown) {
+        w.value = v;
+        return w;
+      },
+      setPlaceholder(p: string) {
+        w.placeholder = p;
+        return w;
+      },
+      setLimits(min: number, max: number, step: number) {
+        Object.assign(w, { min, max, step });
+        return w;
+      },
+      addOption(key: string, label: string) {
+        w.options[key] = label;
+        return w;
+      },
+      onChange(fn: (v: any) => void) {
+        w.onChangeHandler = fn;
+        return w;
+      },
+    };
+    this.widgets.push(w);
+    return w;
+  }
+
   addToggle(cb: any) {
-    cb({ setValue: () => ({ onChange: () => {} }) });
+    cb(this.widget("toggle"));
     return this;
   }
   addText(cb: any) {
-    cb({ setValue: () => ({ onChange: () => {} }), setPlaceholder: () => ({}) });
+    cb(this.widget("text"));
     return this;
   }
   addDropdown(cb: any) {
-    cb({ addOption: () => ({}), setValue: () => ({ onChange: () => {} }) });
+    cb(this.widget("dropdown", { options: {} as Record<string, string> }));
+    return this;
+  }
+  addSlider(cb: any) {
+    cb(this.widget("slider"));
     return this;
   }
 }
