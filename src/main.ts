@@ -185,6 +185,18 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // dieses Nachziehen bliebe die Hover-Leiste stehen, nachdem die Sidebar geoeffnet
     // wurde, bis der Block aus einem anderen Grund neu zeichnet.
     this.registerEvent(this.app.workspace.on("layout-change", () => this.syncAllToolbars()));
+
+    // `layout-change` allein reicht NICHT: es feuert, wenn Blaetter entstehen oder
+    // verschwinden — nicht, wenn der Nutzer eine Seitenleiste bloss ein- oder
+    // ausklappt. Genau das ist aber der Auslöser, auf den die Ausweich-Leiste
+    // reagieren muss. `resize` deckt es ab ("a WorkspaceItem is resized OR the
+    // workspace layout has changed", seit 0.9.7). Im GUI-Smoke war die Leiste
+    // deshalb nach dem ersten Aufklappen dauerhaft verschwunden.
+    //
+    // `resize` feuert beim Ziehen einer Pane-Grenze sehr haeufig — deshalb ist
+    // `syncToolbar()` ohne `force` idempotent und macht hier nichts, solange sich
+    // die Sichtbarkeit nicht wirklich aendert.
+    this.registerEvent(this.app.workspace.on("resize", () => this.syncAllToolbars()));
   }
 
   onunload(): void {
