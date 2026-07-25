@@ -229,8 +229,15 @@ export class MarkdownView {
   file: TFile | null = null;
   editor: any = {};
   leaf: any;
+  // Im Lesemodus existiert `editor` zwar, ist aber nicht der angezeigte und
+  // gespeicherte Puffer — Schreibzugriffe darauf verpuffen lautlos. Wer den
+  // Editor benutzt, MUSS den Modus pruefen, deshalb kann der Mock ihn setzen.
+  mode: "source" | "preview" = "source";
   constructor(leaf?: any) {
     this.leaf = leaf;
+  }
+  getMode() {
+    return this.mode;
   }
 }
 

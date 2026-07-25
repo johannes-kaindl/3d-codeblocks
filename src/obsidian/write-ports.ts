@@ -8,7 +8,23 @@ export function obsidianWritePorts(app: App): WritePorts {
     editorFor(path: string): EditorHandle | null {
       for (const leaf of app.workspace.getLeavesOfType("markdown")) {
         const view = leaf.view;
-        if (view instanceof MarkdownView && view.file?.path === path) return view.editor;
+        // `getMode() === "source"` ist nicht optional: im Lesemodus existiert
+        // `view.editor`, ist aber nicht der Puffer, den Obsidian anzeigt und
+        // speichert. Ein `replaceRange` darauf verpufft LAUTLOS — kein Wurf,
+        // kein Fehler, der Aufrufer meldet "View saved" und die Notiz bleibt
+        // unveraendert. Ohne den Modus-Check ist das Speichern im Lesemodus
+        // also kaputt und sieht dabei aus wie Erfolg. Mit dem Check faellt es
+        // auf `vault.process` zurueck, das genau dafuer gebaut ist.
+        //
+        // Nicht abbrechen, wenn ein Blatt im Lesemodus passt: dieselbe Notiz
+        // kann in zwei Blaettern offen sein (eins lesend, eins bearbeitend) —
+        // dann gehoert der Editor-Pfad dem bearbeitenden.
+        if (
+          view instanceof MarkdownView &&
+          view.file?.path === path &&
+          view.getMode() === "source"
+        )
+          return view.editor;
       }
       return null;
     },
