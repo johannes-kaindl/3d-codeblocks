@@ -917,6 +917,12 @@ Expected: FAIL — `Failed to resolve import "../../src/core/active-viewport"`
 // Nutzerinteraktion meldet (Autorotate zaehlt bewusst nicht).
 import type { ViewSpec } from "./view-spec";
 
+/**
+ * Begruendung, wenn `canSave()` false ist. Steht hier, damit Sidebar, Toolbar,
+ * Block und die Wege ohne Codeblock denselben Satz zeigen.
+ */
+export const NO_BLOCK_REASON = "The view can only be saved in a `3d` code block";
+
 /** Was Sidebar und Toolbar von einem Viewport brauchen — three.js sehen sie nie. */
 export interface ViewportController {
   /** Aktuelle Kamera als Spec, oder `null`, wenn (noch) kein Modell geladen ist. */
@@ -1504,10 +1510,17 @@ Imports und `BlockDeps`:
 
 ```typescript
 import { Notice } from "obsidian";
-import type { ActiveViewport, ViewportController } from "../core/active-viewport";
+import {
+  NO_BLOCK_REASON,
+  type ActiveViewport,
+  type ViewportController,
+} from "../core/active-viewport";
 import { applyViewKey } from "../core/block-edit";
 import type { ViewSpec } from "../core/view-spec";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
+// Fehlertext-Hilfe aus dem Host mitbenutzen statt sie zu spiegeln — dort wird
+// `describe` dafuer zu `export function describeError` umbenannt.
+import { describeError } from "./viewer-host";
 
 export interface BlockDeps {
   app: App;
@@ -1571,7 +1584,7 @@ Die vier Controller-Methoden:
   async save(spec: ViewSpec | null): Promise<void> {
     const info = this.deps.sectionInfo();
     if (info === null) {
-      new Notice("The view can only be saved in a `3d` code block");
+      new Notice(NO_BLOCK_REASON);
       return;
     }
 
@@ -1588,16 +1601,19 @@ Die vier Controller-Methoden:
       new Notice(spec === null ? "View cleared" : "View saved");
     } catch (error) {
       new Notice(
-        error instanceof BlockChangedError ? error.message : `Could not save view: ${describe(error)}`,
+        error instanceof BlockChangedError
+          ? error.message
+          : `Could not save view: ${describeError(error)}`,
       );
     }
   }
 ```
 
-Am Dateiende die schon in `viewer-host.ts` vorhandene Hilfe spiegeln:
+In `src/obsidian/viewer-host.ts` dafür die private Hilfe umbenennen und exportieren (die drei
+vorhandenen Aufrufstellen in derselben Datei mitziehen):
 
 ```typescript
-function describe(error: unknown): string {
+export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 ```
@@ -1771,12 +1787,14 @@ export function setIcon(el: any, name: string): void {
 // Die Ansichts-Entscheidungen stecken in `panelModel` (pur, testbar); diese Klasse
 // zeichnet nur — UI-STANDARD §6. DOM ausschliesslich ueber createEl/createDiv.
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
-import type { ActiveViewport, ViewportController } from "../core/active-viewport";
+import {
+  NO_BLOCK_REASON,
+  type ActiveViewport,
+  type ViewportController,
+} from "../core/active-viewport";
 import { NAMED_VIEWS, type ViewSpec } from "../core/view-spec";
 
 export const VIEW_TYPE_3D_CONTROLS = "three-d-controls";
-
-const NO_BLOCK_REASON = "The view can only be saved in a `3d` code block";
 
 export interface PanelModel {
   empty: boolean;
@@ -2210,91 +2228,144 @@ git commit -m "feat(obsidian): Hover-Toolbar im Viewport als Sidebar-Ersatz"
 ### Task 12: Embed und FileView als Controller ohne Speichern
 
 **Files:**
+- Create: `src/obsidian/read-only-controller.ts`
 - Modify: `src/obsidian/embed.ts`
 - Modify: `src/obsidian/file-view.ts`
-- Test: `tests/obsidian/embed.test.ts`, `tests/obsidian/file-view.test.ts`
+- Test: `tests/obsidian/read-only-controller.test.ts`, `tests/obsidian/embed.test.ts`, `tests/obsidian/file-view.test.ts`
 
 **Interfaces:**
-- Consumes: `ViewportController`, `ActiveViewport` (Task 6); `ViewerHost.currentView/applyView` (Task 8).
-- Produces: `ModelEmbed` und `ModelFileView` implementieren `ViewportController` mit `canSave() === false`.
+- Consumes: `ViewportController`, `ActiveViewport`, `NO_BLOCK_REASON` (Task 6); `ViewerHost.currentView/applyView` (Task 8).
+- Produces: `readOnlyController(host: () => ViewerHost | null, label: () => string): ViewportController` — eine Fabrik, die Embed und FileView **teilen**, statt fünf identische Methoden zweimal zu schreiben. Beide Klassen halten das Ergebnis als Feld `controller` und melden es an die Registry.
 
 **Warum eigene Task:** Ohne sie wäre die Sidebar bei einem `![[haus.glb]]`-Embed oder in der FileView schlicht leer — Spec §2.5 verlangt aber ausdrücklich, dass „Fit" dort funktioniert und nur das Speichern mit Begründung gesperrt ist. Es ist die kleine, ehrliche Auflösung der Asymmetrie der vier Wege.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test for the shared factory**
 
-An `tests/obsidian/file-view.test.ts` anhängen (analog in `embed.test.ts`, dort mit dem vorhandenen Embed-Aufbau):
+`tests/obsidian/read-only-controller.test.ts`:
 
 ```typescript
-import { ActiveViewport } from "../../src/core/active-viewport";
+import { describe, expect, it, vi } from "vitest";
+import { readOnlyController } from "../../src/obsidian/read-only-controller";
+import { NAMED_VIEWS } from "../../src/core/view-spec";
 
-it("cannot save, because there is no code block", async () => {
-  const { view } = await makeLoadedFileView();
-  expect(view.canSave()).toBe(false);
-});
+function fakeHost() {
+  return { currentView: vi.fn(() => NAMED_VIEWS.top), applyView: vi.fn() };
+}
 
-it("explains nothing and simply does nothing when asked to save", async () => {
-  const { view, written } = await makeLoadedFileView();
-  await view.save(null);
-  expect(written).toEqual([]);
-});
+describe("readOnlyController", () => {
+  it("never allows saving — there is no code block behind it", () => {
+    expect(readOnlyController(() => fakeHost() as any, () => "a.glb").canSave()).toBe(false);
+  });
 
-it("still becomes the active viewport, so Fit works", async () => {
-  const { view, created, active } = await makeLoadedFileView();
-  created[0].opts.onInteract();
-  expect(active.get()).toBe(view);
+  it("reads the current view through the host", () => {
+    const host = fakeHost();
+    expect(readOnlyController(() => host as any, () => "a.glb").getView()).toEqual(NAMED_VIEWS.top);
+  });
+
+  it("applies a view through the host, so Fit works", () => {
+    const host = fakeHost();
+    readOnlyController(() => host as any, () => "a.glb").applyView(null);
+    expect(host.applyView).toHaveBeenCalledWith(null);
+  });
+
+  it("survives a missing host", () => {
+    const controller = readOnlyController(() => null, () => "a.glb");
+    expect(controller.getView()).toBeNull();
+    expect(() => controller.applyView(null)).not.toThrow();
+  });
+
+  it("reports the label it was given", () => {
+    expect(readOnlyController(() => null, () => "haus.glb").label()).toBe("haus.glb");
+  });
 });
 ```
 
-`makeLoadedFileView` folgt dem Muster von `loadedBlock` aus Task 9: vorhandene Test-Hilfen der Datei plus `active: new ActiveViewport()` in den Deps; `written` bleibt leer, weil diese Wege gar keinen Schreib-Port bekommen.
+An `tests/obsidian/file-view.test.ts` anhängen (analog in `embed.test.ts` mit dem dortigen Aufbau) — hier wird nur noch die *Verdrahtung* geprüft, nicht die Logik:
+
+```typescript
+it("registers itself as the active viewport when the user interacts", async () => {
+  const { view, created, active } = await makeLoadedFileView();
+  created[0].opts.onInteract();
+  expect(active.get()).toBe(view.controller);
+  expect(active.get()?.canSave()).toBe(false);
+});
+
+it("clears itself from the registry on unload", async () => {
+  const { view, created, active } = await makeLoadedFileView();
+  created[0].opts.onInteract();
+  view.onunload();
+  expect(active.get()).toBeNull();
+});
+```
+
+`makeLoadedFileView` folgt dem Muster von `loadedBlock` aus Task 9: vorhandene Test-Hilfen der Datei plus `active: new ActiveViewport()` in den Deps.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run tests/obsidian/file-view.test.ts tests/obsidian/embed.test.ts`
-Expected: FAIL — `view.canSave is not a function`
+Run: `npx vitest run tests/obsidian/read-only-controller.test.ts tests/obsidian/file-view.test.ts tests/obsidian/embed.test.ts`
+Expected: FAIL — `Failed to resolve import "../../src/obsidian/read-only-controller"`
 
-- [ ] **Step 3: Implement in both files**
+- [ ] **Step 3: Write the shared factory**
 
-In `src/obsidian/file-view.ts` und `src/obsidian/embed.ts` jeweils dieselben fünf Methoden ergänzen (die Klassen halten bereits einen `ViewerHost`):
+`src/obsidian/read-only-controller.ts`:
 
 ```typescript
-  label(): string {
-    return this.file?.path ?? "3D model";
-  }
+// Controller fuer die Wege ohne Codeblock (Embed, FileView): steuerbar, aber
+// nicht speicherbar. Bewusst eine geteilte Fabrik statt zweier gleicher
+// Methodensaetze — der Unterschied zwischen den beiden Wegen ist nur, woher
+// Host und Label kommen.
+import { Notice } from "obsidian";
+import { NO_BLOCK_REASON, type ViewportController } from "../core/active-viewport";
+import type { ViewSpec } from "../core/view-spec";
 
-  getView(): ViewSpec | null {
-    return this.host?.currentView() ?? null;
-  }
+interface HostLike {
+  currentView(): ViewSpec | null;
+  applyView(spec: ViewSpec | null): void;
+}
 
-  applyView(spec: ViewSpec | null): void {
-    this.host?.applyView(spec);
-  }
-
-  /** Kein Codeblock, kein Speicherort — bewusst, siehe Spec §2.5. */
-  canSave(): boolean {
-    return false;
-  }
-
-  async save(): Promise<void> {
-    new Notice("The view can only be saved in a `3d` code block");
-  }
+export function readOnlyController(
+  host: () => HostLike | null,
+  label: () => string,
+): ViewportController {
+  return {
+    label,
+    getView: () => host()?.currentView() ?? null,
+    applyView: (spec) => host()?.applyView(spec),
+    canSave: () => false,
+    async save() {
+      new Notice(NO_BLOCK_REASON);
+    },
+  };
+}
 ```
 
-Beide Klassen bekommen `active: ActiveViewport` in ihre Deps, setzen sich im `onInteract`-Durchgriff (wie `ModelBlock` in Task 9) als aktiv und rufen beim Entladen `active.clearIf(this)`.
+- [ ] **Step 4: Wire both classes to it**
 
-- [ ] **Step 4: Wire the dep in `main.ts`**
+In `src/obsidian/file-view.ts` und `src/obsidian/embed.ts` je ein Feld anlegen — mehr nicht:
+
+```typescript
+  readonly controller = readOnlyController(
+    () => this.host,
+    () => this.file?.path ?? "3D model",
+  );
+```
+
+Beide Klassen bekommen `active: ActiveViewport` in ihre Deps, setzen im `onInteract`-Durchgriff (wie `ModelBlock` in Task 9) `active.set(this.controller)` und rufen beim Entladen `active.clearIf(this.controller)`.
+
+- [ ] **Step 5: Wire the dep in `main.ts`**
 
 `hostDeps` um `active: this.active` erweitern, damit Embed-Registrierung und `registerView` sie mitbekommen.
 
-- [ ] **Step 5: Run tests, typecheck and lint**
+- [ ] **Step 6: Run tests, typecheck and lint**
 
 Run: `npm test && npm run typecheck && npm run lint`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/obsidian/embed.ts src/obsidian/file-view.ts src/main.ts tests/obsidian/embed.test.ts tests/obsidian/file-view.test.ts
-git commit -m "feat(obsidian): Embed und FileView steuerbar, Speichern dort bewusst gesperrt"
+git add src/obsidian/read-only-controller.ts src/obsidian/embed.ts src/obsidian/file-view.ts src/main.ts tests/obsidian/read-only-controller.test.ts tests/obsidian/embed.test.ts tests/obsidian/file-view.test.ts
+git commit -m "feat(obsidian): geteilter Nur-Lese-Controller für Embed und FileView"
 ```
 
 ---
