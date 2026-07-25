@@ -55,12 +55,14 @@ export function parseView(text: string): ViewSpec | null {
   if (numbers.some((value) => !Number.isFinite(value))) return null;
 
   const [azimuth, elevation, distance] = numbers;
-  if (distance <= 0) return null;
+
+  const roundedDistance = round2(distance);
+  if (roundedDistance <= 0) return null;
 
   return {
     azimuth: wrapAzimuth(azimuth),
     elevation: clampElevation(elevation),
-    distance: round2(distance),
+    distance: roundedDistance,
   };
 }
 

@@ -33,6 +33,10 @@ describe("parseView", () => {
     expect(parseView("0,0,-2")).toBeNull();
   });
 
+  it("rejects distance that rounds to zero", () => {
+    expect(parseView("0,0,0.001")).toBeNull();
+  });
+
   it("rejects unknown names and malformed input", () => {
     expect(parseView("schräg-von-oben")).toBeNull();
     expect(parseView("45,30")).toBeNull();
