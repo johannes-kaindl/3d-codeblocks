@@ -8,15 +8,22 @@ import {
   type ActiveViewport,
   type ViewportController,
 } from "../core/active-viewport";
-import { NAMED_VIEWS, type ViewSpec } from "../core/view-spec";
+import { NAMED_VIEWS } from "../core/view-spec";
 
 export const VIEW_TYPE_3D_CONTROLS = "three-d-controls";
+
+/** Save braucht mehr als Clear: ohne geladenes Modell gibt es keine Kamera zum Schreiben. */
+const MODEL_LOADING_REASON = "The model is still loading";
 
 export interface PanelModel {
   empty: boolean;
   label: string;
+  /** Save schreibt eine Kamera — die gibt es erst, wenn `getView()` nicht mehr `null` ist. */
   canSave: boolean;
   saveDisabledReason: string | null;
+  /** Clear entfernt nur den Key, braucht also kein geladenes Modell. */
+  canClear: boolean;
+  clearDisabledReason: string | null;
 }
 
 export function panelModel(controller: ViewportController | null): PanelModel {
@@ -26,15 +33,21 @@ export function panelModel(controller: ViewportController | null): PanelModel {
       label: "Click a 3D model to control it here.",
       canSave: false,
       saveDisabledReason: null,
+      canClear: false,
+      clearDisabledReason: null,
     };
   }
 
-  const canSave = controller.canSave();
+  const hasBlock = controller.canSave();
+  const hasView = controller.getView() !== null;
+
   return {
     empty: false,
     label: controller.label(),
-    canSave,
-    saveDisabledReason: canSave ? null : NO_BLOCK_REASON,
+    canSave: hasBlock && hasView,
+    saveDisabledReason: !hasBlock ? NO_BLOCK_REASON : !hasView ? MODEL_LOADING_REASON : null,
+    canClear: hasBlock,
+    clearDisabledReason: hasBlock ? null : NO_BLOCK_REASON,
   };
 }
 
@@ -88,21 +101,15 @@ export class ControlPanelView extends ItemView {
     const save = actions.createEl("button", { cls: "mod-cta", text: "Save view" });
     save.disabled = !model.canSave;
     if (model.saveDisabledReason) save.title = model.saveDisabledReason;
-    save.addEventListener("click", () => void this.saveCurrent(controller));
+    save.addEventListener("click", () => void controller.save(controller.getView()));
 
     const clear = actions.createEl("button", { text: "Clear view" });
-    clear.disabled = !model.canSave;
-    if (model.saveDisabledReason) clear.title = model.saveDisabledReason;
+    clear.disabled = !model.canClear;
+    if (model.clearDisabledReason) clear.title = model.clearDisabledReason;
     clear.addEventListener("click", () => void controller.save(null));
 
     const fit = actions.createEl("button", { text: "Fit" });
     fit.addEventListener("click", () => controller.applyView(null));
     setIcon(fit.createSpan({ cls: "tdcb-icon" }), "maximize");
-  }
-
-  private async saveCurrent(controller: ViewportController): Promise<void> {
-    const spec: ViewSpec | null = controller.getView();
-    if (spec === null) return;
-    await controller.save(spec);
   }
 }

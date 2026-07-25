@@ -112,10 +112,15 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         if (existing.length > 0) {
           // `revealLeaf` braucht Obsidian 1.7.2 (minAppVersion hier ist 1.5.0);
           // `setActiveLeaf` deckt denselben Zweck ab und ist seit 0.16.3 verfuegbar.
+          // `revealLeaf` klappt zusaetzlich eine eingeklappte Seitenleiste auf — das
+          // holen wir uns explizit zurueck, sonst wirkt der Befehl bei kollabierter
+          // rechter Leiste (Normalzustand) wie ein Nichts-Tun.
+          this.app.workspace.rightSplit.collapsed = false;
           this.app.workspace.setActiveLeaf(existing[0], { focus: true });
           return;
         }
         const leaf = this.app.workspace.getRightLeaf(false);
+        this.app.workspace.rightSplit.collapsed = false;
         await leaf?.setViewState({ type: VIEW_TYPE_3D_CONTROLS, active: true });
       },
     });
