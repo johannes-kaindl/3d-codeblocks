@@ -179,6 +179,21 @@ export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
+export class ItemView {
+  containerEl: any = makeFakeEl();
+  contentEl: any = makeFakeEl();
+  constructor(public leaf: any) {}
+  register(): void {}
+  registerEvent(): void {}
+  onload(): void {}
+  onunload(): void {}
+}
+
+export function setIcon(el: any, name: string): void {
+  el.dataset = el.dataset ?? {};
+  el.dataset.icon = name;
+}
+
 export function makeFakeApp(): any {
   return {
     vault: {

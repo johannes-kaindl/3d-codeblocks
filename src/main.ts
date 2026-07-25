@@ -8,6 +8,7 @@ import {
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
+import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
 import { registerModelEmbeds, unregisterModelEmbeds } from "./obsidian/embed";
 import type { TrackedView } from "./obsidian/tracked-view";
@@ -96,6 +97,28 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // Datei anklicken → 3D-View im ganzen Pane.
     this.registerView(VIEW_TYPE_3D, (leaf: WorkspaceLeaf) => new ModelFileView(leaf, hostDeps));
     this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
+
+    // Rechte Leiste: Presets/Save/Clear/Fit fuer den zuletzt bedienten Viewport.
+    this.registerView(
+      VIEW_TYPE_3D_CONTROLS,
+      (leaf: WorkspaceLeaf) => new ControlPanelView(leaf, this.active),
+    );
+
+    this.addCommand({
+      id: "open-controls",
+      name: "Open 3D view controls",
+      callback: async () => {
+        const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS);
+        if (existing.length > 0) {
+          // `revealLeaf` braucht Obsidian 1.7.2 (minAppVersion hier ist 1.5.0);
+          // `setActiveLeaf` deckt denselben Zweck ab und ist seit 0.16.3 verfuegbar.
+          this.app.workspace.setActiveLeaf(existing[0], { focus: true });
+          return;
+        }
+        const leaf = this.app.workspace.getRightLeaf(false);
+        await leaf?.setViewState({ type: VIEW_TYPE_3D_CONTROLS, active: true });
+      },
+    });
 
     // Regenerierte Dateien (gleicher Pfad, neuer Inhalt) sollen ohne Neustart neu laden.
     this.registerEvent(
