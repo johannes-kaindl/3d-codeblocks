@@ -228,11 +228,14 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     const { panelPlacement } = this.deps.settings();
     if (!toolbarVisible(panelPlacement, this.deps.panelVisible())) return;
 
-    // In die Buehne haengen (nicht `root`, das auch den `title:`-Caption traegt) —
-    // sonst positioniert das CSS die Leiste oben rechts ueber dem Titel statt ueber
-    // dem Viewport, weil `.tdcb-toolbar` sich am naechsten `position: relative`-
-    // Vorfahren (`.tdcb-stage`) orientiert.
-    this.toolbar = buildToolbar(this.parts.stage, this);
+    // In den Viewport-Wrapper haengen (nicht `root`, das auch den `title:`-Caption
+    // traegt, und NICHT `stage` selbst): `root` wuerde die Leiste ueber den Titel statt
+    // ueber den Viewport setzen; `stage` wird von `ViewerHost` in Poster-Modus,
+    // Reaktivierung und Fehler-Reload komplett geleert (`stage.empty()`) — eine dort
+    // haengende Leiste wuerde bei jedem dieser Wege verschwinden und nie zurueckkommen,
+    // weil `syncToolbar()` nur den initialen Ladeweg abdeckt. `viewport` ist Geschwister
+    // der Buehne, nicht Kind, und ueberlebt deshalb alle drei.
+    this.toolbar = buildToolbar(this.parts.viewport, this);
   }
 
   private observeVisibility(): void {

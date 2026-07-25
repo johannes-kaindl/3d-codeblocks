@@ -72,6 +72,18 @@ async function makeLoadedEmbed(overrides: Record<string, unknown> = {}) {
   return { embed, created, active };
 }
 
+/** Rekursiv nach `.tdcb-stage` suchen -- sie haengt seit dem Viewport-Wrapper-Fix
+    (Toolbar-Ueberleben in Poster-/Reaktivierungs-/Fehler-Reload-Pfaden) unter
+    `.tdcb-viewport`, nicht mehr direkt unter `.tdcb-block`. */
+function findStage(el: any): any {
+  if (String(el.className).includes("tdcb-stage")) return el;
+  for (const child of el.children ?? []) {
+    const found = findStage(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 function fileAt(path: string, mtime = 1): TFile {
   const f = new TFile();
   f.path = path;
@@ -103,9 +115,7 @@ describe("ModelEmbed", () => {
     embed.loadFile();
     await embed.rendering;
 
-    const stage = el.children[0].children.find((c: any) =>
-      String(c.className).includes("tdcb-stage"),
-    );
+    const stage = findStage(el);
     expect(stage.style.height).toBe("250px");
   });
 
@@ -117,9 +127,7 @@ describe("ModelEmbed", () => {
     embed.loadFile();
     await embed.rendering;
 
-    const stage = el.children[0].children.find((c: any) =>
-      String(c.className).includes("tdcb-stage"),
-    );
+    const stage = findStage(el);
     expect(stage.style.height).toBe("400px");
   });
 

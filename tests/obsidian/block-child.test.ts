@@ -217,9 +217,10 @@ describe("ModelBlock", () => {
     block.onload();
     await block.loadNow();
 
-    const stage = el.children[0].children.find((c: any) =>
-      String(c.className).includes("tdcb-stage"),
-    );
+    // `tdcb-stage` haengt seit dem Wrapper-Fix (Toolbar-Ueberleben in Poster-/
+    // Reaktivierungs-/Fehler-Reload-Pfaden) unter `.tdcb-viewport`, nicht mehr direkt
+    // unter `.tdcb-block` -- deshalb rekursiv suchen statt eine Ebene fest anzunehmen.
+    const stage = findStage(el);
     expect(String(stage.className)).not.toContain("tdcb-hidden");
   });
 
@@ -424,16 +425,88 @@ describe("toolbar state after load (regression)", () => {
     block.onload();
     await block.loadNow();
 
-    const stage = findStage(el);
-    const toolbars = stage.children.filter((c: any) => String(c.className).includes("tdcb-toolbar"));
-    expect(toolbars).toHaveLength(1);
+    expect(findAllToolbars(el)).toHaveLength(1);
+  });
+
+  // Regressionstest fuer die zweite Review-Runde (Wrapper-Fix): der Anker-Fix aus
+  // Finding 6 haengte die Toolbar in `.tdcb-stage` -- genau dort, wo `ViewerHost` in
+  // drei Pfaden `stage.empty()` aufruft (Poster-Modus, Reaktivierung, Fehler-Reload).
+  // Alle drei wischten die Leiste weg, ohne dass sie je zurueckkam.
+  it("survives poster-mode reactivation (viewMode: on-click)", async () => {
+    const { deps, app } = makeDeps({
+      panelVisible: () => false,
+      settings: () => ({ ...DEFAULT_SETTINGS, viewMode: "on-click" as const }),
+    });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    // Nach dem initialen Laden degradiert der Host sofort zum Poster (on-click) --
+    // `renderPoster()` leert die Buehne, die Toolbar (jetzt im Wrapper) muss stehen
+    // bleiben.
+    expect(findAllToolbars(el)).toHaveLength(1);
+
+    const playButton = findByClass(el, "tdcb-play");
+    expect(playButton).toBeTruthy();
+    // `reactivate()` haengt hinter dem Klick als fire-and-forget-Promise (`void
+    // this.reactivate()` in viewer-host.ts) -- ueber einen Makrotask warten laesst
+    // die ganze Mikrotask-Kette (mehrere sequentielle `await`s) sicher durchlaufen,
+    // ohne die genaue Anzahl an Haltestellen kennen zu muessen.
+    playButton.click();
+    await flushAsync();
+
+    // Der eigentliche Regressionsfall: `reactivate()` ruft `this.stage.empty()`
+    // (viewer-host.ts) VOR dem Neu-Rendern auf. Mit dem alten Anker (`.tdcb-stage`)
+    // war die Leiste danach spurlos weg; im Wrapper (`.tdcb-viewport`, ein Geschwister
+    // der Buehne) uebersteht sie das unveraendert -- exakt EINE Leiste, keine leere
+    // Stelle.
+    expect(findAllToolbars(el)).toHaveLength(1);
+  });
+
+  it("survives budget eviction to a poster (degradeToPoster)", async () => {
+    let release: (() => void) | null = null;
+    const budget = {
+      register: vi.fn((_id: string, releaseFn: () => void) => {
+        release = releaseFn;
+      }),
+      touch: vi.fn(),
+      unregister: vi.fn(),
+    };
+    const { deps, app } = makeDeps({ panelVisible: () => false, budget });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile());
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: a.glb", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+    expect(findAllToolbars(el)).toHaveLength(1);
+
+    // Simuliert eine Budget-Verdraengung (LRU) -- ruft denselben Release-Callback wie
+    // `ContextManager`, der `degradeToPoster()` in `ViewerHost` ausloest. Der Cast ist
+    // ein bekanntes TS-Verhalten: die einzige Zuweisung ausserhalb der Deklaration
+    // steckt in einem verschachtelten Closure (`vi.fn(...)`), das TS' Kontrollfluss-
+    // Analyse hier auf `null` einengt, obwohl `loadNow()` es zur Laufzeit garantiert
+    // ausgefuehrt hat.
+    (release as (() => void) | null)?.();
+
+    expect(findAllToolbars(el)).toHaveLength(1);
   });
 });
 
-/** Rekursiv nach `.tdcb-toolbar` suchen -- die Leiste haengt inzwischen an `.tdcb-stage`,
-    nicht mehr an `.tdcb-block` (Finding 6, Anker-Fix). */
+/** Rekursiv nach `.tdcb-toolbar` suchen -- die Leiste haengt inzwischen im
+    Viewport-Wrapper (`.tdcb-viewport`), nicht mehr in `.tdcb-stage` selbst (Wrapper-Fix,
+    zweite Review-Runde): `ViewerHost` leert die Buehne in drei Pfaden komplett. */
+// Exakter Klassen-Token-Vergleich, nicht `includes()` -- sonst matcht
+// "tdcb-toolbar-button" (die einzelnen Buttons) auch als "tdcb-toolbar" mit.
+function hasClass(el: any, cls: string): boolean {
+  return String(el.className).split(/\s+/).includes(cls);
+}
+
 function findToolbar(el: any): any {
-  if (String(el.className).includes("tdcb-toolbar")) return el;
+  if (hasClass(el, "tdcb-toolbar")) return el;
   for (const child of el.children ?? []) {
     const found = findToolbar(child);
     if (found) return found;
@@ -441,13 +514,36 @@ function findToolbar(el: any): any {
   return null;
 }
 
+function findAllToolbars(el: any): any[] {
+  const out: any[] = [];
+  if (hasClass(el, "tdcb-toolbar")) out.push(el);
+  for (const child of el.children ?? []) out.push(...findAllToolbars(child));
+  return out;
+}
+
+function findByClass(el: any, cls: string): any {
+  if (String(el.className).split(" ").includes(cls)) return el;
+  for (const child of el.children ?? []) {
+    const found = findByClass(child, cls);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 function findStage(el: any): any {
-  if (String(el.className).includes("tdcb-stage")) return el;
+  if (hasClass(el, "tdcb-stage")) return el;
   for (const child of el.children ?? []) {
     const found = findStage(child);
     if (found) return found;
   }
   return null;
+}
+
+/** Auf einen Makrotask warten -- laesst die komplette Mikrotask-Kette eines
+    fire-and-forget-Promise (z. B. `void this.reactivate()` in viewer-host.ts) sicher
+    durchlaufen, unabhaengig davon, wie viele sequentielle `await`s darin stecken. */
+function flushAsync(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function makeDracoGlb(): ArrayBuffer {
