@@ -2514,3 +2514,28 @@ git -C /Users/Shared/code/obsidian-plugins commit -m "docs(registry): Sidebar-od
 ## Nach dem Plan
 
 Wenn alle Tasks grün sind: `superpowers:finishing-a-development-branch` für den Merge nach `main`. Der Release (0.2.0) ist bewusst **kein** Teil dieses Plans — v0.1.2 liegt im Store-Review, und ein Release während der Prüfung wäre eine eigene Entscheidung.
+
+---
+
+## Offene Folgearbeiten (Stand 2026-07-25, nach dem Merge)
+
+Aus dem Gesamtreview des Branches bewusst geparkt — keine davon datenkritisch,
+alle mit Belegstelle. Reihenfolge nach Nutzen, nicht nach Aufwand.
+
+| # | Befund | Ort | Aufwand |
+|---|---|---|---|
+| P1 | `.tdcb-stage` hat beim Wrapper-Umbau `position: relative` verloren, deshalb klippt die Bühne das Poster-Overlay nicht mehr — die abgerundeten Ecken und der Rahmen werden überzeichnet | `styles.css` | eine Zeile |
+| P2 | In Fehlerzuständen ist die Bühne `display: none`, der Wrapper kollabiert auf Höhe 0 und die Toolbar liegt über der Meldung; bei langen Texten kann sie den Reload-Knopf abfangen | `styles.css`, `viewer-host.ts` | klein |
+| P3 | Nach einer Budget-Verdrängung überlebt die Toolbar mit *aktiviertem* „Save", obwohl `getView()` dann `null` ist → stiller Blindklick (dieselbe Klasse, die für den Ladezustand bereits gelöst wurde) | `block-child.ts`, `viewport-toolbar.ts` | klein |
+| P4 | Der `retry()`/Reload-Pfad hat auf keinem Branch einen Regressionstest | `tests/obsidian/block-child.test.ts` | klein |
+| P5 | Nach erfolgreichem Speichern rendert Obsidian den Block neu, der alte Controller entlädt sich und die Sidebar fällt auf den Leerzustand — „Ansicht verwerfen" ist erst nach einem erneuten Klick erreichbar. Saubere Lösung braucht ein Reclaim-Konzept in `ActiveViewport` | `active-viewport.ts`, `block-child.ts` | Design nötig |
+| P6 | `isPanelVisible` nimmt an, die Sidebar-View liege im rechten Split; wer sie nach links zieht, sieht Panel **und** Toolbar | `main.ts` | eine Zeile |
+
+### Nicht aus diesem Vorhaben — Vorbefund auf `main`
+
+**Der Ansichtsmodus „Standbild, Klick aktiviert" (`viewMode: "on-click"`) ist
+unbenutzbar** und war es schon vor diesem Branch. `reactivate()` ruft `render()`
+→ `mount()`, und dort greift derselbe `on-click`-Zweig erneut, der sofort wieder
+zum Standbild degradiert (`viewer-host.ts`). Der Klick auf „Click to activate"
+führt also im Kreis. Betrifft v0.1.2, die im Community-Store-Review liegt.
+Der Modus ist ein Setting, kein Default — der Standardweg ist nicht betroffen.
