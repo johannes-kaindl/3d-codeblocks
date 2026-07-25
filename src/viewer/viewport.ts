@@ -18,6 +18,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { fitCamera } from "../core/camera-fit";
+import { cameraToView, viewToCamera, type ViewSpec } from "../core/view-spec";
 import { GRID_NAME, type SceneColors, buildScene, makeGrid } from "./scene";
 
 const FOV_DEG = 50;
@@ -47,6 +48,9 @@ export class Viewport {
   private needsRender = true;
   private frame: number | null = null;
   private disposed = false;
+  private baseDistance = 0;
+  /** Gewuenschte Ansicht, gesetzt bevor ein Modell da ist — angewendet sobald `setModel` Bounds liefert. */
+  private pendingView: ViewSpec | null = null;
 
   constructor(options: ViewportOptions) {
     this.options = options;
@@ -99,8 +103,9 @@ export class Viewport {
 
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
+    this.baseDistance = fitCamera(box.min, box.max, FOV_DEG, this.aspect()).distance;
     this.updateGrid();
-    this.resetCamera();
+    this.setView(this.pendingView);
   }
 
   setColors(colors: SceneColors): void {
@@ -135,9 +140,19 @@ export class Viewport {
   }
 
   resetCamera(): void {
+    this.setView(null);
+  }
+
+  /** Kamera auf die Ansicht setzen; `null` = automatisch einpassen. */
+  setView(spec: ViewSpec | null): void {
+    this.pendingView = spec;
     if (this.disposed || !this.bounds) return;
 
-    const fit = fitCamera(this.bounds.min, this.bounds.max, FOV_DEG, this.aspect());
+    const fit =
+      spec === null
+        ? fitCamera(this.bounds.min, this.bounds.max, FOV_DEG, this.aspect())
+        : viewToCamera(spec, this.bounds.min, this.bounds.max, FOV_DEG, this.aspect());
+
     this.camera.position.set(fit.position.x, fit.position.y, fit.position.z);
     this.camera.near = fit.near;
     this.camera.far = fit.far;
@@ -145,6 +160,12 @@ export class Viewport {
     this.controls.target.set(fit.target.x, fit.target.y, fit.target.z);
     this.controls.update();
     this.requestRender();
+  }
+
+  /** Aktuelle Kamera als Spec — `null`, solange kein Modell geladen ist. */
+  getView(): ViewSpec | null {
+    if (this.disposed || !this.bounds || this.baseDistance <= 0) return null;
+    return cameraToView(this.camera.position, this.controls.target, this.baseDistance);
   }
 
   /** Aktuellen Frame als Data-URL — Grundlage des Poster-Modus. */

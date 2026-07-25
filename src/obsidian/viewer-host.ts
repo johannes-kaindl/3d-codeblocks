@@ -11,11 +11,14 @@ import { detectFormat, type ModelFormat } from "../core/format";
 import { inspectGlb, unsupportedRequired } from "../core/gltf-inspect";
 import type { PluginSettings } from "../core/settings-types";
 import { toViewModel, type ViewerState } from "../core/view-model";
+import type { ViewSpec } from "../core/view-spec";
 import type { SceneColors } from "../viewer/scene";
 import { renderMessage } from "./render-box";
 
 export interface ViewportLike {
   setModel(object: unknown): void;
+  setView(spec: ViewSpec | null): void;
+  getView(): ViewSpec | null;
   setColors(colors: SceneColors): void;
   resize(): void;
   resetCamera(): void;
@@ -65,6 +68,7 @@ export interface RenderSource {
   inspectContainer: boolean;
   /** alt-Text des Poster-Bilds. */
   label: string;
+  view?: ViewSpec;
 }
 
 let nextHostId = 0;
@@ -129,6 +133,14 @@ export class ViewerHost {
     this.viewport.setColors(this.deps.readColors(this.stage));
   }
 
+  currentView(): ViewSpec | null {
+    return this.viewport?.getView() ?? null;
+  }
+
+  applyView(spec: ViewSpec | null): void {
+    this.viewport?.setView(spec);
+  }
+
   dispose(): void {
     this.disposed = true;
     this.releaseViewport();
@@ -160,6 +172,7 @@ export class ViewerHost {
         return;
       }
       viewport.setModel(object);
+      viewport.setView(source.view ?? null);
     } catch (error) {
       this.releaseViewport();
       this.show({ kind: "load-failed", detail: describe(error) });

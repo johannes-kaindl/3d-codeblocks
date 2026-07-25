@@ -33,6 +33,8 @@ function makeView() {
       create: () => {
         const vp = {
           setModel: vi.fn(),
+          setView: vi.fn(),
+          getView: vi.fn(() => null),
           setColors: vi.fn(),
           resize: vi.fn(),
           resetCamera: vi.fn(),

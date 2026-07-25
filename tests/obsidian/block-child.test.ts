@@ -12,6 +12,8 @@ function makeFactory() {
         opts,
         disposed: 0,
         setModel: vi.fn(),
+        setView: vi.fn(),
+        getView: vi.fn(() => null),
         setColors: vi.fn(),
         resize: vi.fn(),
         resetCamera: vi.fn(),

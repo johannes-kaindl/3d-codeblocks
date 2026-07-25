@@ -108,6 +108,7 @@ export class ModelBlock extends MarkdownRenderChild {
       format,
       inspectContainer: needsContainerInspection(file.path),
       label: this.config.title ?? file.path,
+      view: this.config.view,
     });
   }
 
