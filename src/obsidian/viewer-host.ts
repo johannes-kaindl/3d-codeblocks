@@ -101,6 +101,10 @@ export class ViewerHost {
   private posterUrl: string | null = null;
   private source: RenderSource | null = null;
   private disposed = false;
+  // Hat der Nutzer dieses Modell per Klick aufs Standbild angefordert? `mount` sieht
+  // sonst nicht, WARUM es rendert, und schickt den Klick im `on-click`-Modus sofort
+  // wieder ins Standbild zurueck — dadurch war der Modus seit v0.1.0 unbenutzbar.
+  private activated = false;
 
   constructor(
     private readonly stage: HTMLElement,
@@ -207,7 +211,10 @@ export class ViewerHost {
       return;
     }
 
-    if (settings.viewMode === "on-click") {
+    // Nach dem Klick gilt der Modus als erfuellt: das Modell bleibt live und laeuft
+    // ab jetzt ueber das Budget wie jedes andere — es kann also spaeter wieder zum
+    // Standbild werden, und ein erneuter Klick holt es zurueck.
+    if (settings.viewMode === "on-click" && !this.activated) {
       this.degradeToPoster();
       return;
     }
@@ -241,6 +248,7 @@ export class ViewerHost {
 
   private async reactivate(): Promise<void> {
     if (this.disposed || !this.source) return;
+    this.activated = true;
     this.stage.empty();
     await this.render(this.source);
   }
