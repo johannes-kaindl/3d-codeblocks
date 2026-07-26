@@ -278,6 +278,17 @@ export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
+export class Modal {
+  contentEl = makeFakeEl();
+  constructor(public app: any) {}
+  open() {
+    (this as any).onOpen?.();
+  }
+  close() {
+    (this as any).onClose?.();
+  }
+}
+
 export class ItemView {
   containerEl: any = makeFakeEl();
   contentEl: any = makeFakeEl();
