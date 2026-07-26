@@ -122,8 +122,11 @@ export class ControlPanelView extends ItemView {
 
 /** Edit-Sektion unter den View-Buttons — nur wenn der Controller `editPanel` anbietet
  *  (glTF/GLB-Weg, Task 8/10). Zwei Zustaende: `!active` zeigt nur den Einstiegsknopf,
- *  `active` die Modus-Buttons plus — je nach Auswahl — entweder die Zahlenfelder mit
- *  Reset/Save/Discard oder den Hinweis, erst ein Teil des Modells auszuwaehlen. */
+ *  `active` die Modus-Buttons plus — je nach Auswahl — entweder die Zahlenfelder oder
+ *  den Hinweis, erst ein Teil des Modells auszuwaehlen. Reset/Save/Discard rendern WIE
+ *  IN DER TOOLBAR immer: Save/Discard wirken auf die Session, nicht die Auswahl (wer
+ *  einen Node bearbeitet und dann ins Leere klickt, muss weiter speichern/verwerfen
+ *  koennen) -- nur Reset ist an eine Auswahl gebunden und bleibt ohne sie deaktiviert. */
 function drawEditSection(root: HTMLElement, edit: EditUiModel): void {
   const section = root.createDiv({ cls: "tdcb-panel-edit" });
 
@@ -146,35 +149,35 @@ function drawEditSection(root: HTMLElement, edit: EditUiModel): void {
   const selection = edit.selection;
   if (selection === null) {
     section.createDiv({ text: "Click a part of the model to select it." });
-    return;
+  } else {
+    section.createDiv({ cls: "tdcb-panel-edit-label", text: selection.name });
+
+    // Beide Zeilen fuellen sich aus DERSELBEN `inputs`-Liste -- der `change`-Handler
+    // liest beim Feuern alle sechs aktuellen Feldwerte (nicht nur den geaenderten),
+    // weil `applyTrs` immer das komplette `NodeTrs` erwartet.
+    const inputs: HTMLInputElement[] = [];
+    const addField = (row: HTMLElement, value: number): void => {
+      const input = row.createEl("input");
+      input.type = "number";
+      input.value = String(value);
+      inputs.push(input);
+    };
+
+    const positionRow = section.createDiv({ cls: "tdcb-panel-edit-row" });
+    for (const value of selection.trs.translation) addField(positionRow, value);
+    const scaleRow = section.createDiv({ cls: "tdcb-panel-edit-row" });
+    for (const value of selection.trs.scale) addField(scaleRow, value);
+
+    const onChange = (): void => {
+      const [tx, ty, tz, sx, sy, sz] = inputs.map((input) => Number(input.value));
+      edit.applyTrs({ translation: [tx, ty, tz], scale: [sx, sy, sz] });
+    };
+    for (const input of inputs) input.addEventListener("change", onChange);
   }
-
-  section.createDiv({ cls: "tdcb-panel-edit-label", text: selection.name });
-
-  // Beide Zeilen fuellen sich aus DERSELBEN `inputs`-Liste -- der `change`-Handler
-  // liest beim Feuern alle sechs aktuellen Feldwerte (nicht nur den geaenderten), weil
-  // `applyTrs` immer das komplette `NodeTrs` erwartet.
-  const inputs: HTMLInputElement[] = [];
-  const addField = (row: HTMLElement, value: number): void => {
-    const input = row.createEl("input");
-    input.type = "number";
-    input.value = String(value);
-    inputs.push(input);
-  };
-
-  const positionRow = section.createDiv({ cls: "tdcb-panel-edit-row" });
-  for (const value of selection.trs.translation) addField(positionRow, value);
-  const scaleRow = section.createDiv({ cls: "tdcb-panel-edit-row" });
-  for (const value of selection.trs.scale) addField(scaleRow, value);
-
-  const onChange = (): void => {
-    const [tx, ty, tz, sx, sy, sz] = inputs.map((input) => Number(input.value));
-    edit.applyTrs({ translation: [tx, ty, tz], scale: [sx, sy, sz] });
-  };
-  for (const input of inputs) input.addEventListener("change", onChange);
 
   const buttons = section.createDiv({ cls: "tdcb-panel-actions" });
   const reset = buttons.createEl("button", { text: "Reset node" });
+  reset.disabled = selection === null;
   reset.addEventListener("click", () => edit.reset());
 
   const save = buttons.createEl("button", { cls: "mod-cta", text: "Save edits" });

@@ -241,14 +241,42 @@ describe("Edit-Sektion", () => {
     expect(model.applyTrs).toHaveBeenCalledWith({ translation: [4, 0, 2], scale: [1, 1, 1] });
   });
 
-  it("aktiv ohne Auswahl: Hinweis statt Felder", () => {
+  it("aktiv ohne Auswahl: Hinweis statt Felder, aber Save/Discard bleiben bedienbar", () => {
+    // Save/Discard wirken auf die SESSION, nicht die Auswahl -- wer einen Node bearbeitet
+    // und dann ins Leere klickt (Auswahl weg), muss weiter speichern/verwerfen koennen.
+    // Nur Reset ist an eine Auswahl gebunden (wie in der Toolbar): sichtbar, aber deaktiviert.
     const { view, active } = makeView();
     view.onload();
-    const model = makeEditModel({ active: true, selection: null });
+    const model = makeEditModel({ active: true, selection: null, dirty: false });
     active.set({ ...controller(), editPanel: () => model });
 
     expect(JSON.stringify(view.contentEl.children)).toContain("Click a part of the model to select it.");
     expect(collectInputs(view.contentEl)).toHaveLength(0);
+
+    const reset = findByText(view.contentEl, "Reset node");
+    const save = findByText(view.contentEl, "Save edits");
+    const discard = findByText(view.contentEl, "Discard edits");
+    expect(reset.disabled).toBe(true);
+    expect(save.disabled).toBe(true); // dirty: false
+    expect(discard.disabled).toBe(false);
+
+    // Reset absichtlich NICHT geklickt: `disabled` verhindert im echten DOM den Klick,
+    // der Mock bildet das nicht nach -- ein Klick hier wuerde `edit.reset()` also trotz
+    // Deaktivierung ausloesen und faelschlich gruen bleiben.
+    click(discard);
+    expect(model.discard).toHaveBeenCalled();
+  });
+
+  it("ohne Auswahl, aber dirty: Save edits ist bedienbar", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({ active: true, selection: null, dirty: true });
+    active.set({ ...controller(), editPanel: () => model });
+
+    const save = findByText(view.contentEl, "Save edits");
+    expect(save.disabled).toBe(false);
+    click(save);
+    expect(model.save).toHaveBeenCalled();
   });
 
   it("ohne editPanel am Controller (alte Wege) keine Edit-Sektion", () => {
