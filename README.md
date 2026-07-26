@@ -82,6 +82,50 @@ no code block to save into.
 The **Controls placement** setting decides where the buttons show up: the sidebar when
 it is open, the hover toolbar otherwise (default), or always just one of the two.
 
+## Edit mode
+
+Move and scale the top-level nodes of a `.gltf` or `.glb` model — a floor, a wall, a
+prop — without leaving Obsidian. Not available for `gltf` code blocks (JSON-in-note) or
+STL, since both lack the node structure the editor works on.
+
+Enter edit mode with the **pencil** button (**Edit model**) in the hover toolbar, or with
+the same button in the 3D-view sidebar. Click a node to select it — a gizmo appears —
+then use **Move**/**Scale** to switch what the gizmo does, or type exact numbers into the
+sidebar's translation/scale fields. **Reset node** reverts the selected node only;
+**Save edits**/**Discard edits** act on the whole session.
+
+**Originals are never modified — edits are saved to a `<name>.edit.gltf` (or
+`.edit.glb`) next to the file**, overwriting an existing edit file of the same name.
+Editing a `.edit.` file itself saves in place — it is already a user edit, not the
+generated original.
+
+Re-entering edit mode re-reads the fresh original and re-applies the existing edit file
+on top of it, matched by node **name** (a notice reports "Loaded existing edits for N
+node(s)"). This is what makes edits survive regeneration: rerun whatever produced the
+original, and the next time you enter edit mode your moves and scales come back —
+unless a node was renamed or removed, in which case a notice lists which edits no longer
+match.
+
+Leaving with unsaved changes shows a confirm dialog ("Discard unsaved edits?" —
+**Discard** or **Keep editing**); there is no per-step undo, only **Reset node** for the
+current selection and **Discard edits** for the whole session.
+
+**Locked node prefixes** (setting, default `env__`) protects nodes by name — a node whose
+name starts with one of the comma-separated prefixes cannot be selected or edited at all.
+
+**Limits:**
+- Translation and scale only — no rotation, by design (the contract this editor follows
+  doesn't need it, and it keeps the gizmo and the file diff simple).
+- Top-level nodes only, no multi-select.
+- No step-undo; use Discard/Reset instead.
+- STL and `gltf` code blocks are not editable.
+
+**Known limitation:** node identity relies on the glTF node indices three.js's
+`GLTFLoader` reports via `parser.associations`. In files where several top-level nodes
+share a single mesh, that association can mis-select — a three.js `GLTFLoader` quirk, not
+something this plugin controls. One mesh per node avoids it; most generators (CAD
+exports, floor-plan scripts) already produce models this way.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -92,6 +136,7 @@ it is open, the hover toolbar otherwise (default), or always just one of the two
 | Show ground grid | off | Reference grid under the model |
 | Maximum live 3D views | 6 (slider 0–12) | Older inline views become still images beyond this; 0 turns the limit off |
 | Controls placement | Sidebar when open, toolbar otherwise | Where the Save/Clear/Fit buttons appear |
+| Locked node prefixes | `env__` | Comma-separated name prefixes protected from editing |
 
 The last setting exists because browsers cap simultaneous WebGL contexts (around 8–16)
 and silently kill the oldest ones. Rather than let that happen at random, the plugin

@@ -113,6 +113,27 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
       und nur das ist die verwertbare Information. Welcher der beiden Fälle es ist, ändert
       am Code nichts, kostet aber einen Devtools-Umweg. Bewusst gestrichen statt beobachtet.
 
+## Edit mode (2026-07-26)
+
+- [ ] **1. Betreten** — Block mit `eg.gltf` → **Edit model** (Pencil in der Hover-Leiste
+      oder in der Sidebar) → Raum anklicken → Gizmo erscheint, Rahmen um den Raum sichtbar.
+- [ ] **2. Speichern** — Raum mit dem Gizmo verschieben → **Save edits** → Notice „Edits
+      saved to …edit.gltf" → `eg.edit.gltf` existiert neben `eg.gltf`; die mtime von
+      `eg.gltf` selbst bleibt unverändert.
+- [ ] **3. Wiedereinstieg** — Edit-Modus erneut betreten → Notice „Loaded existing edits
+      for 1 node(s)", die Verschiebung sitzt wieder auf dem frisch gelesenen Original.
+- [ ] **4. Locked-Präfix** — einen `env__`-Node anklicken → keine Auswahl, kein Gizmo.
+- [ ] **5. Dirty-Discard** — Node verschieben (dirty, nicht gespeichert) → **Discard
+      edits** → Confirm-Dialog „Discard unsaved edits?"; **Keep editing** bleibt im
+      Modus, **Discard** verwirft und schließt.
+- [ ] **6. Abnahme-Test (Kontrakt §Abnahme)** — im outpost-Repo:
+      `uv run python scripts/outpost_floorplan.py --diff weltmodell/3d/eg.edit.gltf` →
+      Prosa-Zeile + Zielwerte, die zur im Editor vorgenommenen Verschiebung passen.
+- [ ] **7. Regeneration im Edit-Modus** — bei offenem Edit-Modus das outpost-Skript
+      laufen lassen, das `eg.gltf` neu erzeugt → Edits bleiben nach dem Reload erhalten;
+      wurde dabei ein bearbeiteter Node umbenannt/entfernt, erscheint die Notice „N
+      edited node(s) no longer exist: …" statt die Session stillschweigend zu verlieren.
+
 ## Befunde
 
 _Hier notieren, was auffällt._
