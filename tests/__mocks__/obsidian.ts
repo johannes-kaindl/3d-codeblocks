@@ -50,11 +50,22 @@ export function makeFakeEl(): any {
     setText: (text: string) => {
       el.textContent = text;
     },
+    // Token-basiert wie das echte `DOMTokenList` (classList.add/remove) -- NICHT als
+    // Substring-Ersetzung: `addClass` muss idempotent sein (zweimal dieselbe Klasse
+    // haengen sonst ein Duplikat an, das ein einzelnes `removeClass` danach nur EINMAL
+    // entfernt -- eine Toggle-Sequenz true→true→false liesse die Klasse dann faelschlich
+    // stehen), und `removeClass` darf keine Klasse treffen, die eine andere nur als
+    // Teilstring enthaelt (z. B. "tdcb-toolbar" in "tdcb-toolbar-button").
     addClass: (cls: string) => {
-      el.className = `${el.className} ${cls}`.trim();
+      const tokens = el.className.split(/\s+/).filter(Boolean);
+      if (!tokens.includes(cls)) tokens.push(cls);
+      el.className = tokens.join(" ");
     },
     removeClass: (cls: string) => {
-      el.className = el.className.replace(cls, "").trim();
+      el.className = el.className
+        .split(/\s+/)
+        .filter((token: string) => token !== "" && token !== cls)
+        .join(" ");
     },
     toggleClass: (cls: string, on: boolean) => (on ? el.addClass(cls) : el.removeClass(cls)),
     // Registriert weiterhin ueber vi.fn (bestehende Tests lesen `.mock.calls`), fuehrt

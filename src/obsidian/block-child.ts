@@ -264,6 +264,16 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   syncToolbar(force = false): void {
     if (!this.parts || this.unloaded) return;
 
+    // Sichtbarer Rahmen um den Viewport, solange der Edit-Modus aktiv ist (styles.css) —
+    // UNBEDINGT, vor beiden Returns unten (Spec §2.1: der Rahmen haengt nicht an der
+    // Toolbar-Sichtbarkeit). Zwei Fehlerrichtungen, wenn das hier haengen bliebe: (a)
+    // bei `panelPlacement: "sidebar"` erscheint der Rahmen nie (die Toolbar wird dort
+    // nie gebaut); (b) Klassen-Leiche — Edit betreten waehrend die Toolbar sichtbar ist
+    // (Klasse gesetzt), Placement wechselt auf "sidebar", der naechste `syncToolbar()`
+    // entfernt die Toolbar und kehrt VOR dem Toggle zurueck → Edit-Modus verlassen liesse
+    // den Akzent-Rahmen dauerhaft stehen.
+    this.parts.viewport.toggleClass("tdcb-editing", this.edit?.active ?? false);
+
     const { panelPlacement } = this.deps.settings();
     const wanted = toolbarVisible(panelPlacement, this.deps.panelVisible());
     if (!force && wanted === (this.toolbar !== null)) return;
@@ -281,8 +291,6 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // weil `syncToolbar()` nur den initialen Ladeweg abdeckt. `viewport` ist Geschwister
     // der Buehne, nicht Kind, und ueberlebt deshalb alle drei.
     this.toolbar = buildToolbar(this.parts.viewport, this, this.edit?.uiModel() ?? null);
-    // Sichtbarer Rahmen um den Viewport, solange der Edit-Modus aktiv ist (styles.css).
-    this.parts.viewport.toggleClass("tdcb-editing", this.edit?.active ?? false);
   }
 
   private observeVisibility(): void {

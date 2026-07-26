@@ -249,12 +249,19 @@ export class EditCoordinator {
     const session = this.session;
     if (!session) return;
     if (session.dirty) {
-      // Epoch VOR dem Confirm-Await ziehen (gleicher Schutz wie enter()/reapplyAfterReload(),
-      // Fix #1, Task-9-Review): waehrend der Nutzer im Dialog entscheidet, kann ein Reload
-      // das Rig austauschen (reapplyAfterReload() erhoeht denselben Zaehler). Diese
-      // Fortsetzung erkennt sich dann als ueberholt und darf NICHT mehr das frisch geladene
-      // Rig/Session unter dem alten discard()-Aufruf wegreissen (Carry-over aus Task 9).
-      const epoch = ++this.epoch;
+      // NUR lesen, nicht erhoehen (Task-10-Review, Fix #2): `discard()` installiert
+      // selbst keinen neuen Zustand, bevor der Confirm-Await zurueckkommt — anders als
+      // enter()/reapplyAfterReload() ist es kein Invalidator, nur ein Beobachter. Ein
+      // `++this.epoch` hier wuerde ein *gleichzeitig laufendes* reapplyAfterReload()
+      // ausbremsen: reapply bumpt zuerst (N), disposed das alte Rig, haengt im eigenen
+      // Read-Await; discard() bumpt dann noch einmal (N+1) und haengt im Confirm-Dialog;
+      // reapply wacht auf, sieht `epoch !== this.epoch` (N vs. N+1) und bricht VOR dem
+      // Installieren von Session/Rig ab — der Nutzer bricht den Dialog ab und die
+      // Session bleibt unwiederbringlich verwaist (kein Rig, aber `pinned`/`active`
+      // weiter true). Nur-Lesen laesst reapply seinen eigenen Bump unangetastet; der
+      // bestehende Regressionstest bleibt gruen, weil reapplyAfterReload()s EIGENER
+      // Bump die hier nur gelesene Epoche trotzdem entwertet.
+      const epoch = this.epoch;
       if (!(await this.deps.confirmDiscard())) return;
       if (epoch !== this.epoch) return;
     }

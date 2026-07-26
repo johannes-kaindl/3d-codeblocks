@@ -664,6 +664,98 @@ describe("edit mode wiring", () => {
     expect(exitSilently).toHaveBeenCalledTimes(1);
     expect(edit.active).toBe(false);
   });
+
+  // Task-10-Review, Fix #1: `tdcb-editing` ist Spec §2.1 -- UNBEDINGT, unabhaengig von
+  // der Toolbar-Sichtbarkeit. Vorher haengte der Toggle hinter dem `!wanted`-Return in
+  // `syncToolbar()`, also nie erreichbar, wenn die Toolbar (z. B. bei
+  // `panelPlacement: "sidebar"`) gar nicht gebaut wird.
+  it("toggles tdcb-editing on the viewport wrapper even when the toolbar never appears (sidebar placement)", async () => {
+    const { deps, app } = makeDeps({
+      panelVisible: () => false,
+      settings: () => ({ ...DEFAULT_SETTINGS, panelPlacement: "sidebar" as const }),
+    });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const originalCreate = deps.factory.create;
+    deps.factory.create = (opts: any) => {
+      const viewport = originalCreate(opts);
+      viewport.createEditRig = vi.fn(() => ({
+        setMode: vi.fn(),
+        select: vi.fn(),
+        applyTrs: vi.fn(),
+        dispose: vi.fn(),
+      }));
+      return viewport;
+    };
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    // "sidebar"-Placement -> die Toolbar wird nie gebaut, das darf den Rahmen nicht verhindern.
+    expect(findAllToolbars(el)).toHaveLength(0);
+
+    const viewport = findByClass(el, "tdcb-viewport");
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
+
+    const edit = (block as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+    expect(hasClass(viewport, "tdcb-editing")).toBe(true);
+
+    await edit.discard(); // keine Aenderungen -> kein Confirm, sofortiger exit
+    expect(edit.active).toBe(false);
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
+  });
+
+  // Task-10-Review, Fix #1 (b): Klassen-Leiche -- Edit betreten waehrend die Toolbar
+  // sichtbar ist (Klasse gesetzt), Placement wechselt DANACH auf "sidebar" (Toolbar
+  // verschwindet), Edit-Modus wird verlassen. Vorher blieb der Akzent-Rahmen dauerhaft
+  // stehen, weil jeder `syncToolbar()`-Aufruf ab dem Placement-Wechsel vor dem Toggle
+  // zurueckkehrte (`!wanted`-Return).
+  it("clears a stale tdcb-editing outline when placement flips away from the toolbar while editing (regression)", async () => {
+    let placement: "auto" | "sidebar" = "auto";
+    const { deps, app } = makeDeps({
+      panelVisible: () => false,
+      settings: () => ({ ...DEFAULT_SETTINGS, panelPlacement: placement }),
+    });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const originalCreate = deps.factory.create;
+    deps.factory.create = (opts: any) => {
+      const viewport = originalCreate(opts);
+      viewport.createEditRig = vi.fn(() => ({
+        setMode: vi.fn(),
+        select: vi.fn(),
+        applyTrs: vi.fn(),
+        dispose: vi.fn(),
+      }));
+      return viewport;
+    };
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    // "auto" + unsichtbares Panel -> Toolbar sichtbar.
+    expect(findAllToolbars(el)).toHaveLength(1);
+
+    const edit = (block as any).edit;
+    await edit.enter();
+    const viewport = findByClass(el, "tdcb-viewport");
+    expect(hasClass(viewport, "tdcb-editing")).toBe(true);
+
+    // Placement wechselt WAEHREND des Edit-Modus auf "sidebar" -- die Toolbar verschwindet.
+    placement = "sidebar";
+    block.syncToolbar();
+    expect(findAllToolbars(el)).toHaveLength(0);
+
+    await edit.discard();
+    expect(edit.active).toBe(false);
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
+  });
 });
 
 /** Rekursiv nach `.tdcb-toolbar` suchen -- die Leiste haengt inzwischen im
