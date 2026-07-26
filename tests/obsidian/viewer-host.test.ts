@@ -100,3 +100,49 @@ describe("ViewerHost", () => {
     expect(created[0].setView).toHaveBeenCalledWith(null);
   });
 });
+
+// Der ganze Zweig war ungetestet — deshalb blieb der Modus seit v0.1.0 unbenutzbar,
+// obwohl die Suite gruen war (Smoke #4 / Vorbefund-TaskNote).
+describe("ViewerHost with viewMode 'on-click'", () => {
+  const onClick = { ...DEFAULT_SETTINGS, viewMode: "on-click" as const };
+  const source = { provideBytes: bytes, format: "gltf" as const, inspectContainer: false, label: "x" };
+
+  /** Das Klickfeld, das `renderPoster` ueber das Standbild legt. */
+  function playOverlay(stage: any) {
+    return stage.children.find((child: any) => child.className === "tdcb-play");
+  }
+
+  /** `reactivate()` laeuft asynchron los; der Klick-Handler wartet nicht darauf. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("starts as a still image instead of a live viewport", async () => {
+    const { host, created, stage } = makeHost({ settings: () => onClick });
+    await host.render(source);
+    expect(created[0].disposed).toBe(1);
+    expect(playOverlay(stage)).toBeDefined();
+  });
+
+  it("stays interactive after the user clicks the still image", async () => {
+    const { host, created, stage } = makeHost({ settings: () => onClick });
+    await host.render(source);
+
+    playOverlay(stage).click();
+    await settle();
+
+    // Ein zweiter Viewport wurde gebaut — und darf diesmal NICHT sofort wieder
+    // eingezogen werden, sonst landet der Klick wieder im Standbild.
+    expect(created).toHaveLength(2);
+    expect(created[1].disposed).toBe(0);
+  });
+
+  it("hands the reactivated viewport to the budget, so it can degrade again later", async () => {
+    const { host, budget, stage } = makeHost({ settings: () => onClick });
+    await host.render(source);
+    expect(budget.register).not.toHaveBeenCalled();
+
+    playOverlay(stage).click();
+    await settle();
+
+    expect(budget.register).toHaveBeenCalled();
+  });
+});
