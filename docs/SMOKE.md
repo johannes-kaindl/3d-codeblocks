@@ -71,8 +71,13 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
       (Sidebar oder Pin-Button in der Hover-Leiste) → `view:`-Zeile erscheint im Block,
       das Bild bleibt nach dem Neuaufbau gleich. Notiz schließen und neu öffnen → dieselbe
       Ansicht.
-- [ ] **2. Namens-Schreibweise** — nahe an `top` drehen und speichern → im Block steht
-      `view: top`, nicht drei Zahlen wie `0,88,1.01`.
+- [ ] **2. Namens-Schreibweise** — nahe an einen Standardwinkel drehen und speichern → im
+      Block steht der Name (`iso`, `top`, …) statt drei Zahlen.
+      **Toleranz ist 5°** (seit 0.1.3, vorher 2° — das traf von Hand niemand). Weiter
+      daneben bleiben Zahlen stehen, und das ist richtig so: der Name ist verlustbehaftet,
+      ab einer gewissen Abweichung würde die Kamera beim Wiederherstellen sichtbar auf den
+      Standardwinkel springen. `top` liegt bei 89° (Anschlag, weil OrbitControls bei 90°
+      umkippt) — von Hand landet man dort typisch bei 70–80° und bekommt dann Zahlen.
 - [ ] **3. Undo im Editor** — im Quelltext-Editor speichern → Strg+Z (Cmd+Z) macht die
       `view:`-Zeile rückgängig.
 - [ ] **4. Lesemodus** — im Lesemodus speichern → funktioniert; **Clear view** entfernt
