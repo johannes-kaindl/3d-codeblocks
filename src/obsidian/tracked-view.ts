@@ -1,7 +1,10 @@
 import type { TFile } from "obsidian";
 
-/** Eine Inline-View (Codeblock, gltf-Block, Embed), die auf Datei-Änderungen und
-    Theme-Wechsel reagiert und sich beim Entladen selbst abmeldet. */
+/** Eine View (Codeblock, gltf-Block, Embed, FileView), die auf Datei-Änderungen und
+    Theme-Wechsel reagiert und sich beim Entladen selbst abmeldet.
+    Die FileView gehoert seit dem Whole-Branch-Review ausdruecklich dazu: sie ist ein
+    vollwertiger Edit-Ort, und ohne `modify`-Abo waere eine dort laufende Edit-Session
+    nach der ersten Regenerierung dauerhaft stale. */
 export interface TrackedView {
   onFileModified(file: TFile): void | Promise<void>;
   refreshColors(): void;

@@ -147,6 +147,11 @@ export class Plugin {
   registerMarkdownCodeBlockProcessor(_lang: string, _handler: any) {}
   registerEvent(_ref: any) {}
   register(_cb: any) {}
+  // Lazy-add-on-demand: erst noetig, seit `main.ts`s onload() als Ganzes getestet wird
+  // (FileView-Verdrahtung im modify-Watcher).
+  registerView(_type: string, _creator: any) {}
+  registerExtensions(_extensions: string[], _type: string) {}
+  addCommand(_command: any) {}
 }
 
 export class PluginSettingTab {
@@ -282,7 +287,10 @@ export class FileView {
   onUnloadFile(_file: any): Promise<void> {
     return Promise.resolve();
   }
-  register(_cb: any) {}
+  // Als vi.fn pro Instanz: der Watcher-Test in main.test.ts liest die registrierte
+  // Abmeldung aus `register.mock.calls` und ruft sie von Hand, um Obsidians
+  // Component-Unload nachzustellen.
+  register = vi.fn();
 }
 
 export function normalizePath(p: string): string {

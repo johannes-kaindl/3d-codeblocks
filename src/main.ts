@@ -27,7 +27,7 @@ import type { HostBaseDeps } from "./obsidian/viewer-host";
 export default class ThreeDCodeblocksPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
 
-  // Alle Inline-Views (Block, gltf-Block, Embed) — bekommen `modify` und Theme-Wechsel.
+  // Alle Views (Block, gltf-Block, Embed, FileView) — bekommen `modify` und Theme-Wechsel.
   private readonly views = new Set<TrackedView>();
   private readonly contexts = new ContextManager(
     () => this.settings.maxContexts,
@@ -111,8 +111,16 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       new Notice("3D Codeblocks: ![[…]] embeds unavailable (Obsidian embedRegistry missing).");
     }
 
-    // Datei anklicken → 3D-View im ganzen Pane.
-    this.registerView(VIEW_TYPE_3D, (leaf: WorkspaceLeaf) => new ModelFileView(leaf, hostDeps));
+    // Datei anklicken → 3D-View im ganzen Pane. `track` wie bei Block/Embed: die
+    // FileView ist ein vollwertiger Edit-Ort und braucht dasselbe `modify`-Abo, sonst
+    // wird eine dort laufende Edit-Session bei der ersten Regenerierung stale
+    // (Whole-Branch-Review, Finding 2). `track()` meldet sie ueber `view.register()`
+    // beim Entladen des Leafs auch wieder ab.
+    this.registerView(VIEW_TYPE_3D, (leaf: WorkspaceLeaf) => {
+      const view = new ModelFileView(leaf, hostDeps);
+      this.track(view);
+      return view;
+    });
     this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
 
     // Rechte Leiste: Presets/Save/Clear/Fit fuer den zuletzt bedienten Viewport.

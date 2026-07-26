@@ -193,6 +193,50 @@ describe("ModelFileView edit mode wiring", () => {
     expect(edit.active).toBe(false);
   });
 
+  // Finding 2 (Whole-Branch-Review): die FileView haengt jetzt im `modify`-Abo. Ohne
+  // das ging der Vorzeige-Loop (Erzeuger regeneriert waehrend der Nutzer editiert) auf
+  // diesem Weg dauerhaft schief -- die Session zeigte auf ein laengst ersetztes Modell.
+  it("reaches reapplyAfterReload() on onFileModified() during an active edit", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { view, deps, app } = makeView({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+
+    const edit = (view as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+
+    const reapplyAfterReload = vi.spyOn(edit, "reapplyAfterReload");
+    const before = app.vault.readBinary.mock.calls.length;
+
+    file.stat.mtime = 99;
+    view.onFileModified(file);
+    await view.rendering;
+
+    expect(app.vault.readBinary.mock.calls.length).toBe(before + 1);
+    expect(reapplyAfterReload).toHaveBeenCalledTimes(1);
+    // Der Edit ueberlebt die Regenerierung -- nicht nur "die Methode wurde gerufen".
+    expect(edit.active).toBe(true);
+  });
+
+  it("ignores a modify of another file and of the same mtime", async () => {
+    const { view, app } = makeView();
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+    const before = app.vault.readBinary.mock.calls.length;
+
+    view.onFileModified(fileAt("andere.gltf"));
+    await view.rendering;
+    view.onFileModified(file); // gleiche mtime wie beim Laden
+    await view.rendering;
+
+    expect(app.vault.readBinary.mock.calls.length).toBe(before);
+  });
+
   it("onLoadFile() for a new file ends a still-active edit from the previous file first", async () => {
     const editFiles: Record<string, string> = { "a.gltf": contractGltfText() };
     const { view, deps } = makeView({ editIo: makeEditIo(editFiles) });
