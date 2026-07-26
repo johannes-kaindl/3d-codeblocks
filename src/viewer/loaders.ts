@@ -21,7 +21,23 @@ function loadGltf(buffer: ArrayBuffer): Promise<Object3D> {
     new GLTFLoader().parse(
       buffer,
       "",
-      (gltf) => resolve(gltf.scene),
+      (gltf) => {
+        // Zuordnung Szene ↔ JSON-Node fuer den Editor: three sanitisiert `name` beim Laden,
+        // der JSON-Index aus `parser.associations` ist die verlaessliche Identitaet.
+        const associations = (
+          gltf as unknown as {
+            parser?: { associations?: Map<object, { nodes?: number }> };
+          }
+        ).parser?.associations;
+        if (associations) {
+          for (const [object, assoc] of associations) {
+            if (assoc?.nodes !== undefined) {
+              (object as Object3D).userData.tdcbNodeIndex = assoc.nodes;
+            }
+          }
+        }
+        resolve(gltf.scene);
+      },
       (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
     );
   });
