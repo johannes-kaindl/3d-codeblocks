@@ -63,6 +63,16 @@ describe("ActiveViewport", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it("notify fires listeners again with the current controller", () => {
+    const active = new ActiveViewport();
+    const seen: (string | null)[] = [];
+    active.subscribe((c) => seen.push(c?.label() ?? null));
+    const controller = makeController("a");
+    active.set(controller);
+    active.notify();
+    expect(seen).toEqual(["a", "a"]);
+  });
+
   it("keeps notifying later subscribers even when an earlier one throws", () => {
     // Sidebar und jeder Block/Embed/gltf-Block haengen am selben Listener-Set. Ohne
     // Isolation stoppt ein werfender Listener alle NACHFOLGENDEN Benachrichtigungen

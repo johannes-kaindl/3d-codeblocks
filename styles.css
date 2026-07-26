@@ -185,3 +185,25 @@
   margin-bottom: var(--size-4-2);
   color: var(--text-muted);
 }
+
+/* Edit-Sektion im Sidebar-Panel (Task 11) -- Modus-Buttons und die zwei Zeilen
+   Position/Scale teilen sich dasselbe Zeilen-Layout wie `.tdcb-panel-actions`. */
+.tdcb-panel-edit {
+  margin-top: var(--size-4-3);
+}
+
+.tdcb-panel-edit-modes,
+.tdcb-panel-edit-row {
+  display: flex;
+  gap: var(--size-4-1);
+  margin-bottom: var(--size-4-1);
+}
+
+.tdcb-panel-edit-label {
+  margin-bottom: var(--size-4-1);
+  color: var(--text-muted);
+}
+
+.tdcb-panel-edit input[type="number"] {
+  width: 5em;
+}

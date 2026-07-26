@@ -3,6 +3,7 @@
 // Eine Notiz kann mehrere Modelle zeigen (fuenf Etagen). Aktiv ist der zuletzt
 // benutzte; gespeist wird das aus `onInteract`, das schon heute jede echte
 // Nutzerinteraktion meldet (Autorotate zaehlt bewusst nicht).
+import type { EditUiModel } from "./edit-session";
 import type { ViewSpec } from "./view-spec";
 
 /**
@@ -29,6 +30,9 @@ export interface ViewportController {
   save(spec: ViewSpec | null): Promise<void>;
   /** Anzeigename fuer die Sidebar (Titel oder Dateipfad). */
   label(): string;
+  /** Edit-Zustand fuers Sidebar-Panel; `undefined`/`null`, wenn der Weg (noch) keinen
+   *  Editor kennt (Embed/FileView-Altpfad) oder kein Modell geladen ist. */
+  editPanel?: () => EditUiModel | null;
 }
 
 type Listener = (controller: ViewportController | null) => void;
@@ -44,10 +48,22 @@ export class ActiveViewport {
   set(controller: ViewportController | null): void {
     if (this.current === controller) return;
     this.current = controller;
-    // Jeden Listener isoliert aufrufen — Sidebar und jeder Block/Embed/gltf-Block
-    // haengen am selben Set. Ohne den try/catch stoppt ein werfender Listener JEDE
-    // nachfolgende Benachrichtigung in dieser Runde (z. B. bekaeme die Sidebar nie
-    // mit, dass ein Block aktiv wurde, nur weil ein anderer Listener vorher warf).
+    this.emit(controller);
+  }
+
+  /** Feuert alle Listener erneut mit dem AKTUELLEN Controller — fuer Aenderungen, die
+   *  keinen Wechsel des aktiven Controllers sind (z. B. Edit-Zustand), aber trotzdem
+   *  Sidebar/Toolbar zum Nachzeichnen bewegen sollen. `set()` selbst ist idempotent
+   *  gegen denselben Controller, `notify()` ist explizit der Weg drumherum. */
+  notify(): void {
+    this.emit(this.current);
+  }
+
+  /** Jeden Listener isoliert aufrufen — Sidebar und jeder Block/Embed/gltf-Block
+   *  haengen am selben Set. Ohne den try/catch stoppt ein werfender Listener JEDE
+   *  nachfolgende Benachrichtigung in dieser Runde (z. B. bekaeme die Sidebar nie
+   *  mit, dass ein Block aktiv wurde, nur weil ein anderer Listener vorher warf). */
+  private emit(controller: ViewportController | null): void {
     for (const listener of this.listeners) {
       try {
         listener(controller);

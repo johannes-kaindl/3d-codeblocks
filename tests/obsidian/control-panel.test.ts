@@ -6,6 +6,7 @@ import {
   NO_BLOCK_REASON,
   type ViewportController,
 } from "../../src/core/active-viewport";
+import type { EditUiModel } from "../../src/core/edit-session";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
 
 function controller(overrides: Partial<ViewportController> = {}): ViewportController {
@@ -16,6 +17,25 @@ function controller(overrides: Partial<ViewportController> = {}): ViewportContro
     save: vi.fn(async () => {}),
     label: () => "eg.glb",
     ...overrides,
+  };
+}
+
+// Identisch zum Helfer aus viewport-toolbar.test.ts (Task 10) -- Testdateien teilen
+// keine Helfer ueber Dateigrenzen.
+function makeEditModel(over: Partial<EditUiModel> = {}): EditUiModel {
+  return {
+    active: false,
+    disabledReason: null,
+    mode: "translate",
+    dirty: false,
+    selection: null,
+    enter: vi.fn(),
+    save: vi.fn(),
+    discard: vi.fn(),
+    setMode: vi.fn(),
+    reset: vi.fn(),
+    applyTrs: vi.fn(),
+    ...over,
   };
 }
 
@@ -80,6 +100,26 @@ function findByClass(root: any, cls: string): any {
 function click(el: any): void {
   const call = el.addEventListener.mock.calls.find((c: any[]) => c[0] === "click");
   call[1]();
+}
+
+// Alle INPUT-Elemente im Baum, jeweils mit einer `.handlers`-Bequemlichkeitsansicht
+// auf `addEventListener.mock.calls` -- der Mock kennt keine echten input-Events, zeichnet
+// registrierte Handler aber ueber `addEventListener` auf (wie `click()` oben schon nutzt).
+function collectInputs(root: any): any[] {
+  const found: any[] = [];
+  const walk = (el: any) => {
+    if (el.tagName === "INPUT") {
+      const handlers: Record<string, ((event?: any) => void)[]> = {};
+      for (const call of el.addEventListener.mock.calls as any[]) {
+        (handlers[call[0]] ??= []).push(call[1]);
+      }
+      el.handlers = handlers;
+      found.push(el);
+    }
+    for (const child of el.children as any[]) walk(child);
+  };
+  walk(root);
+  return found;
 }
 
 function makeView(): { view: ControlPanelView; active: ActiveViewport } {
@@ -171,5 +211,122 @@ describe("ControlPanelView", () => {
 
     active.set(null);
     expect(findByClass(view.contentEl, "tdcb-empty")).toBeTruthy();
+  });
+});
+
+describe("Edit-Sektion", () => {
+  it("zeigt den Edit-Button, wenn der Controller editPanel anbietet", () => {
+    const { view, active } = makeView();
+    view.onload();
+    active.set({ ...controller(), editPanel: () => makeEditModel() });
+
+    expect(JSON.stringify(view.contentEl.children)).toContain("Edit model");
+  });
+
+  it("aktiv: zeigt Auswahlname und sechs Zahlenfelder, applyTrs bei Aenderung", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({
+      active: true,
+      selection: { name: "privat-herd", trs: { translation: [1, 0, 2], scale: [1, 1, 1] } },
+    });
+    active.set({ ...controller(), editPanel: () => model });
+
+    expect(findByText(view.contentEl, "privat-herd")).toBeTruthy();
+
+    const inputs = collectInputs(view.contentEl);
+    expect(inputs).toHaveLength(6);
+    inputs[0].value = "4";
+    inputs[0].handlers.change?.forEach((fn: any) => fn());
+    expect(model.applyTrs).toHaveBeenCalledWith({ translation: [4, 0, 2], scale: [1, 1, 1] });
+  });
+
+  it("aktiv ohne Auswahl: Hinweis statt Felder", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({ active: true, selection: null });
+    active.set({ ...controller(), editPanel: () => model });
+
+    expect(JSON.stringify(view.contentEl.children)).toContain("Click a part of the model to select it.");
+    expect(collectInputs(view.contentEl)).toHaveLength(0);
+  });
+
+  it("ohne editPanel am Controller (alte Wege) keine Edit-Sektion", () => {
+    const { view, active } = makeView();
+    view.onload();
+    active.set(controller());
+
+    expect(JSON.stringify(view.contentEl.children)).not.toContain("Edit model");
+  });
+
+  it("Enter-Button ruft edit.enter()", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel();
+    active.set({ ...controller(), editPanel: () => model });
+
+    click(findByText(view.contentEl, "Edit model"));
+
+    expect(model.enter).toHaveBeenCalled();
+  });
+
+  it("Enter-Button deaktiviert und traegt den Sperrgrund als Tooltip", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({ disabledReason: "Editing requires a glTF or GLB file" });
+    active.set({ ...controller(), editPanel: () => model });
+
+    const button = findByText(view.contentEl, "Edit model");
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("Editing requires a glTF or GLB file");
+  });
+
+  it("Modus-Buttons: aktiver Modus traegt mod-cta, Klick ruft setMode", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({ active: true, mode: "translate" });
+    active.set({ ...controller(), editPanel: () => model });
+
+    const move = findByText(view.contentEl, "Move");
+    const scale = findByText(view.contentEl, "Scale");
+    expect(String(move.className).split(" ")).toContain("mod-cta");
+    expect(String(scale.className).split(" ")).not.toContain("mod-cta");
+
+    click(scale);
+    expect(model.setMode).toHaveBeenCalledWith("scale");
+  });
+
+  it("Reset/Save/Discard: Save folgt dirty, Klicks rufen die Modell-Handler", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({
+      active: true,
+      dirty: true,
+      selection: { name: "privat-herd", trs: { translation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+    active.set({ ...controller(), editPanel: () => model });
+
+    const save = findByText(view.contentEl, "Save edits");
+    expect(save.disabled).toBe(false);
+
+    click(findByText(view.contentEl, "Reset node"));
+    expect(model.reset).toHaveBeenCalled();
+    click(save);
+    expect(model.save).toHaveBeenCalled();
+    click(findByText(view.contentEl, "Discard edits"));
+    expect(model.discard).toHaveBeenCalled();
+  });
+
+  it("Save edits ist deaktiviert, solange nichts dirty ist", () => {
+    const { view, active } = makeView();
+    view.onload();
+    const model = makeEditModel({
+      active: true,
+      dirty: false,
+      selection: { name: "privat-herd", trs: { translation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+    active.set({ ...controller(), editPanel: () => model });
+
+    expect(findByText(view.contentEl, "Save edits").disabled).toBe(true);
   });
 });

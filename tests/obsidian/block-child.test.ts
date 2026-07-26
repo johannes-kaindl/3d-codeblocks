@@ -756,6 +756,64 @@ describe("edit mode wiring", () => {
     expect(edit.active).toBe(false);
     expect(hasClass(viewport, "tdcb-editing")).toBe(false);
   });
+
+  // Task 11: die Sidebar zieht ueber `editPanel()` nach, die Toolbar weiter ueber
+  // `syncToolbar()` -- beide muessen denselben Coordinator-Zustand sehen.
+  it("editPanel() spiegelt den Coordinator-Zustand (null vor dem Laden, dann uiModel())", async () => {
+    const { deps, app } = makeDeps({ panelVisible: () => false });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    expect(block.editPanel()).toBeNull(); // vor onload(): (this as any).edit ist noch null
+
+    block.onload();
+    await block.loadNow();
+
+    // `uiModel()` baut bei jedem Aufruf frische Closures (enter/save/...) -- ein
+    // `toEqual` ueber das gesamte Objekt schietert an der Funktionsidentitaet, obwohl
+    // die eigentlichen Daten uebereinstimmen. Nur die Daten vergleichen.
+    const edit = (block as any).edit;
+    const { enter: _e, save: _s, discard: _d, setMode: _m, reset: _r, applyTrs: _a, ...data } = block.editPanel()!;
+    expect(data).toEqual({
+      active: false,
+      disabledReason: null,
+      mode: "translate",
+      dirty: false,
+      selection: null,
+    });
+    expect(edit.uiModel().active).toBe(false);
+  });
+
+  it("EditCoordinator.onChange benachrichtigt active.notify() (Sidebar zieht ohne Controller-Wechsel nach)", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { deps, app } = makeDeps({ panelVisible: () => false, editIo: makeEditIo(editFiles) });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const originalCreate = deps.factory.create;
+    deps.factory.create = (opts: any) => {
+      const viewport = originalCreate(opts);
+      viewport.createEditRig = vi.fn(() => ({
+        setMode: vi.fn(),
+        select: vi.fn(),
+        applyTrs: vi.fn(),
+        dispose: vi.fn(),
+      }));
+      return viewport;
+    };
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+    (deps as any).active.set(block); // derselbe Controller bleibt aktiv -- `set()` waere hier ein No-op
+
+    const notify = vi.spyOn((deps as any).active, "notify");
+    const edit = (block as any).edit;
+    await edit.enter();
+
+    expect(notify).toHaveBeenCalled();
+  });
 });
 
 /** Rekursiv nach `.tdcb-toolbar` suchen -- die Leiste haengt inzwischen im

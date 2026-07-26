@@ -14,6 +14,7 @@ import { applyViewKey } from "../core/block-edit";
 import { parseBlockConfig, type BlockConfig } from "../core/block-config";
 import { detectFormat, type ModelFormat } from "../core/format";
 import { parseLockedPrefixes, type PluginSettings } from "../core/settings-types";
+import type { EditUiModel } from "../core/edit-session";
 import type { ViewSpec } from "../core/view-spec";
 import { toViewModel } from "../core/view-model";
 import type { SceneColors } from "../viewer/scene";
@@ -97,9 +98,6 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this),
     });
 
-    // `notify()` auf `ActiveViewport` kommt erst in Task 11 -- bis dahin reicht
-    // `syncToolbar(true)` allein, um Toolbar/Panel nach jeder Zustandsaenderung
-    // (enter/save/discard/setMode/...) nachzuziehen.
     this.edit = new EditCoordinator({
       io: this.deps.editIo,
       filePath: () => this.file?.path ?? null,
@@ -109,6 +107,11 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       confirmDiscard: this.deps.confirmDiscard,
       onChange: () => {
         this.syncToolbar(true);
+        // Sidebar-Panel (Task 11) haengt nicht an `syncToolbar()` -- es zeichnet ueber
+        // `active.subscribe()`. `notify()` feuert diese Listener auch dann, wenn dieser
+        // Block der aktive Controller BLEIBT (kein Wechsel, `set()` waere hier ein No-op),
+        // damit Move/Scale/Reset/Save/Discard und die Zahlenfelder dort live nachziehen.
+        this.deps.active.notify();
       },
     });
 
@@ -145,6 +148,10 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   label(): string {
     return this.config?.title ?? this.config?.file ?? "3D model";
   }
+
+  /** `this.edit` ist `null` vor `onload()` und nach `onunload()` -- ohne Coordinator
+   *  gibt es keinen Edit-Zustand, die Sidebar zeigt dann gar keine Edit-Sektion. */
+  editPanel = (): EditUiModel | null => this.edit?.uiModel() ?? null;
 
   getView(): ViewSpec | null {
     return this.host?.currentView() ?? null;
