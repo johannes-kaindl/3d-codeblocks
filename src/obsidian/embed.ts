@@ -9,10 +9,12 @@
 //
 // Kein Codeblock dahinter → nur steuerbar (Fit/Presets), nie speicherbar; siehe
 // `readOnlyController`, den sich diese Klasse mit `ModelFileView` teilt.
-import { MarkdownRenderChild, type App, type TFile } from "obsidian";
+import { MarkdownRenderChild, Notice, type App, type TFile } from "obsidian";
 import type { ActiveViewport } from "../core/active-viewport";
 import { embedHeightFromAttrs } from "../core/embed-src";
 import { detectFormat } from "../core/format";
+import { parseLockedPrefixes } from "../core/settings-types";
+import { EditCoordinator, type EditIo } from "./edit-mode";
 import { buildBox, type BoxParts } from "./render-box";
 import { readModel } from "./file-source";
 import { readOnlyController } from "./read-only-controller";
@@ -29,6 +31,10 @@ export type { TrackedView } from "./tracked-view";
 export interface EmbedDeps extends HostBaseDeps {
   app: App;
   active: ActiveViewport;
+  /** I/O fuer den Edit-Modus (Original lesen, Edit-Datei schreiben) — `vaultEditIo(app)`. */
+  editIo: EditIo;
+  /** Bestaetigungsdialog vorm Verwerfen ungespeicherter Edits. */
+  confirmDiscard: () => Promise<boolean>;
 }
 
 // --- minimale Deklaration der inoffiziellen embedRegistry-API --------------------
@@ -65,9 +71,14 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   /** Laufendes Render-Promise (für Tests abwartbar). */
   rendering: Promise<void> = Promise.resolve();
 
+  /** Kein Toolbar bei Embeds — nur die Sidebar (Task 12) bedient den Edit-Modus, deshalb
+      `onChange` hier nur `active.notify()` statt einer `syncToolbar()`-Variante. */
+  private readonly edit: EditCoordinator;
+
   readonly controller = readOnlyController(
     () => this.host,
     () => this.file.path,
+    () => this.edit.uiModel(),
   );
 
   constructor(
@@ -76,6 +87,15 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
     private readonly deps: EmbedDeps,
   ) {
     super(hostEl);
+    this.edit = new EditCoordinator({
+      io: this.deps.editIo,
+      filePath: () => this.file.path,
+      host: () => this.host,
+      lockedPrefixes: () => parseLockedPrefixes(this.deps.settings().lockedNodePrefixes),
+      notice: (m) => new Notice(m),
+      confirmDiscard: this.deps.confirmDiscard,
+      onChange: () => this.deps.active.notify(),
+    });
   }
 
   /** Obsidian ruft dies OHNE Argument nach dem Erstellen — die Datei kam über den
@@ -87,8 +107,11 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   onunload(): void {
     this.unloaded = true;
     // Reihenfolge wie in ModelBlock: erst clearIf (raeumt nur auf, wenn dieser Embed
-    // auch der aktive war), dann erst den Host disposen.
+    // auch der aktive war), dann Edit still beenden (VOR dem Host-Dispose — der
+    // Coordinator disposed sein Rig noch auf dem lebenden Viewport), dann erst den
+    // Host disposen.
     this.deps.active.clearIf(this.controller);
+    this.edit.exitSilently();
     this.host?.dispose();
     this.host = null;
   }
@@ -96,7 +119,14 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   onFileModified(file: TFile): void {
     if (this.unloaded) return;
     if (file.path !== this.file.path || file.stat.mtime === this.loadedMtime) return;
-    void this.render();
+    this.rendering = this.reloadAndReapply();
+  }
+
+  /** Regenerierung ueberlebt einen aktiven Edit — Session per Name auf den frisch
+      geladenen Stand legen (wie ModelBlock.loadNow(), Task 10). */
+  private async reloadAndReapply(): Promise<void> {
+    await this.render();
+    if (this.edit.active) await this.edit.reapplyAfterReload();
   }
 
   refreshColors(): void {

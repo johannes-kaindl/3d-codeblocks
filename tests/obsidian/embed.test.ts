@@ -3,6 +3,40 @@ import { TFile, makeFakeApp, makeFakeEl } from "../__mocks__/obsidian";
 import { ModelEmbed, registerModelEmbeds } from "../../src/obsidian/embed";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
 import { ActiveViewport } from "../../src/core/active-viewport";
+import type { EditIo } from "../../src/obsidian/edit-mode";
+import { contractGltfText } from "../helpers/contract-gltf";
+
+/** In-Memory-`EditIo`-Fake wie im Task-10-Test (`tests/obsidian/block-child.test.ts`) --
+ *  reicht fuer die Verdrahtungstests hier, die nie wirklich patchen. */
+function makeEditIo(files: Record<string, string> = {}): EditIo {
+  return {
+    exists: (path) => path in files,
+    readText: (path) => Promise.resolve(files[path] ?? "{}"),
+    readBinary: () => Promise.reject(new Error("binary unused in these tests")),
+    writeText: (path, text) => {
+      files[path] = text;
+      return Promise.resolve();
+    },
+    writeBinary: () => Promise.reject(new Error("binary unused in these tests")),
+  };
+}
+
+/** Fabrik-Override, die zusaetzlich ein `createEditRig`-Double liefert -- ohne Rig
+ *  bleibt `enter()` bewusst inaktiv (Fix #4, edit-mode.ts). */
+function withEditRig(factory: any) {
+  const originalCreate = factory.create;
+  factory.create = (opts: any) => {
+    const viewport = originalCreate(opts);
+    viewport.createEditRig = vi.fn(() => ({
+      setMode: vi.fn(),
+      select: vi.fn(),
+      applyTrs: vi.fn(),
+      dispose: vi.fn(),
+    }));
+    return viewport;
+  };
+  return factory;
+}
 
 function makeGlb(): ArrayBuffer {
   const bytes = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" } }));
@@ -57,6 +91,8 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       loadModel,
       readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
       active,
+      editIo: makeEditIo(),
+      confirmDiscard: () => Promise.resolve(true),
       ...overrides,
     } as any,
   };
@@ -174,6 +210,84 @@ describe("ModelEmbed as a ViewportController", () => {
     created[0].opts.onInteract();
     embed.onunload();
     expect(active.get()).toBeNull();
+  });
+});
+
+// Task 12: Embed-Verdrahtung des EditCoordinator -- Embeds haben keine Toolbar,
+// die Sidebar ist der EINZIGE Bedienort (`controller.editPanel()`).
+describe("ModelEmbed edit mode wiring", () => {
+  it("offers editPanel for a .gltf file, enabled once the host has loaded", async () => {
+    const { deps } = makeDeps();
+    const el = makeFakeEl();
+
+    const embed = new ModelEmbed(el, fileAt("model.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    const panel = embed.controller.editPanel?.();
+    expect(panel).toBeTruthy();
+    expect(panel!.disabledReason).toBeNull();
+  });
+
+  it("disables editing for an .stl file with the format reason", async () => {
+    const { deps } = makeDeps();
+    const el = makeFakeEl();
+
+    const embed = new ModelEmbed(el, fileAt("model.stl"), deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    const panel = embed.controller.editPanel?.();
+    expect(panel!.disabledReason).toContain("glTF");
+  });
+
+  it("reaches reapplyAfterReload() on onFileModified() during an active edit", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { deps } = makeDeps({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const el = makeFakeEl();
+    const file = fileAt("model.gltf", 1);
+    const embed = new ModelEmbed(el, file, deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    const edit = (embed as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+
+    const reapplyAfterReload = vi.spyOn(edit, "reapplyAfterReload");
+
+    file.stat.mtime = 99;
+    embed.onFileModified(file);
+    await embed.rendering;
+
+    expect(reapplyAfterReload).toHaveBeenCalledTimes(1);
+    // Reload ueberlebt den aktiven Edit -- die Session bleibt aktiv, nicht nur
+    // "die Methode wurde aufgerufen".
+    expect(edit.active).toBe(true);
+  });
+
+  it("onunload() during an active edit does not throw and unpins (Coordinator spy)", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { deps } = makeDeps({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const el = makeFakeEl();
+    const embed = new ModelEmbed(el, fileAt("model.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    const edit = (embed as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+
+    const exitSilently = vi.spyOn(edit, "exitSilently");
+
+    expect(() => embed.onunload()).not.toThrow();
+
+    expect(exitSilently).toHaveBeenCalledTimes(1);
+    expect(edit.active).toBe(false);
   });
 });
 

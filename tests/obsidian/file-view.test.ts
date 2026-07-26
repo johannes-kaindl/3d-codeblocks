@@ -3,6 +3,40 @@ import { TFile, makeFakeApp } from "../__mocks__/obsidian";
 import { ModelFileView, VIEW_TYPE_3D } from "../../src/obsidian/file-view";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
 import { ActiveViewport } from "../../src/core/active-viewport";
+import type { EditIo } from "../../src/obsidian/edit-mode";
+import { contractGltfText } from "../helpers/contract-gltf";
+
+/** In-Memory-`EditIo`-Fake wie im Task-10-Test (`tests/obsidian/block-child.test.ts`) --
+ *  reicht fuer die Verdrahtungstests hier, die nie wirklich patchen. */
+function makeEditIo(files: Record<string, string> = {}): EditIo {
+  return {
+    exists: (path) => path in files,
+    readText: (path) => Promise.resolve(files[path] ?? "{}"),
+    readBinary: () => Promise.reject(new Error("binary unused in these tests")),
+    writeText: (path, text) => {
+      files[path] = text;
+      return Promise.resolve();
+    },
+    writeBinary: () => Promise.reject(new Error("binary unused in these tests")),
+  };
+}
+
+/** Fabrik-Override, die zusaetzlich ein `createEditRig`-Double liefert -- ohne Rig
+ *  bleibt `enter()` bewusst inaktiv (Fix #4, edit-mode.ts). */
+function withEditRig(factory: any) {
+  const originalCreate = factory.create;
+  factory.create = (opts: any) => {
+    const viewport = originalCreate(opts);
+    viewport.createEditRig = vi.fn(() => ({
+      setMode: vi.fn(),
+      select: vi.fn(),
+      applyTrs: vi.fn(),
+      dispose: vi.fn(),
+    }));
+    return viewport;
+  };
+  return factory;
+}
 
 function makeGlb(): ArrayBuffer {
   const bytes = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" } }));
@@ -28,33 +62,37 @@ function makeView(overrides: Record<string, unknown> = {}) {
   app.vault.readBinary = vi.fn().mockResolvedValue(makeGlb());
   const budget = { register: vi.fn(), touch: vi.fn(), unregister: vi.fn() };
   const active = (overrides.active as ActiveViewport | undefined) ?? new ActiveViewport();
-  const view = new ModelFileView({ app } as any, {
-    settings: () => DEFAULT_SETTINGS,
-    factory: {
-      isWebGLAvailable: () => true,
-      create: (opts: any) => {
-        const vp = {
-          opts,
-          setModel: vi.fn(),
-          setView: vi.fn(),
-          getView: vi.fn(() => null),
-          setColors: vi.fn(),
-          resize: vi.fn(),
-          resetCamera: vi.fn(),
-          capturePoster: () => "data:image/png;base64,AAA",
-          dispose: vi.fn(),
-        };
-        created.push(vp);
-        return vp;
-      },
+  const factory = {
+    isWebGLAvailable: () => true,
+    create: (opts: any) => {
+      const vp = {
+        opts,
+        setModel: vi.fn(),
+        setView: vi.fn(),
+        getView: vi.fn(() => null),
+        setColors: vi.fn(),
+        resize: vi.fn(),
+        resetCamera: vi.fn(),
+        capturePoster: () => "data:image/png;base64,AAA",
+        dispose: vi.fn(),
+      };
+      created.push(vp);
+      return vp;
     },
+  };
+  const deps = {
+    settings: () => DEFAULT_SETTINGS,
+    factory,
     budget,
     loadModel,
     readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
     active,
+    editIo: makeEditIo(),
+    confirmDiscard: () => Promise.resolve(true),
     ...overrides,
-  } as any);
-  return { view, created, budget, loadModel, app, active };
+  } as any;
+  const view = new ModelFileView({ app } as any, deps);
+  return { view, created, budget, loadModel, app, active, deps };
 }
 
 /** Eine geladene FileView mit aktiver Registry — analog `loadedBlock` (Task 9). */
@@ -107,6 +145,72 @@ describe("ModelFileView", () => {
     await view.onUnloadFile(fileAt("a.glb"));
 
     expect(created[0].dispose).toHaveBeenCalled();
+  });
+});
+
+// Task 12: FileView-Verdrahtung des EditCoordinator -- keine Toolbar hier, die
+// Sidebar ist der EINZIGE Bedienort (`controller.editPanel()`).
+describe("ModelFileView edit mode wiring", () => {
+  it("offers editPanel for a .gltf file, enabled once the host has loaded", async () => {
+    const { view } = makeView();
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+
+    const panel = view.controller.editPanel?.();
+    expect(panel).toBeTruthy();
+    expect(panel!.disabledReason).toBeNull();
+  });
+
+  it("disables editing for an .stl file with the format reason", async () => {
+    const { view } = makeView();
+    const file = fileAt("model.stl");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+
+    const panel = view.controller.editPanel?.();
+    expect(panel!.disabledReason).toContain("glTF");
+  });
+
+  it("onUnloadFile() during an active edit ends it silently (no confirm, unpins)", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { view, deps } = makeView({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+
+    const edit = (view as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+
+    const exitSilently = vi.spyOn(edit, "exitSilently");
+
+    await view.onUnloadFile(file);
+
+    expect(exitSilently).toHaveBeenCalledTimes(1);
+    expect(edit.active).toBe(false);
+  });
+
+  it("onLoadFile() for a new file ends a still-active edit from the previous file first", async () => {
+    const editFiles: Record<string, string> = { "a.gltf": contractGltfText() };
+    const { view, deps } = makeView({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const fileA = fileAt("a.gltf");
+    await view.onLoadFile(fileA);
+    (view as unknown as { file: TFile }).file = fileA;
+
+    const edit = (view as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+
+    // Datei-Wechsel im selben Pane ist kein Reload desselben Modells -- der Edit auf
+    // der ALTEN Datei darf nicht ueber den neuen Host hinweg "aktiv" bleiben.
+    await view.onLoadFile(fileAt("b.gltf"));
+
+    expect(edit.active).toBe(false);
   });
 });
 

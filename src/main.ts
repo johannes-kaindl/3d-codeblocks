@@ -44,7 +44,16 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // `active` gehoert seit Task 12 mit dazu — Embed und FileView brauchen es, um sich
     // bei Interaktion als aktiven Viewport zu melden; ModelBlock/GltfBlock nehmen
     // einfach nur weniger von diesem Objekt.
-    const hostDeps: HostBaseDeps & { active: ActiveViewport } = {
+    // `editIo`/`confirmDiscard` ebenfalls seit Task 12 hier drin, statt nur beim
+    // Codeblock: Embed und FileView bekommen (ueber die Sidebar) denselben
+    // EditCoordinator wie der Codeblock — dieselben Instanzen, kein Doppelbau.
+    const editIo = vaultEditIo(this.app);
+    const confirmDiscard = () => confirmDiscardEdits(this.app);
+    const hostDeps: HostBaseDeps & {
+      active: ActiveViewport;
+      editIo: ReturnType<typeof vaultEditIo>;
+      confirmDiscard: () => Promise<boolean>;
+    } = {
       settings: () => this.settings,
       factory: {
         create: (options) => new Viewport(options),
@@ -54,6 +63,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       loadModel,
       readColors: readSceneColors,
       active: this.active,
+      editIo,
+      confirmDiscard,
     };
 
     // ```3d file: — Datei-Verweis mit Titel/Höhe (mehrere pro Notiz).
@@ -69,8 +80,6 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
             return info ? { lineStart: info.lineStart, lineEnd: info.lineEnd } : null;
           },
           panelVisible: () => this.panelVisible(),
-          editIo: vaultEditIo(this.app),
-          confirmDiscard: () => confirmDiscardEdits(this.app),
         });
         this.track(block);
         ctx.addChild(block);

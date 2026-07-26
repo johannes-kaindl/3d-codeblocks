@@ -31,4 +31,17 @@ describe("readOnlyController", () => {
   it("reports the label it was given", () => {
     expect(readOnlyController(() => null, () => "haus.glb").label()).toBe("haus.glb");
   });
+
+  // Task 12: Embed/FileView reichen ihren EditCoordinator hier durch — aber nur, wenn
+  // sie einen haben, sonst zeigt die Sidebar faelschlich eine leere Edit-Sektion.
+  it("omits editPanel entirely when none is given", () => {
+    const controller = readOnlyController(() => fakeHost() as any, () => "a.glb");
+    expect(controller.editPanel).toBeUndefined();
+  });
+
+  it("exposes editPanel when given, delegating to it", () => {
+    const panel = { active: true } as any;
+    const controller = readOnlyController(() => fakeHost() as any, () => "a.glb", () => panel);
+    expect(controller.editPanel?.()).toBe(panel);
+  });
 });
