@@ -6,12 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-07-26
+
 ### Added
 
 - Saved camera angles: turn a model, press **Save view**, and the angle is written into
   the code block as `view:` (`iso`, `top`, or `azimuth,elevation,distance`).
 - Sidebar view with view presets and Save/Clear/Fit, plus a hover toolbar on the model
   when the sidebar is closed. New setting: **Controls placement**.
+
+### Fixed
+
+- **View mode "Still image, activate on click" now works.** Clicking the still image
+  rebuilt the viewport and immediately degraded it back to a still image, so the model
+  never became interactive. Present since 0.1.0.
+- **Saving a view in Reading mode no longer fails silently.** The editor write path is
+  a no-op there, yet still reported "View saved"; Reading mode now writes through the
+  vault instead.
+- The hover toolbar reappears after collapsing and expanding a sidebar. Obsidian does
+  not emit `layout-change` for that, so the plugin listens for `resize` as well.
+- Named views are written within 5° of a preset instead of 2°. Turning a model by hand
+  never hit the old tolerance, which made names like `top` practically unreachable.
+- Settings are declared through `getSettingDefinitions()` so they appear in Obsidian
+  1.13+ settings search, with the existing `display()` rendering kept as a fallback for
+  older versions.
 
 ## [0.1.2] — 2026-07-24
 

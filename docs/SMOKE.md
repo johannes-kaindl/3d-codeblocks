@@ -88,9 +88,18 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
       a \`3d\` code block", **Fit** funktioniert trotzdem.
 - [ ] **8. `view: quatsch`** — von Hand eintippen → Hinweiszeile unter dem Viewport,
       Modell trotzdem sichtbar.
-- [ ] **9. Fremdänderung während offener Notiz** — Notiz in einem zweiten Fenster ändern,
-      dann in der ersten speichern → Abbruch mit „Note changed — view not saved", Notiz
-      bleibt unbeschädigt (unveränderter Blockrumpf).
+- [x] **9. Fremdänderung während offener Notiz — gestrichen, in der GUI nicht herstellbar
+      (gemessen 2026-07-26).** Zwei Anläufe im echten Vault: eine einzelne externe Änderung,
+      dann 60 Änderungen in 15 s bei gleichzeitigen `Save view`-Klicks. **Jedes Mal
+      „View saved", Notiz jedes Mal unbeschädigt.** Kein Zufall, sondern strukturell: der
+      Guard vergleicht `expectedBody` gegen **die Quelle, in die er schreibt** — Datei
+      (`vault.read`) bzw. Editor-Buffer (`editor.getValue()`). Ein externer Schreiber
+      trifft beide Seiten gleichzeitig; entweder Obsidian lädt nach (alles aktuell) oder
+      nicht (beide Seiten konsistent alt). Die Divergenz, die der Guard fängt, entsteht
+      nur durch Obsidian-**interne** Veralterung von `getSectionInfo`/`source` — von außen
+      nicht erzwingbar. Abdeckung liegt bei `tests/obsidian/block-writer.test.ts` (beide
+      Schreibwege, geänderter Rumpf, verschobener Block, Fence-Sprache, CRLF, „ohne den
+      Buffer anzufassen"). Gestrichen aus demselben Grund wie Punkt 10.
 - [x] **10. Trailing newline — erledigt durch Punkt 1, keine eigene Beobachtung nötig.**
       Ursprünglich als offene Frage notiert („liefert Obsidian den `source` mit oder ohne
       abschließendes `\n`?"). Beantwortet sich implizit: der Schreibweg vergleicht den
