@@ -17,6 +17,7 @@ import type { EditRigCallbacks } from "../viewer/edit-controls";
 
 export const EDIT_UNAVAILABLE_FORMAT = "Editing requires a glTF or GLB file";
 export const EDIT_UNAVAILABLE_LOADING = "The model is still loading";
+export const EDIT_STALE_ON_DISK = "Model changed on disk — re-open edit mode to continue";
 
 const same = (a: readonly [number, number, number], b: readonly [number, number, number]) =>
   a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
@@ -53,6 +54,31 @@ function dropUnchangedLockedEntries(
     if (!unchangedLocked) filtered.set(name, trs);
   }
   return filtered;
+}
+
+/** Zeigt jeder Edit-Index im FRISCH gelesenen Original noch auf den Node, den die
+ * Session dort erwartet? Der Patch adressiert nach Index, die Session haelt aber
+ * Indizes vom Zeitpunkt des Betretens (bzw. des letzten Reapply). Wurde die Datei
+ * dazwischen mit umsortierten, eingefuegten oder entfernten Nodes regeneriert, schriebe
+ * `patchGltfJson` TRS auf die FALSCHEN JSON-Nodes — und zwar still: Namen sind vom
+ * Patch per Kontrakt unberuehrt, der nachgelagerte Diff verschoebe also einfach den
+ * falschen Raum. Der Name an der Indexstelle ist der billigste vollstaendige Beweis,
+ * dass Index und Node noch zusammengehoeren.
+ *
+ * Bewusst konservativ: fehlt der Index in der frischen Analyse (Node aus der Szene
+ * geflogen, Datei strukturell defekt), gilt das als Nichtuebereinstimmung. */
+function indicesStillMatch(
+  freshJson: unknown,
+  session: EditSession,
+  edits: TrsEdit[],
+  lockedPrefixes: string[],
+): boolean {
+  const fresh = new Map(analyzeTopLevelNodes(freshJson, lockedPrefixes).map((n) => [n.index, n.name]));
+  const known = new Map(session.list().map((n) => [n.index, n.name]));
+  return edits.every((edit) => {
+    const name = known.get(edit.index);
+    return name !== undefined && fresh.get(edit.index) === name;
+  });
 }
 
 export interface EditIo {
@@ -226,13 +252,35 @@ export class EditCoordinator {
     const snapshot = session.changes();
 
     try {
+      // Original frisch lesen — und danach PRUEFEN, ob die Indizes der Session dort
+      // ueberhaupt noch dieselben Nodes bezeichnen (s. `indicesStillMatch`). Ohne diese
+      // Pruefung ist "frisch lesen" ein halber Schutz: der Inhalt ist aktuell, die
+      // Adressen sind es nicht.
       const format = editFormatFor(path);
+      let originalText: string;
+      let originalBinary: ArrayBuffer | null = null;
       if (format === "gltf-json") {
-        const original = await this.deps.io.readText(path);
-        await this.deps.io.writeText(target.path, patchGltfJson(original, snapshot));
+        originalText = await this.deps.io.readText(path);
       } else {
-        const original = await this.deps.io.readBinary(path);
-        await this.deps.io.writeBinary(target.path, patchGlbContainer(original, snapshot));
+        originalBinary = await this.deps.io.readBinary(path);
+        const text = glbJsonText(originalBinary);
+        if (text === null) throw new Error("not a valid GLB container");
+        originalText = text;
+      }
+
+      if (!indicesStillMatch(JSON.parse(originalText), session, snapshot, this.deps.lockedPrefixes())) {
+        // Nicht schreiben, Modus und Session unangetastet lassen: der Nutzer behaelt
+        // seine ungespeicherten Edits (bleibt dirty) und kann nach einem Neubetreten
+        // — das die Session per Name auf den neuen Stand legt — erneut speichern.
+        this.deps.notice(EDIT_STALE_ON_DISK);
+        this.deps.onChange();
+        return;
+      }
+
+      if (originalBinary === null) {
+        await this.deps.io.writeText(target.path, patchGltfJson(originalText, snapshot));
+      } else {
+        await this.deps.io.writeBinary(target.path, patchGlbContainer(originalBinary, snapshot));
       }
       // Nur baselinen, wenn sich waehrend des Schreibens nichts mehr veraendert hat —
       // sonst bleibt die Session bewusst dirty, statt den neuen Edit zu verschlucken.

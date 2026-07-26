@@ -1,7 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import { EDIT_UNAVAILABLE_LOADING, EditCoordinator, type EditIo } from "../../src/obsidian/edit-mode";
-import { contractGltfText } from "../helpers/contract-gltf";
+import {
+  EDIT_STALE_ON_DISK,
+  EDIT_UNAVAILABLE_LOADING,
+  EditCoordinator,
+  type EditIo,
+} from "../../src/obsidian/edit-mode";
+import { contractGltfText, makeContractGltf } from "../helpers/contract-gltf";
 import type { NodeTrs } from "../../src/core/gltf-patch";
+
+/** Dieselbe Szene, aber vom Generator mit VERTAUSCHTER Node-Reihenfolge neu geschrieben:
+ *  an Index 0 steht jetzt `privat-bad` statt `privat-herd`. Genau der Fall, in dem ein
+ *  Patch nach Index das falsche Zimmer verschieben wuerde — die Namen bleiben ja
+ *  unangetastet, der nachgelagerte Diff faellt also auf nichts auf. */
+function reorderedContractGltfText(): string {
+  const doc = makeContractGltf() as Record<string, unknown>;
+  doc.nodes = [
+    { name: "privat-bad", mesh: 2, translation: [-3, 0, 1], scale: [1, 1, 1] },
+    { name: "privat-herd", mesh: 0, translation: [1, 0, 2] },
+    { name: "env__gelaende", mesh: 3, translation: [0, -0.1, 0] },
+  ];
+  doc.scenes = [{ nodes: [0, 1, 2] }];
+  return JSON.stringify(doc);
+}
 
 /** Kontrakt-JSON als GLB verpacken (wie tests/core/gltf-patch.test.ts): 12-Byte-Header +
  * JSON-Chunk + BIN-Chunk. */
@@ -217,6 +237,75 @@ describe("EditCoordinator", () => {
     const written = JSON.parse(io.files["3d/eg.edit.gltf"]);
     expect(written.nodes[0].translation).toEqual([4, 0, 2]);
     expect(coordinator.uiModel().dirty).toBe(false);
+  });
+
+  it("save: mehrere Edits landen alle im selben Patch (Ledger T2)", async () => {
+    const { coordinator, io } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+    coordinatorSelect(coordinator, 2);
+    coordinator.uiModel().applyTrs({ translation: [-5, 0, 8], scale: [2, 2, 2] });
+    await coordinator.save();
+
+    const written = JSON.parse(io.files["3d/eg.edit.gltf"]);
+    expect(written.nodes[0].translation).toEqual([4, 0, 2]);
+    expect(written.nodes[2].translation).toEqual([-5, 0, 8]);
+    expect(written.nodes[2].scale).toEqual([2, 2, 2]);
+    // Unbeteiligte Nodes bleiben, wie sie waren.
+    expect(written.nodes[3].translation).toEqual([0, -0.1, 0]);
+    expect(coordinator.uiModel().dirty).toBe(false);
+  });
+
+  // Das Original wird beim Speichern FRISCH gelesen (richtig) — die Indizes in
+  // `session.changes()` stammen aber vom Betreten. Wurde die Datei dazwischen mit
+  // umsortierten Nodes regeneriert, schriebe der Patch TRS auf die falschen JSON-Nodes:
+  // still falsche Daten, weil die Namen unangetastet bleiben und der nachgelagerte Diff
+  // deshalb einfach den falschen Raum verschiebt.
+  it("save: umsortiertes Original auf der Platte -> kein Schreiben, Notice, Session bleibt", async () => {
+    const files: Record<string, string> = { "3d/eg.gltf": contractGltfText() };
+    const { coordinator, io, notices } = makeCoordinator(files);
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+
+    // Regenerierung waehrend des Edits: gleiche Namen, andere Reihenfolge.
+    io.files["3d/eg.gltf"] = reorderedContractGltfText();
+    await coordinator.save();
+
+    expect(io.files["3d/eg.edit.gltf"]).toBeUndefined();
+    expect(notices).toContain(EDIT_STALE_ON_DISK);
+    // Kein Datenverlust: Modus und ungespeicherter Edit bleiben erhalten.
+    expect(coordinator.active).toBe(true);
+    expect(coordinator.uiModel().dirty).toBe(true);
+  });
+
+  it("save: verschwundener Node auf der Platte -> ebenfalls kein Schreiben", async () => {
+    const files: Record<string, string> = { "3d/eg.gltf": contractGltfText() };
+    const { coordinator, io, notices } = makeCoordinator(files);
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+
+    const shrunk = makeContractGltf() as Record<string, unknown>;
+    shrunk.scenes = [{ nodes: [2, 3] }]; // Node 0 ist nicht mehr Teil der Szene
+    io.files["3d/eg.gltf"] = JSON.stringify(shrunk);
+    await coordinator.save();
+
+    expect(io.files["3d/eg.edit.gltf"]).toBeUndefined();
+    expect(notices).toContain(EDIT_STALE_ON_DISK);
+    expect(coordinator.active).toBe(true);
+  });
+
+  it("save: unveraendertes Original schreibt normal weiter (kein Fehlalarm)", async () => {
+    const { coordinator, io, notices } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+    await coordinator.save();
+
+    expect(io.files["3d/eg.edit.gltf"]).toBeDefined();
+    expect(notices).not.toContain(EDIT_STALE_ON_DISK);
   });
 
   it("save auf einer .edit.-Quelle schreibt in-place", async () => {
