@@ -13,11 +13,12 @@ import {
 import { applyViewKey } from "../core/block-edit";
 import { parseBlockConfig, type BlockConfig } from "../core/block-config";
 import { detectFormat, type ModelFormat } from "../core/format";
-import type { PluginSettings } from "../core/settings-types";
+import { parseLockedPrefixes, type PluginSettings } from "../core/settings-types";
 import type { ViewSpec } from "../core/view-spec";
 import { toViewModel } from "../core/view-model";
 import type { SceneColors } from "../viewer/scene";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
+import { EditCoordinator, type EditIo } from "./edit-mode";
 import { readModel, resolveModelPath } from "./file-source";
 import { buildBox, renderHint, renderMessage, type BoxParts } from "./render-box";
 import {
@@ -46,6 +47,10 @@ export interface BlockDeps {
   sectionInfo: () => { lineStart: number; lineEnd: number } | null;
   /** Ist die Sidebar (Task 10) gerade offen? Entscheidet mit, ob die Toolbar erscheint. */
   panelVisible: () => boolean;
+  /** I/O fuer den Edit-Modus (Original lesen, Edit-Datei schreiben) — `vaultEditIo(app)`. */
+  editIo: EditIo;
+  /** Bestaetigungsdialog vorm Verwerfen ungespeicherter Edits. */
+  confirmDiscard: () => Promise<boolean>;
 }
 
 export class ModelBlock extends MarkdownRenderChild implements ViewportController {
@@ -62,6 +67,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   private unsubscribeActive: (() => void) | null = null;
   private toolbar: HTMLElement | null = null;
   private unloaded = false;
+  private edit: EditCoordinator | null = null;
 
   constructor(containerEl: HTMLElement, source: string, sourcePath: string, deps: BlockDeps) {
     super(containerEl);
@@ -91,6 +97,21 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       budget: wrapBudgetWithActive(this.deps.budget, this.deps.active, this),
     });
 
+    // `notify()` auf `ActiveViewport` kommt erst in Task 11 -- bis dahin reicht
+    // `syncToolbar(true)` allein, um Toolbar/Panel nach jeder Zustandsaenderung
+    // (enter/save/discard/setMode/...) nachzuziehen.
+    this.edit = new EditCoordinator({
+      io: this.deps.editIo,
+      filePath: () => this.file?.path ?? null,
+      host: () => this.host,
+      lockedPrefixes: () => parseLockedPrefixes(this.deps.settings().lockedNodePrefixes),
+      notice: (m) => new Notice(m),
+      confirmDiscard: this.deps.confirmDiscard,
+      onChange: () => {
+        this.syncToolbar(true);
+      },
+    });
+
     // Klasse aus der Registry ableiten statt einweg zu setzen — sonst bleibt
     // `tdcb-active` an jedem je beruehrten Block haengen, sobald ein anderer aktiv
     // wird (nichts setzt sie je wieder zurueck). `subscribe` liefert nur AENDERUNGEN,
@@ -112,6 +133,9 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     this.unsubscribeActive = null;
     this.observer?.disconnect();
     this.observer = null;
+    // VOR dem Host-Dispose: der Coordinator disposed sein Rig noch auf dem lebenden
+    // Viewport (kein Confirm, Edits sind fluechtig — Spec §4).
+    this.edit?.exitSilently();
     this.host?.dispose();
     this.host = null;
   }
@@ -207,6 +231,10 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // `force`, weil sich nur der Button-Zustand geaendert hat, nicht die Sichtbarkeit —
     // der idempotente Pfad wuerde hier sonst genau das Noetige ueberspringen.
     this.syncToolbar(true);
+
+    // Ueberlebt ein aktiver Edit-Modus die Regenerierung (gleicher Pfad, neuer Host)?
+    // `reapplyAfterReload()` legt die Session per Name auf den frisch geladenen Stand.
+    if (this.edit?.active) await this.edit.reapplyAfterReload();
   }
 
   /** Reagiert auf Regenerierung durch den Erzeuger-Loop (gleicher Pfad, neuer Inhalt). */
@@ -252,7 +280,9 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // haengende Leiste wuerde bei jedem dieser Wege verschwinden und nie zurueckkommen,
     // weil `syncToolbar()` nur den initialen Ladeweg abdeckt. `viewport` ist Geschwister
     // der Buehne, nicht Kind, und ueberlebt deshalb alle drei.
-    this.toolbar = buildToolbar(this.parts.viewport, this);
+    this.toolbar = buildToolbar(this.parts.viewport, this, this.edit?.uiModel() ?? null);
+    // Sichtbarer Rahmen um den Viewport, solange der Edit-Modus aktiv ist (styles.css).
+    this.parts.viewport.toggleClass("tdcb-editing", this.edit?.active ?? false);
   }
 
   private observeVisibility(): void {

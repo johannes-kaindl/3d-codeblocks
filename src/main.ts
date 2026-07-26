@@ -8,8 +8,10 @@ import {
 import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
+import { confirmDiscardEdits } from "./obsidian/confirm";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
+import { vaultEditIo } from "./obsidian/edit-mode";
 import { registerModelEmbeds, unregisterModelEmbeds } from "./obsidian/embed";
 import type { TrackedView } from "./obsidian/tracked-view";
 import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
@@ -67,6 +69,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
             return info ? { lineStart: info.lineStart, lineEnd: info.lineEnd } : null;
           },
           panelVisible: () => this.panelVisible(),
+          editIo: vaultEditIo(this.app),
+          confirmDiscard: () => confirmDiscardEdits(this.app),
         });
         this.track(block);
         ctx.addChild(block);

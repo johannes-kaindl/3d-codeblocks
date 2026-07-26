@@ -3,6 +3,7 @@ import { makeFakeEl } from "../__mocks__/obsidian";
 import { buildToolbar, toolbarVisible } from "../../src/obsidian/viewport-toolbar";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
 import { MODEL_LOADING_REASON, type ViewportController } from "../../src/core/active-viewport";
+import type { EditUiModel } from "../../src/core/edit-session";
 
 function controller(overrides: Partial<ViewportController> = {}): ViewportController {
   return {
@@ -14,6 +15,25 @@ function controller(overrides: Partial<ViewportController> = {}): ViewportContro
     ...overrides,
   };
 }
+
+function makeEditModel(over: Partial<EditUiModel> = {}): EditUiModel {
+  return {
+    active: false,
+    disabledReason: null,
+    mode: "translate",
+    dirty: false,
+    selection: null,
+    enter: vi.fn(),
+    save: vi.fn(),
+    discard: vi.fn(),
+    setMode: vi.fn(),
+    reset: vi.fn(),
+    applyTrs: vi.fn(),
+    ...over,
+  };
+}
+
+const labels = (bar: any) => bar.children.map((b: any) => b.getAttribute("aria-label"));
 
 describe("toolbarVisible", () => {
   it("shows only when resolvePanelTarget picks the toolbar", () => {
@@ -68,5 +88,51 @@ describe("buildToolbar", () => {
     expect(bar.children[0].disabled).toBe(true);
     expect(bar.children[0].title).toBe(MODEL_LOADING_REASON);
     expect(bar.children[1].disabled).toBe(false);
+  });
+});
+
+describe("buildToolbar im Edit-Kontext", () => {
+  it("inaktiv: View-Buttons + Edit-Button", () => {
+    const bar: any = buildToolbar(makeFakeEl(), controller(), makeEditModel());
+    expect(labels(bar)).toContain("Edit model");
+  });
+
+  it("Edit-Button traegt den Sperrgrund als Tooltip und ist deaktiviert", () => {
+    const bar: any = buildToolbar(
+      makeFakeEl(),
+      controller(),
+      makeEditModel({ disabledReason: "Editing requires a glTF or GLB file" }),
+    );
+    const edit = bar.children.find((b: any) => b.getAttribute("aria-label") === "Edit model");
+    expect(edit.disabled).toBe(true);
+    expect(edit.title).toContain("glTF");
+  });
+
+  it("aktiv: Move/Scale/Reset/Save/Discard statt der View-Buttons; Save folgt dirty", () => {
+    const model = makeEditModel({ active: true, dirty: false, selection: null });
+    const bar: any = buildToolbar(makeFakeEl(), controller(), model);
+    expect(labels(bar)).toEqual(["Move", "Scale", "Reset node", "Save edits", "Discard edits"]);
+    const save = bar.children.find((b: any) => b.getAttribute("aria-label") === "Save edits");
+    expect(save.disabled).toBe(true);
+    const reset = bar.children.find((b: any) => b.getAttribute("aria-label") === "Reset node");
+    expect(reset.disabled).toBe(true); // keine Auswahl
+  });
+
+  it("Klicks rufen die Modell-Handler", () => {
+    const model = makeEditModel({
+      active: true,
+      dirty: true,
+      selection: { name: "privat-herd", trs: { translation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+    const bar: any = buildToolbar(makeFakeEl(), controller(), model);
+    bar.children.find((b: any) => b.getAttribute("aria-label") === "Scale").click();
+    expect(model.setMode).toHaveBeenCalledWith("scale");
+    bar.children.find((b: any) => b.getAttribute("aria-label") === "Save edits").click();
+    expect(model.save).toHaveBeenCalled();
+  });
+
+  it("ohne Edit-Modell (Embed/FileView-Altpfad) unveraendert nur View-Buttons", () => {
+    const bar: any = buildToolbar(makeFakeEl(), controller());
+    expect(labels(bar)).toEqual(["Save view", "Clear view", "Fit camera to model"]);
   });
 });

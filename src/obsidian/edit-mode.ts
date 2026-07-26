@@ -248,7 +248,16 @@ export class EditCoordinator {
   async discard(): Promise<void> {
     const session = this.session;
     if (!session) return;
-    if (session.dirty && !(await this.deps.confirmDiscard())) return;
+    if (session.dirty) {
+      // Epoch VOR dem Confirm-Await ziehen (gleicher Schutz wie enter()/reapplyAfterReload(),
+      // Fix #1, Task-9-Review): waehrend der Nutzer im Dialog entscheidet, kann ein Reload
+      // das Rig austauschen (reapplyAfterReload() erhoeht denselben Zaehler). Diese
+      // Fortsetzung erkennt sich dann als ueberholt und darf NICHT mehr das frisch geladene
+      // Rig/Session unter dem alten discard()-Aufruf wegreissen (Carry-over aus Task 9).
+      const epoch = ++this.epoch;
+      if (!(await this.deps.confirmDiscard())) return;
+      if (epoch !== this.epoch) return;
+    }
     for (const edit of session.changes()) {
       session.resetNode(edit.index);
       const base = session.current(edit.index);

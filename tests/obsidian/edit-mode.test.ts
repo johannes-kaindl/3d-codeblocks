@@ -287,6 +287,44 @@ describe("EditCoordinator", () => {
     expect(host.pin).toHaveBeenLastCalledWith(false);
   });
 
+  // Carry-over-Fund aus der Task-9-Nachpruefung (Ledger): `discard()` hatte KEINEN
+  // Epoch-Schutz um den `confirmDiscard()`-Await. Task 10 macht `reapplyAfterReload()`
+  // aus dem echten Ladeweg erreichbar (loadNow()) -- ein Reload waehrend der offene
+  // Confirm-Dialog haengt, taeuscht dann genau diese Race vor: der Reload tauscht
+  // Rig/Session aus, und der stale discard() wuerde danach die FRISCH geladene Session
+  // unter sich wegreissen, statt sich als ueberholt zu erkennen (gleicher Fix wie
+  // enter()/reapplyAfterReload(), Fix #1, Task-9-Review).
+  it("discard: ein Reload waehrend des offenen Confirm-Dialogs reisst die neu geladene Session nicht weg", async () => {
+    let resolveConfirm!: (value: boolean) => void;
+    const confirm = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveConfirm = resolve;
+        }),
+    );
+    const { coordinator, host } = makeCoordinator(
+      { "3d/eg.gltf": contractGltfText() },
+      { confirmDiscard: confirm },
+    );
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+
+    const discardPromise = coordinator.discard(); // haengt im offenen Confirm-Dialog
+
+    // Reload waehrend der Nutzer noch entscheidet (z.B. Datei-Watcher-Reload):
+    await coordinator.reapplyAfterReload();
+    expect(coordinator.uiModel().dirty).toBe(true); // der Edit hat den Reload ueberlebt
+
+    resolveConfirm(true); // Nutzer bestaetigt jetzt endlich das Verwerfen
+    await discardPromise;
+
+    // Der ueberholte discard() darf die frisch geladene Session NICHT wegreissen.
+    expect(coordinator.active).toBe(true);
+    expect(coordinator.uiModel().dirty).toBe(true);
+    expect(host.pin).toHaveBeenLastCalledWith(true);
+  });
+
   it("reapplyAfterReload: Session ueberlebt die Regeneration per Name", async () => {
     const { coordinator, host } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
     await coordinator.enter();

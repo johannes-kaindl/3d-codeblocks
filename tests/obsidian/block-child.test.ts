@@ -5,6 +5,8 @@ import { ModelBlock } from "../../src/obsidian/block-child";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
 import { ActiveViewport } from "../../src/core/active-viewport";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
+import type { EditIo } from "../../src/obsidian/edit-mode";
+import { contractGltfText } from "../helpers/contract-gltf";
 
 function makeFactory() {
   const created: any[] = [];
@@ -34,6 +36,21 @@ function makeFactory() {
 
 function makeBudget() {
   return { register: vi.fn(), touch: vi.fn(), unregister: vi.fn() };
+}
+
+/** In-Memory-`EditIo`-Fake wie im Task-9-Test (`tests/obsidian/edit-mode.test.ts`) --
+ *  reicht fuer die Verdrahtungstests hier, die nie wirklich patchen. */
+function makeEditIo(files: Record<string, string> = {}): EditIo {
+  return {
+    exists: (path) => path in files,
+    readText: (path) => Promise.resolve(files[path] ?? "{}"),
+    readBinary: () => Promise.reject(new Error("binary unused in these tests")),
+    writeText: (path, text) => {
+      files[path] = text;
+      return Promise.resolve();
+    },
+    writeBinary: () => Promise.reject(new Error("binary unused in these tests")),
+  };
 }
 
 function glbFile(path = "a.glb", mtime = 1): TFile {
@@ -73,6 +90,8 @@ function makeDeps(overrides: Partial<Record<string, unknown>> = {}) {
       },
       sectionInfo: () => ({ lineStart: 0, lineEnd: 2 }),
       panelVisible: () => false,
+      editIo: makeEditIo(),
+      confirmDiscard: () => Promise.resolve(true),
       ...overrides,
     } as any,
   };
@@ -566,6 +585,84 @@ describe("toolbar state after load (regression)", () => {
     (release as (() => void) | null)?.();
 
     expect(findAllToolbars(el)).toHaveLength(1);
+  });
+});
+
+// Task 10: Block-Verdrahtung des EditCoordinator -- Betreten (ueber die Toolbar
+// sichtbar), Format-Sperre, Unload waehrend eines aktiven Edits.
+describe("edit mode wiring", () => {
+  it('shows an enabled "Edit model" button after loadNow() with a .gltf file', async () => {
+    const { deps, app } = makeDeps({ panelVisible: () => false });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    const toolbar = findToolbar(el);
+    const editButton = toolbar.children.find(
+      (b: any) => b.getAttribute("aria-label") === "Edit model",
+    );
+    expect(editButton).toBeTruthy();
+    expect(editButton.disabled).toBe(false);
+  });
+
+  it('disables "Edit model" for an .stl file with the format reason', async () => {
+    const { deps, app } = makeDeps({ panelVisible: () => false });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.stl"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.stl", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    const toolbar = findToolbar(el);
+    const editButton = toolbar.children.find(
+      (b: any) => b.getAttribute("aria-label") === "Edit model",
+    );
+    expect(editButton.disabled).toBe(true);
+    expect(editButton.title).toContain("glTF");
+  });
+
+  it("onunload() during an active edit does not throw and unpins (Coordinator spy)", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { deps, app } = makeDeps({
+      panelVisible: () => false,
+      editIo: makeEditIo(editFiles),
+    });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    // Die Fake-Viewport aus `makeFactory()` kennt `createEditRig` nicht -- ohne ein
+    // Rig bleibt `enter()` bewusst inaktiv (Fix #4, edit-mode.ts). Fuer diesen Test
+    // (wirklich AKTIVER Edit-Modus beim Unload) braucht es ein echtes Rig-Double.
+    const originalCreate = deps.factory.create;
+    deps.factory.create = (opts: any) => {
+      const viewport = originalCreate(opts);
+      viewport.createEditRig = vi.fn(() => ({
+        setMode: vi.fn(),
+        select: vi.fn(),
+        applyTrs: vi.fn(),
+        dispose: vi.fn(),
+      }));
+      return viewport;
+    };
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    const edit = (block as any).edit;
+    await edit.enter();
+    expect(edit.active).toBe(true);
+
+    const exitSilently = vi.spyOn(edit, "exitSilently");
+
+    expect(() => block.onunload()).not.toThrow();
+
+    expect(exitSilently).toHaveBeenCalledTimes(1);
+    expect(edit.active).toBe(false);
   });
 });
 

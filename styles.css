@@ -26,6 +26,12 @@
   width: 100%;
 }
 
+/* Sichtbarer Rahmen um den Viewport, solange der Edit-Modus aktiv ist (Task 10). */
+.tdcb-viewport.tdcb-editing {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
 .tdcb-stage {
   width: 100%;
   overflow: hidden;
@@ -156,6 +162,11 @@
   display: flex;
   align-items: center;
   padding: var(--size-4-1);
+}
+
+/* Aktiver Move-/Scale-Modus im Edit-Werkzeugsatz (Task 10). */
+.tdcb-toolbar-button.is-active {
+  color: var(--interactive-accent);
 }
 
 .tdcb-panel-presets {

@@ -7,6 +7,7 @@ import {
   NO_BLOCK_REASON,
   type ViewportController,
 } from "../core/active-viewport";
+import type { EditUiModel } from "../core/edit-session";
 import { resolvePanelTarget, type PanelPlacement } from "../core/panel-target";
 
 export function toolbarVisible(placement: PanelPlacement, panelVisible: boolean): boolean {
@@ -49,23 +50,126 @@ const BUTTONS: ToolbarButton[] = [
   },
 ];
 
-export function buildToolbar(parent: HTMLElement, controller: ViewportController): HTMLElement {
+interface EditButtonSpec {
+  icon: string;
+  label: string;
+  disabled: (edit: EditUiModel) => boolean;
+  // `null` = kein eigener Tooltip, Label reicht als title.
+  title: (edit: EditUiModel) => string | null;
+  isActive?: (edit: EditUiModel) => boolean;
+  run: (edit: EditUiModel) => void;
+}
+
+const EDIT_BUTTONS: EditButtonSpec[] = [
+  {
+    icon: "move",
+    label: "Move",
+    disabled: () => false,
+    title: () => null,
+    isActive: (edit) => edit.mode === "translate",
+    run: (edit) => edit.setMode("translate"),
+  },
+  {
+    icon: "scaling",
+    label: "Scale",
+    disabled: () => false,
+    title: () => null,
+    isActive: (edit) => edit.mode === "scale",
+    run: (edit) => edit.setMode("scale"),
+  },
+  {
+    icon: "rotate-ccw",
+    label: "Reset node",
+    disabled: (edit) => edit.selection === null,
+    title: () => null,
+    run: (edit) => edit.reset(),
+  },
+  {
+    icon: "save",
+    label: "Save edits",
+    disabled: (edit) => !edit.dirty,
+    title: (edit) => (edit.dirty ? null : "No changes yet"),
+    run: (edit) => edit.save(),
+  },
+  {
+    icon: "x",
+    label: "Discard edits",
+    disabled: () => false,
+    title: () => null,
+    run: (edit) => edit.discard(),
+  },
+];
+
+/** Ein Icon-Button, wie ihn beide Leisten (View-Buttons, Edit-Buttons) brauchen —
+ *  Icon, zugaengliches `aria-label` (UI-STANDARD §2), disabled+title, stopPropagation
+ *  gegen den Klick-durch-zum-Viewport-Bug. */
+function appendButton(
+  bar: HTMLElement,
+  icon: string,
+  label: string,
+  disabled: boolean,
+  title: string,
+  isActive: boolean,
+  onClick: () => void,
+): void {
+  const button = bar.createEl("button", { cls: "tdcb-toolbar-button" });
+  setIcon(button, icon);
+  button.setAttribute("aria-label", label);
+  button.disabled = disabled;
+  button.title = title;
+  button.toggleClass("is-active", isActive);
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+}
+
+/** `edit` optional: ohne ihn (Embed/FileView-Altpfad) exakt das bisherige Verhalten —
+ *  nur die drei View-Buttons. Mit `edit` kommt je nach `edit.active` entweder ein
+ *  vierter View-Button ("Edit model") dazu, oder die View-Buttons weichen komplett
+ *  den fuenf Edit-Buttons (Move/Scale/Reset/Save/Discard). */
+export function buildToolbar(
+  parent: HTMLElement,
+  controller: ViewportController,
+  edit?: EditUiModel | null,
+): HTMLElement {
   const bar = parent.createDiv({ cls: "tdcb-toolbar" });
+
+  if (edit?.active) {
+    for (const spec of EDIT_BUTTONS) {
+      appendButton(
+        bar,
+        spec.icon,
+        spec.label,
+        spec.disabled(edit),
+        spec.title(edit) ?? spec.label,
+        spec.isActive?.(edit) ?? false,
+        () => spec.run(edit),
+      );
+    }
+    return bar;
+  }
+
   const hasBlock = controller.canSave();
   const hasView = controller.getView() !== null;
 
   for (const spec of BUTTONS) {
-    const button = bar.createEl("button", { cls: "tdcb-toolbar-button" });
-    setIcon(button, spec.icon);
-    // Icon-only-Buttons brauchen ein zugaengliches Label (UI-STANDARD §2).
-    button.setAttribute("aria-label", spec.label);
     const reason = spec.disabledReason(hasBlock, hasView);
-    button.disabled = reason !== null;
-    button.title = reason ?? spec.label;
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      spec.run(controller);
-    });
+    appendButton(bar, spec.icon, spec.label, reason !== null, reason ?? spec.label, false, () =>
+      spec.run(controller),
+    );
+  }
+
+  if (edit) {
+    appendButton(
+      bar,
+      "pencil",
+      "Edit model",
+      edit.disabledReason !== null,
+      edit.disabledReason ?? "Edit model",
+      false,
+      () => edit.enter(),
+    );
   }
 
   return bar;
