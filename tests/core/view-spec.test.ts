@@ -61,6 +61,21 @@ describe("formatView", () => {
     expect(formatView({ azimuth: 20, elevation: 10, distance: 1 })).toBe("20,10,1");
   });
 
+  // Von Hand trifft niemand einen Standardwinkel auf 2 Grad genau (Smoke #4, Schritt 3:
+  // "von oben" schauen ergab 71 statt 89 Grad). 5 Grad Toleranz macht den Namen im
+  // Alltag erreichbar; der Sprung beim Wiederherstellen bleibt dabei unsichtbar klein.
+  it("writes the name when the view is a few degrees off in both angles", () => {
+    expect(formatView({ azimuth: 41, elevation: 34, distance: 1 })).toBe("iso");
+  });
+
+  // Die Gegenprobe zur Entscheidung, die Toleranz NICHT weiter aufzuziehen: der reale
+  // Wert aus Smoke #4 liegt 18 Grad neben `top` und muss Zahlen bleiben. Als `top`
+  // geschrieben wuerde die Kamera beim Wiederherstellen sichtbar von 71 auf 89 springen
+  // — genau das, was `view:` verspricht nicht zu tun.
+  it("keeps numbers for a hand-turned near-top view that is far off the named angle", () => {
+    expect(formatView({ azimuth: 358, elevation: 71, distance: 1 })).toBe("358,71,1");
+  });
+
   it("does not use a name when the distance differs too much", () => {
     expect(formatView({ azimuth: 45, elevation: 30, distance: 2 })).toBe("45,30,2");
   });

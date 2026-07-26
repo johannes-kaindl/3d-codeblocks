@@ -30,8 +30,13 @@ export const NAMED_VIEWS: Record<string, ViewSpec> = {
 
 export const VIEW_NAMES = Object.keys(NAMED_VIEWS).join(", ");
 
-/** Toleranz, innerhalb derer `formatView` lieber den Namen als Zahlen schreibt. */
-const NAME_ANGLE_TOLERANCE = 2;
+/** Toleranz, innerhalb derer `formatView` lieber den Namen als Zahlen schreibt.
+    5 Grad statt urspruenglich 2: von Hand trifft niemand einen Standardwinkel auf zwei
+    Grad genau, damit war die Namensform praktisch unerreichbar (Smoke #4, Schritt 3).
+    Bewusst NICHT weiter aufgezogen — der Name ist verlustbehaftet, und ab einer gewissen
+    Abweichung springt die Kamera beim Wiederherstellen sichtbar auf den Standardwinkel.
+    Bei 5 Grad bleibt dieser Sprung unter der Wahrnehmungsschwelle. */
+const NAME_ANGLE_TOLERANCE = 5;
 const NAME_DISTANCE_TOLERANCE = 0.05;
 
 function wrapAzimuth(value: number): number {
