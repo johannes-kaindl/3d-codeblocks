@@ -122,9 +122,12 @@ name starts with one of the comma-separated prefixes cannot be selected or edite
 
 **Known limitation:** node identity relies on the glTF node indices three.js's
 `GLTFLoader` reports via `parser.associations`. In files where several top-level nodes
-share a single mesh, that association can mis-select — a three.js `GLTFLoader` quirk, not
-something this plugin controls. One mesh per node avoids it; most generators (CAD
-exports, floor-plan scripts) already produce models this way.
+share a single mesh, that association can become ambiguous — a three.js `GLTFLoader`
+quirk, not something this plugin controls. Mis-selection is now prevented: nodes whose
+index is ambiguous simply become unselectable, so a click never moves the wrong room.
+Editing files with shared meshes is still unsupported — those nodes cannot be edited at
+all. One mesh per node avoids it; most generators (CAD exports, floor-plan scripts)
+already produce models this way.
 
 ## Settings
 

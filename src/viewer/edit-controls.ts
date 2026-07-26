@@ -35,6 +35,42 @@ export function findByIndex(root: Object3D, index: number): Object3D | null {
   return root.children.find((child) => child.userData.tdcbNodeIndex === index) ?? null;
 }
 
+/** Top-Level-Indizes, die MEHRFACH unter `root` vorkommen.
+ *
+ * three's `GLTFLoader` klont Objekte fuer Nodes mit geteiltem mesh-Index und
+ * propagiert dabei dieselbe `associations`-Wertreferenz auf alle Klone — danach koennen
+ * zwei Top-Level-Kinder denselben `tdcbNodeIndex` tragen. `findByIndex` nimmt dann
+ * einfach das erste: ein Klick auf Raum B verschoebe still Raum A, und gespeichert
+ * wuerde der falsche JSON-Node. Solche Indizes sind nicht aufloesbar, also auch nicht
+ * auswaehlbar — lieber gar keine Auswahl als die falsche. */
+export function duplicatedIndices(root: Object3D): Set<number> {
+  const seen = new Set<number>();
+  const duplicated = new Set<number>();
+  for (const child of root.children) {
+    const index: unknown = child.userData.tdcbNodeIndex;
+    if (typeof index !== "number") continue;
+    if (seen.has(index)) duplicated.add(index);
+    else seen.add(index);
+  }
+  return duplicated;
+}
+
+/** Die ganze Auswahl-Entscheidung als pure Funktion: aus einem Raycast-Treffer wird ein
+ * auswaehlbarer Top-Level-Index — oder `null`. Herausgeloest, damit sie ohne WebGL,
+ * Kamera und Pointer-Events testbar ist. `duplicated` wird VOR `isSelectable` geprueft:
+ * ein mehrdeutiger Index darf gar nicht erst als Kandidat durchgereicht werden. */
+export function pickIndex(
+  root: Object3D,
+  hit: Object3D | null,
+  duplicated: ReadonlySet<number>,
+  isSelectable: (index: number) => boolean,
+): number | null {
+  if (!hit) return null;
+  const index = topLevelIndex(root, hit);
+  if (index === null || duplicated.has(index)) return null;
+  return isSelectable(index) ? index : null;
+}
+
 export function objectTrs(object: Object3D): NodeTrs {
   return {
     translation: [object.position.x, object.position.y, object.position.z],
@@ -57,11 +93,17 @@ export class EditRig implements EditRigLike {
   // `false` zurueck, bevor unser Handler ihn lesen wuerde. Ein eigenes Flag, gesetzt
   // beim Drag-Start (dragging-changed), macht die Klick-Erkennung unabhaengig davon.
   private gizmoDragged = false;
+  // Einmal beim Rig-Bau bestimmt (der Modellbaum steht dann fest): Indizes, die sich
+  // nicht eindeutig auf ein Objekt abbilden lassen. Zuweisung im Konstruktor-RUMPF,
+  // nicht als Feld-Initialisierer — `ctx` ist eine Parameter-Property und dort noch
+  // nicht garantiert gesetzt.
+  private readonly duplicated: ReadonlySet<number>;
 
   constructor(
     private readonly ctx: EditRigContext,
     private readonly cb: EditRigCallbacks,
   ) {
+    this.duplicated = duplicatedIndices(ctx.modelRoot);
     this.controls = new TransformControls(ctx.camera, ctx.domElement);
     this.controls.setMode("translate");
     ctx.scene.add(this.helper());
@@ -148,7 +190,10 @@ export class EditRig implements EditRigLike {
     this.raycaster.setFromCamera(ndc, this.ctx.camera);
     const hits = this.raycaster.intersectObject(this.ctx.modelRoot, true);
     const first = hits[0]?.object ?? null;
-    const index = first ? topLevelIndex(this.ctx.modelRoot, first) : null;
-    this.cb.onSelect(index !== null && this.cb.isSelectable(index) ? index : null);
+    // `isSelectable` als Lambda weiterreichen, nicht als blosse Methodenreferenz —
+    // sonst haenge die Bindung an `cb` am Aufrufer.
+    this.cb.onSelect(
+      pickIndex(this.ctx.modelRoot, first, this.duplicated, (index) => this.cb.isSelectable(index)),
+    );
   };
 }
