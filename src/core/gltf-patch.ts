@@ -5,6 +5,14 @@
 // (keine Mesh-Edits, keine Node-CRUD, keine matrix, Namen unangetastet) gar nicht
 // verletzt werden — sie sind Struktureigenschaft, kein Versprechen.
 
+import {
+  CHUNK_TYPE_JSON,
+  GLB_CHUNK_HEADER_BYTES,
+  GLB_HEADER_BYTES,
+  GLB_MAGIC,
+  glbJsonText,
+} from "./gltf-inspect";
+
 export type Vec3 = [number, number, number];
 
 export interface NodeTrs {
@@ -102,4 +110,57 @@ export function extractTrsByName(json: unknown): Map<string, NodeTrs> {
     map.set(node.name, node.base);
   }
   return map;
+}
+
+export interface TrsEdit {
+  index: number;
+  translation: Vec3;
+  scale: Vec3;
+}
+
+export function patchGltfJson(text: string, edits: TrsEdit[]): string {
+  const doc = JSON.parse(text) as GltfDoc;
+  if (!Array.isArray(doc.nodes)) throw new Error("glTF has no nodes array");
+  const nodes = doc.nodes as GltfNode[];
+
+  for (const edit of edits) {
+    const node = nodes[edit.index];
+    if (node === undefined) throw new Error(`glTF node index ${edit.index} does not exist`);
+    // Gesperrt ab Analyse — landet trotzdem ein Edit hier, ist das ein Programmierfehler,
+    // und stilles Ueberschreiben wuerde den Kontrakt (TRS statt matrix) brechen.
+    if (node.matrix !== undefined) throw new Error(`node ${edit.index} uses a matrix transform`);
+    node.translation = [...edit.translation];
+    node.scale = [...edit.scale];
+  }
+
+  return JSON.stringify(doc);
+}
+
+export function patchGlbContainer(buffer: ArrayBuffer, edits: TrsEdit[]): ArrayBuffer {
+  const jsonText = glbJsonText(buffer);
+  if (jsonText === null) throw new Error("not a valid GLB container");
+
+  const patchedJson = new TextEncoder().encode(patchGltfJson(jsonText, edits));
+  // GLB-Spec: JSON-Chunk mit 0x20 (Space) auf ein Vielfaches von 4 auffuellen.
+  const paddedLength = (patchedJson.length + 3) & ~3;
+
+  const view = new DataView(buffer);
+  const oldJsonLength = view.getUint32(GLB_HEADER_BYTES, true);
+  const restStart = GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + oldJsonLength;
+  const rest = new Uint8Array(buffer, restStart); // BIN-Chunk inkl. Header, verbatim
+
+  const total = GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + paddedLength + rest.byteLength;
+  const out = new ArrayBuffer(total);
+  const outView = new DataView(out);
+  const outBytes = new Uint8Array(out);
+
+  outView.setUint32(0, GLB_MAGIC, true);
+  outView.setUint32(4, 2, true);
+  outView.setUint32(8, total, true);
+  outView.setUint32(GLB_HEADER_BYTES, paddedLength, true);
+  outView.setUint32(GLB_HEADER_BYTES + 4, CHUNK_TYPE_JSON, true);
+  outBytes.fill(0x20, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + paddedLength);
+  outBytes.set(patchedJson, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES);
+  outBytes.set(rest, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + paddedLength);
+  return out;
 }

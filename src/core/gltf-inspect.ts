@@ -7,10 +7,22 @@
 // GLB v2: 12 Byte Header (magic "glTF", version, length), dann Chunks je 8 Byte
 // Header (chunkLength, chunkType); erster Chunk ist JSON. Alles little-endian.
 
-const GLB_MAGIC = 0x46546c67;
-const CHUNK_TYPE_JSON = 0x4e4f534a;
-const HEADER_BYTES = 12;
-const CHUNK_HEADER_BYTES = 8;
+export const GLB_MAGIC = 0x46546c67;
+export const CHUNK_TYPE_JSON = 0x4e4f534a;
+export const GLB_HEADER_BYTES = 12;
+export const GLB_CHUNK_HEADER_BYTES = 8;
+
+/** Text des JSON-Chunks — `null` bei jedem Struktur-Defekt. */
+export function glbJsonText(buffer: ArrayBuffer): string | null {
+  if (buffer.byteLength < GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES) return null;
+  const view = new DataView(buffer);
+  if (view.getUint32(0, true) !== GLB_MAGIC) return null;
+  if (view.getUint32(GLB_HEADER_BYTES + 4, true) !== CHUNK_TYPE_JSON) return null;
+  const jsonLength = view.getUint32(GLB_HEADER_BYTES, true);
+  const jsonStart = GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES;
+  if (jsonLength === 0 || jsonStart + jsonLength > buffer.byteLength) return null;
+  return new TextDecoder().decode(new Uint8Array(buffer, jsonStart, jsonLength));
+}
 
 export interface GlbInspection {
   /** Gueltiger GLB-Container mit lesbarem JSON-Chunk. */
@@ -26,18 +38,10 @@ export const UNSUPPORTED_EXTENSIONS = [
 const INVALID: GlbInspection = { valid: false, requiredExtensions: [] };
 
 export function inspectGlb(buffer: ArrayBuffer): GlbInspection {
-  if (buffer.byteLength < HEADER_BYTES + CHUNK_HEADER_BYTES) return INVALID;
-
-  const view = new DataView(buffer);
-  if (view.getUint32(0, true) !== GLB_MAGIC) return INVALID;
-  if (view.getUint32(HEADER_BYTES + 4, true) !== CHUNK_TYPE_JSON) return INVALID;
-
-  const jsonLength = view.getUint32(HEADER_BYTES, true);
-  const jsonStart = HEADER_BYTES + CHUNK_HEADER_BYTES;
-  if (jsonLength === 0 || jsonStart + jsonLength > buffer.byteLength) return INVALID;
+  const text = glbJsonText(buffer);
+  if (text === null) return INVALID;
 
   try {
-    const text = new TextDecoder().decode(new Uint8Array(buffer, jsonStart, jsonLength));
     const parsed: unknown = JSON.parse(text);
     const required =
       typeof parsed === "object" && parsed !== null
