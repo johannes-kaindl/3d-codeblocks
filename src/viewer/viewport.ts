@@ -19,6 +19,7 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { fitCamera } from "../core/camera-fit";
 import { cameraToView, viewToCamera, type ViewSpec } from "../core/view-spec";
+import { EditRig, type EditRigCallbacks } from "./edit-controls";
 import { GRID_NAME, type SceneColors, buildScene, makeGrid } from "./scene";
 
 const FOV_DEG = 50;
@@ -172,6 +173,24 @@ export class Viewport {
     if (this.disposed || !this.bounds) return null;
     const base = fitCamera(this.bounds.min, this.bounds.max, FOV_DEG, this.aspect()).distance;
     return cameraToView(this.camera.position, this.controls.target, base);
+  }
+
+  /** Rig fuer den Edit-Modus — `null`, solange kein Modell geladen ist. */
+  createEditRig(cb: EditRigCallbacks): EditRig | null {
+    if (this.disposed || !this.model) return null;
+    return new EditRig(
+      {
+        scene: this.scene,
+        camera: this.camera,
+        domElement: this.renderer.domElement,
+        modelRoot: this.model,
+        setOrbitEnabled: (on) => {
+          this.controls.enabled = on;
+        },
+        requestRender: () => this.requestRender(),
+      },
+      cb,
+    );
   }
 
   /** Aktuellen Frame als Data-URL — Grundlage des Poster-Modus. */

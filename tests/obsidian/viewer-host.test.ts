@@ -4,6 +4,8 @@ import { ViewerHost } from "../../src/obsidian/viewer-host";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
 
+const fakeRig = { setMode: vi.fn(), select: vi.fn(), applyTrs: vi.fn(), dispose: vi.fn() };
+
 function makeVp() {
   return {
     disposed: 0,
@@ -14,6 +16,7 @@ function makeVp() {
     resize: vi.fn(),
     resetCamera: vi.fn(),
     capturePoster: () => "data:image/png;base64,AAA",
+    createEditRig: vi.fn(() => fakeRig),
     dispose() {
       this.disposed += 1;
     },
@@ -144,5 +147,37 @@ describe("ViewerHost with viewMode 'on-click'", () => {
     await settle();
 
     expect(budget.register).toHaveBeenCalled();
+  });
+});
+
+describe("ViewerHost edit support", () => {
+  it("delegiert createEditRig an den Viewport", async () => {
+    const { host, created } = makeHost();
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+    const cb = { isSelectable: () => true, onSelect: vi.fn(), onTransformEnd: vi.fn(), onInteract: vi.fn() };
+    expect(host.createEditRig(cb)).not.toBeNull();
+    expect(created[0].createEditRig).toHaveBeenCalledWith(cb);
+  });
+
+  it("liefert null ohne Viewport (Poster/Fehler)", () => {
+    const { host } = makeHost();
+    expect(host.createEditRig({ isSelectable: () => true, onSelect: vi.fn(), onTransformEnd: vi.fn(), onInteract: vi.fn() })).toBeNull();
+  });
+
+  it("pinned: Budget-Eviction degradiert NICHT zum Poster", async () => {
+    const { host, budget, created } = makeHost();
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+    host.pin(true);
+    const release = budget.register.mock.calls[0][1] as () => void;
+    release(); // LRU wirft uns raus — im Edit-Modus ignorieren
+    expect(created[0].disposed).toBe(0);
+  });
+
+  it("pinned: on-click-Modus startet nach Reload trotzdem live (Regeneration im Edit)", async () => {
+    const { host, created } = makeHost({ settings: () => ({ ...DEFAULT_SETTINGS, viewMode: "on-click" as const }) });
+    host.pin(true);
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+    // Ohne Pin wuerde on-click ohne Aktivierung sofort degradieren (kein zweiter Viewport-Zustand):
+    expect(created[0].disposed).toBe(0);
   });
 });

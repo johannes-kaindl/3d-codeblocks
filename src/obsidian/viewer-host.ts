@@ -8,11 +8,13 @@
 // `loadModel`/`readColors`/`factory` kommen als Dependency herein, damit der Kern ohne
 // echtes three.js/WebGL testbar bleibt.
 import type { ActiveViewport, ViewportController } from "../core/active-viewport";
+import type { EditRigLike } from "../core/edit-session";
 import { detectFormat, type ModelFormat } from "../core/format";
 import { inspectGlb, unsupportedRequired } from "../core/gltf-inspect";
 import type { PluginSettings } from "../core/settings-types";
 import { toViewModel, type ViewerState } from "../core/view-model";
 import type { ViewSpec } from "../core/view-spec";
+import type { EditRigCallbacks } from "../viewer/edit-controls";
 import type { SceneColors } from "../viewer/scene";
 import { renderMessage } from "./render-box";
 
@@ -24,6 +26,7 @@ export interface ViewportLike {
   resize(): void;
   resetCamera(): void;
   capturePoster(): string | null;
+  createEditRig?(cb: EditRigCallbacks): EditRigLike | null;
   dispose(): void;
 }
 
@@ -105,6 +108,9 @@ export class ViewerHost {
   // sonst nicht, WARUM es rendert, und schickt den Klick im `on-click`-Modus sofort
   // wieder ins Standbild zurueck — dadurch war der Modus seit v0.1.0 unbenutzbar.
   private activated = false;
+  // Edit-Modus laeuft: Poster-Degradierung aussetzen (weder LRU-Eviction noch
+  // on-click-Erststart duerfen das Modell unter dem Editor wegziehen).
+  private pinned = false;
 
   constructor(
     private readonly stage: HTMLElement,
@@ -167,6 +173,15 @@ export class ViewerHost {
     this.viewport?.setView(spec);
   }
 
+  /** Im Edit-Modus: Poster-Degradierung aussetzen (LRU-Eviction UND on-click-Erststart). */
+  pin(on: boolean): void {
+    this.pinned = on;
+  }
+
+  createEditRig(cb: EditRigCallbacks): EditRigLike | null {
+    return this.viewport?.createEditRig?.(cb) ?? null;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.releaseViewport();
@@ -214,7 +229,7 @@ export class ViewerHost {
     // Nach dem Klick gilt der Modus als erfuellt: das Modell bleibt live und laeuft
     // ab jetzt ueber das Budget wie jedes andere — es kann also spaeter wieder zum
     // Standbild werden, und ein erneuter Klick holt es zurueck.
-    if (settings.viewMode === "on-click" && !this.activated) {
+    if (settings.viewMode === "on-click" && !this.activated && !this.pinned) {
       this.degradeToPoster();
       return;
     }
@@ -224,6 +239,7 @@ export class ViewerHost {
   }
 
   private degradeToPoster(): void {
+    if (this.pinned) return;
     if (!this.viewport) return;
 
     this.posterUrl = this.viewport.capturePoster() ?? this.posterUrl;
