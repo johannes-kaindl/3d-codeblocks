@@ -106,6 +106,11 @@ async function makeLoadedFileView(overrides: Record<string, unknown> = {}) {
   return { view, created, active };
 }
 
+/** Token-genau pruefen (der Mock fuehrt `className` als Token-Liste). */
+function hasClass(el: any, cls: string): boolean {
+  return String(el.className).split(/\s+/).includes(cls);
+}
+
 function fileAt(path: string): TFile {
   const f = new TFile();
   f.path = path;
@@ -170,6 +175,27 @@ describe("ModelFileView edit mode wiring", () => {
 
     const panel = view.controller.editPanel?.();
     expect(panel!.disabledReason).toContain("glTF");
+  });
+
+  // Spec 2.1: der sichtbare Rahmen gehoert zu JEDEM Weg -- die FileView hat wie der
+  // Embed keine Toolbar, an der er sonst mit haengen wuerde.
+  it("toggles tdcb-editing on the viewport wrapper on enter and exit", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { view, deps } = makeView({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+
+    const viewport = (view as any).parts.viewport;
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
+
+    await (view as any).edit.enter();
+    expect(hasClass(viewport, "tdcb-editing")).toBe(true);
+
+    (view as any).edit.exitSilently();
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
   });
 
   it("onUnloadFile() during an active edit ends it silently (no confirm, unpins)", async () => {

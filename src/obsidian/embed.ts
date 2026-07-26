@@ -94,8 +94,19 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
       lockedPrefixes: () => parseLockedPrefixes(this.deps.settings().lockedNodePrefixes),
       notice: (m) => new Notice(m),
       confirmDiscard: this.deps.confirmDiscard,
-      onChange: () => this.deps.active.notify(),
+      onChange: () => {
+        this.syncEditFrame();
+        this.deps.active.notify();
+      },
     });
+  }
+
+  /** Sichtbarer Rahmen um den Viewport, solange der Edit-Modus laeuft (Spec §2.1,
+      styles.css). Embeds haben keine Toolbar, an der er wie beim Codeblock mit
+      haengen wuerde — ohne dieses Toggle gaebe es hier gar keine optische
+      Rueckmeldung, dass der Modus laeuft. `parts` fehlt vor dem ersten Render. */
+  private syncEditFrame(): void {
+    this.parts?.viewport.toggleClass("tdcb-editing", this.edit.active);
   }
 
   /** Obsidian ruft dies OHNE Argument nach dem Erstellen — die Datei kam über den

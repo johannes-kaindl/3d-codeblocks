@@ -120,6 +120,11 @@ function findStage(el: any): any {
   return undefined;
 }
 
+/** Token-genau pruefen (der Mock fuehrt `className` als Token-Liste). */
+function hasClass(el: any, cls: string): boolean {
+  return String(el.className).split(/\s+/).includes(cls);
+}
+
 function fileAt(path: string, mtime = 1): TFile {
   const f = new TFile();
   f.path = path;
@@ -266,6 +271,28 @@ describe("ModelEmbed edit mode wiring", () => {
     // Reload ueberlebt den aktiven Edit -- die Session bleibt aktiv, nicht nur
     // "die Methode wurde aufgerufen".
     expect(edit.active).toBe(true);
+  });
+
+  // Spec 2.1: der sichtbare Rahmen gehoert zu JEDEM Weg, nicht nur zum Codeblock --
+  // Embeds haben gar keine Toolbar, an der er sonst mit haengen wuerde.
+  it("toggles tdcb-editing on the viewport wrapper on enter and exit", async () => {
+    const editFiles: Record<string, string> = { "model.gltf": contractGltfText() };
+    const { deps } = makeDeps({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const el = makeFakeEl();
+    const embed = new ModelEmbed(el, fileAt("model.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    const viewport = (embed as any).parts.viewport;
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
+
+    await (embed as any).edit.enter();
+    expect(hasClass(viewport, "tdcb-editing")).toBe(true);
+
+    (embed as any).edit.exitSilently();
+    expect(hasClass(viewport, "tdcb-editing")).toBe(false);
   });
 
   it("onunload() during an active edit does not throw and unpins (Coordinator spy)", async () => {
