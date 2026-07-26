@@ -8,6 +8,9 @@ import type { TFile } from "obsidian";
 export interface TrackedView {
   onFileModified(file: TFile): void | Promise<void>;
   refreshColors(): void;
+  /** "Auto-rotate"-Setting auf den lebenden Viewport anwenden (Smoke-#5-Befund:
+      es wurde sonst nur beim Mount gelesen und ein Toggle blieb wirkungslos). */
+  refreshAutoRotate?(): void;
   register(cb: () => void): void;
   /** Leiste an-/abhaengen, wenn sich Placement oder Sidebar-Sichtbarkeit aendern.
       Optional: nur `ModelBlock` hat ueberhaupt eine Hover-Toolbar. */

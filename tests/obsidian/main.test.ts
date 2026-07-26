@@ -91,4 +91,13 @@ describe("modify watcher wiring", () => {
 
     expect(onFileModified).not.toHaveBeenCalled();
   });
+
+  // Smoke #5-Befund: Settings-Aenderungen muessen offene Viewports erreichen.
+  it("saveSettings stoesst refreshAutoRotate aller getrackten Views an", async () => {
+    const { app, plugin, views } = await loadedPlugin();
+    const view = views.get(VIEW_TYPE_3D)!({ app }) as any;
+    view.refreshAutoRotate = vi.fn();
+    await plugin.saveSettings();
+    expect(view.refreshAutoRotate).toHaveBeenCalled();
+  });
 });

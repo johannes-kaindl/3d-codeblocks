@@ -14,6 +14,9 @@ export interface EditRigContext {
   modelRoot: Object3D;
   setOrbitEnabled(on: boolean): void;
   requestRender(): void;
+  /** Wird als LETZTES in `dispose()` gerufen — der Viewport stellt hier z. B. den
+      pausierten Autorotate wieder her. */
+  onDispose?(): void;
 }
 
 export interface EditRigCallbacks {
@@ -164,6 +167,7 @@ export class EditRig implements EditRigLike {
     this.controls.dispose();
     this.ctx.setOrbitEnabled(true);
     this.ctx.requestRender();
+    this.ctx.onDispose?.();
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {

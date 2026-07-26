@@ -120,6 +120,10 @@ export class ModelFileView extends FileView implements TrackedView {
     this.host?.refreshColors();
   }
 
+  refreshAutoRotate(): void {
+    this.host?.refreshAutoRotate();
+  }
+
   /** Baut Box und Host nur, wenn sie fehlen (wie `ModelEmbed.render()`): ein Reload
       derselben Datei soll den Host WIEDERVERWENDEN, nicht die Edit-Verdrahtung unter
       dem laufenden Coordinator austauschen. `onLoadFile` erzwingt den Neubau ueber

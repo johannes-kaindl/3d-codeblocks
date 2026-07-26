@@ -231,6 +231,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    // "Auto-rotate" wirkt sofort auf offene Viewports — im Smoke #5 schien das
+    // Toggle wirkungslos, weil nur NEUE Viewports den Wert lasen.
+    for (const view of this.views) view.refreshAutoRotate?.();
   }
 
   /** View für `modify`/Theme registrieren und beim Entladen wieder abmelden. */

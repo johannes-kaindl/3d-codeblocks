@@ -13,6 +13,7 @@ function makeVp() {
     setView: vi.fn(),
     getView: vi.fn(() => null),
     setColors: vi.fn(),
+    setAutoRotate: vi.fn(),
     resize: vi.fn(),
     resetCamera: vi.fn(),
     capturePoster: () => "data:image/png;base64,AAA",
@@ -205,5 +206,26 @@ describe("ViewerHost edit support", () => {
     await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
     // Ohne Pin wuerde on-click ohne Aktivierung sofort degradieren (kein zweiter Viewport-Zustand):
     expect(created[0].disposed).toBe(0);
+  });
+});
+
+// Smoke #5-Befund: das Autorotate-Toggle erreichte lebende Viewports nie — der Wert
+// wurde nur einmal beim Mount gelesen. refreshAutoRotate ist das Gegenstueck zu
+// refreshColors fuer genau diese Settings-Aenderung.
+describe("ViewerHost refreshAutoRotate", () => {
+  it("reicht den aktuellen Settings-Wert an den Viewport durch", async () => {
+    let autoRotate = true;
+    const { host, created } = makeHost({
+      settings: () => ({ ...DEFAULT_SETTINGS, autoRotate }),
+    });
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+    autoRotate = false;
+    host.refreshAutoRotate();
+    expect(created[0].setAutoRotate).toHaveBeenCalledWith(false);
+  });
+
+  it("tut ohne Viewport nichts (Poster/Fehler)", () => {
+    const { host } = makeHost();
+    expect(() => host.refreshAutoRotate()).not.toThrow();
   });
 });

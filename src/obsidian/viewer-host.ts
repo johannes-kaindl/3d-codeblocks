@@ -23,6 +23,10 @@ export interface ViewportLike {
   setView(spec: ViewSpec | null): void;
   getView(): ViewSpec | null;
   setColors(colors: SceneColors): void;
+  /** "Auto-rotate"-Setting auf den lebenden Viewport anwenden (Smoke-#5-Befund:
+      der Wert wurde sonst nur einmal beim Mount gelesen). Optional wie
+      `createEditRig` — Mocks ohne die Methode bleiben gueltig. */
+  setAutoRotate?(on: boolean): void;
   resize(): void;
   resetCamera(): void;
   capturePoster(): string | null;
@@ -163,6 +167,12 @@ export class ViewerHost {
   refreshColors(): void {
     if (this.disposed || !this.viewport) return;
     this.viewport.setColors(this.deps.readColors(this.stage));
+  }
+
+  /** Gegenstueck zu `refreshColors` fuer das "Auto-rotate"-Setting. */
+  refreshAutoRotate(): void {
+    if (this.disposed || !this.viewport) return;
+    this.viewport.setAutoRotate?.(this.deps.settings().autoRotate);
   }
 
   currentView(): ViewSpec | null {

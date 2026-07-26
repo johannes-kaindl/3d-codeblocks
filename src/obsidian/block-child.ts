@@ -255,6 +255,10 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     this.host?.refreshColors();
   }
 
+  refreshAutoRotate(): void {
+    this.host?.refreshAutoRotate();
+  }
+
   /** Leiste an- oder abhaengen, je nach Einstellung und Sichtbarkeit der Sidebar.
    *
    *  `force` erzwingt den Neubau, auch wenn die Leiste schon im richtigen Zustand

@@ -144,6 +144,10 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
     this.host?.refreshColors();
   }
 
+  refreshAutoRotate(): void {
+    this.host?.refreshAutoRotate();
+  }
+
   private async render(): Promise<void> {
     if (this.unloaded) return;
 

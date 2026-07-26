@@ -51,9 +51,15 @@ export class Viewport {
   private disposed = false;
   /** Gewuenschte Ansicht, gesetzt bevor ein Modell da ist — angewendet sobald `setModel` Bounds liefert. */
   private pendingView: ViewSpec | null = null;
+  /** Vom Setting gewuenschter Autorotate-Wert — getrennt von `controls.autoRotate`,
+      weil der Edit-Modus die Drehung hart pausiert (Smoke-#5-Befund: gegen ein
+      rotierendes Ziel laesst sich kein Raum greifen). */
+  private autoRotateWanted: boolean;
+  private editSuspendsRotate = false;
 
   constructor(options: ViewportOptions) {
     this.options = options;
+    this.autoRotateWanted = options.autoRotate;
     this.view = options.container.ownerDocument.defaultView ?? window;
 
     this.renderer = new WebGLRenderer({
@@ -126,6 +132,15 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** "Auto-rotate"-Setting zur Laufzeit anwenden. Waehrend des Edit-Modus wird nur
+      der Wunsch gemerkt — die Drehung bleibt pausiert, bis das Rig verschwindet. */
+  setAutoRotate(on: boolean): void {
+    if (this.disposed) return;
+    this.autoRotateWanted = on;
+    this.controls.autoRotate = on && !this.editSuspendsRotate;
+    this.requestRender();
+  }
+
   resize(): void {
     if (this.disposed) return;
 
@@ -178,6 +193,11 @@ export class Viewport {
   /** Rig fuer den Edit-Modus — `null`, solange kein Modell geladen ist. */
   createEditRig(cb: EditRigCallbacks): EditRig | null {
     if (this.disposed || !this.model) return null;
+    // Edit-Modus pausiert die Drehung hart — gegen ein rotierendes Ziel laesst sich
+    // weder klicken noch ziehen (Smoke-#5-Befund). Der Settings-Wunsch bleibt in
+    // `autoRotateWanted` erhalten und kommt beim Rig-Dispose zurueck.
+    this.editSuspendsRotate = true;
+    this.controls.autoRotate = false;
     return new EditRig(
       {
         scene: this.scene,
@@ -188,6 +208,11 @@ export class Viewport {
           this.controls.enabled = on;
         },
         requestRender: () => this.requestRender(),
+        onDispose: () => {
+          this.editSuspendsRotate = false;
+          this.controls.autoRotate = this.autoRotateWanted;
+          this.requestRender();
+        },
       },
       cb,
     );
