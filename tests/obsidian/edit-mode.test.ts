@@ -1,7 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
-import { EditCoordinator, type EditIo } from "../../src/obsidian/edit-mode";
+import { EDIT_UNAVAILABLE_LOADING, EditCoordinator, type EditIo } from "../../src/obsidian/edit-mode";
 import { contractGltfText } from "../helpers/contract-gltf";
 import type { NodeTrs } from "../../src/core/gltf-patch";
+
+/** Kontrakt-JSON als GLB verpacken (wie tests/core/gltf-patch.test.ts): 12-Byte-Header +
+ * JSON-Chunk + BIN-Chunk. */
+function makeGlb(jsonText: string): ArrayBuffer {
+  const jsonBytes = new TextEncoder().encode(jsonText);
+  const jsonPadded = (jsonBytes.length + 3) & ~3;
+  const bin = new Uint8Array([1, 2, 3, 4]);
+  const total = 12 + 8 + jsonPadded + 8 + bin.length;
+  const buffer = new ArrayBuffer(total);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  view.setUint32(0, 0x46546c67, true); // magic "glTF"
+  view.setUint32(4, 2, true);
+  view.setUint32(8, total, true);
+  view.setUint32(12, jsonPadded, true);
+  view.setUint32(16, 0x4e4f534a, true); // "JSON"
+  bytes.fill(0x20, 20, 20 + jsonPadded);
+  bytes.set(jsonBytes, 20);
+  view.setUint32(20 + jsonPadded, bin.length, true);
+  view.setUint32(24 + jsonPadded, 0x004e4942, true); // "BIN\0"
+  bytes.set(bin, 28 + jsonPadded);
+  return buffer;
+}
 
 function makeIo(files: Record<string, string>): EditIo & { files: Record<string, string> } {
   return {
@@ -63,6 +86,113 @@ describe("EditCoordinator", () => {
     expect(coordinator.uiModel().dirty).toBe(true);
     expect(rig.applyTrs).toHaveBeenCalledWith(0, { translation: [7, 0, 2], scale: [1, 1, 1] });
     expect(notices.join(" ")).toContain("1");
+    // Der env__-Node steht unveraendert mit im Edit-File (der Patch schreibt immer das
+    // ganze Dokument) — das darf NICHT als "no longer match" gemeldet werden (Fix #3).
+    expect(notices).toEqual(["Loaded existing edits for 1 node(s)"]);
+  });
+
+  it("enter: gesperrter, aber unveraenderter Node im Edit-File zaehlt nicht als verloren (Fix #3)", async () => {
+    const editJson = JSON.parse(contractGltfText());
+    editJson.nodes[0].translation = [7, 0, 2]; // echter Edit
+    // nodes[3] = env__gelaende bleibt unveraendert — trotzdem im Edit-File vorhanden.
+    const { coordinator, notices } = makeCoordinator({
+      "3d/eg.gltf": contractGltfText(),
+      "3d/eg.edit.gltf": JSON.stringify(editJson),
+    });
+    await coordinator.enter();
+    expect(notices.some((n) => n.includes("no longer match"))).toBe(false);
+  });
+
+  it("enter: gesperrter Node mit abweichendem TRS im Edit-File wird namentlich als verloren gemeldet (Fix #3/#6)", async () => {
+    const editJson = JSON.parse(contractGltfText());
+    editJson.nodes[3].translation = [9, 9, 9]; // env__gelaende, per Praefix gesperrt, ECHT abweichend
+    const { coordinator, notices } = makeCoordinator({
+      "3d/eg.gltf": contractGltfText(),
+      "3d/eg.edit.gltf": JSON.stringify(editJson),
+    });
+    await coordinator.enter();
+    expect(notices.join(" ")).toContain("no longer match");
+    expect(notices.join(" ")).toContain("env__gelaende");
+  });
+
+  it("enter mit defektem GLB-Edit-File: Notice statt stillem leerem Overlay (Fix #2)", async () => {
+    const files: Record<string, ArrayBuffer> = {
+      "3d/eg.glb": makeGlb(contractGltfText()),
+      "3d/eg.edit.glb": new ArrayBuffer(4), // zu kurz fuer einen gueltigen GLB-Header
+    };
+    const io: EditIo = {
+      exists: (path) => path in files,
+      readText: () => Promise.reject(new Error("text unused in this test")),
+      readBinary: (path) => Promise.resolve(files[path]),
+      writeText: () => Promise.reject(new Error("unused")),
+      writeBinary: () => Promise.reject(new Error("unused")),
+    };
+    const rig = makeRig();
+    const host = { createEditRig: vi.fn(() => rig), pin: vi.fn() };
+    const notices: string[] = [];
+    const coordinator = new EditCoordinator({
+      io,
+      filePath: () => "3d/eg.glb",
+      host: () => host,
+      lockedPrefixes: () => ["env__"],
+      notice: (m) => notices.push(m),
+      confirmDiscard: vi.fn().mockResolvedValue(true),
+      onChange: vi.fn(),
+    });
+    await coordinator.enter();
+    expect(coordinator.active).toBe(true);
+    expect(notices.some((n) => n.includes("Could not read"))).toBe(true);
+  });
+
+  it("enter: createEditRig liefert null -> kein stiller aktiver Zustand ohne Gizmo (Fix #4)", async () => {
+    const io = makeIo({ "3d/eg.gltf": contractGltfText() });
+    const host = { createEditRig: vi.fn(() => null), pin: vi.fn() };
+    const notices: string[] = [];
+    const coordinator = new EditCoordinator({
+      io,
+      filePath: () => "3d/eg.gltf",
+      host: () => host,
+      lockedPrefixes: () => ["env__"],
+      notice: (m) => notices.push(m),
+      confirmDiscard: vi.fn().mockResolvedValue(true),
+      onChange: vi.fn(),
+    });
+    await coordinator.enter();
+    expect(coordinator.active).toBe(false);
+    expect(host.pin).not.toHaveBeenCalledWith(true);
+    expect(notices).toContain(EDIT_UNAVAILABLE_LOADING);
+  });
+
+  it("enter: doppeltes Aufrufen waehrend des ersten Reads baut das Rig nur einmal (Fix #1)", async () => {
+    const files: Record<string, string> = { "3d/eg.gltf": contractGltfText() };
+    const resolvers: (() => void)[] = [];
+    const io: EditIo = {
+      exists: (path) => path in files,
+      readText: (path) => new Promise((resolve) => resolvers.push(() => resolve(files[path]))),
+      readBinary: () => Promise.reject(new Error("binary unused in this test")),
+      writeText: () => Promise.reject(new Error("unused")),
+      writeBinary: () => Promise.reject(new Error("unused")),
+    };
+    const rigs = [makeRig(), makeRig()];
+    const host = { createEditRig: vi.fn(() => rigs.shift() ?? null), pin: vi.fn() };
+    const coordinator = new EditCoordinator({
+      io,
+      filePath: () => "3d/eg.gltf",
+      host: () => host,
+      lockedPrefixes: () => [],
+      notice: () => {},
+      confirmDiscard: vi.fn().mockResolvedValue(true),
+      onChange: vi.fn(),
+    });
+
+    // Doppelklick: zweiter enter() waehrend der erste noch auf den Vault-Read wartet.
+    const first = coordinator.enter();
+    const second = coordinator.enter();
+    resolvers.forEach((resolve) => resolve());
+    await Promise.all([first, second]);
+
+    expect(host.createEditRig).toHaveBeenCalledTimes(1);
+    expect(coordinator.active).toBe(true);
   });
 
   it("enter mit unlesbarer Edit-Datei: Notice, Start ohne Overlay", async () => {
@@ -100,6 +230,39 @@ describe("EditCoordinator", () => {
     await coordinator.save();
     expect(JSON.parse(io.files["3d/eg.edit.gltf"]).nodes[0].translation).toEqual([4, 0, 2]);
     expect(Object.keys(io.files)).toEqual(["3d/eg.edit.gltf"]);
+  });
+
+  it("save: Edit waehrend des Schreibens bleibt dirty statt faelschlich als gespeichert zu gelten (Fix #5)", async () => {
+    const files: Record<string, string> = { "3d/eg.gltf": contractGltfText() };
+    let coordinator!: EditCoordinator;
+    const io: EditIo = {
+      exists: (path) => path in files,
+      readText: (path) => Promise.resolve(files[path]),
+      readBinary: () => Promise.reject(new Error("binary unused in this test")),
+      writeText: async (path, text) => {
+        // Simuliert einen Gizmo-Drag, der waehrend des Vault-Schreibens landet.
+        coordinatorSelect(coordinator, 0);
+        coordinator.uiModel().applyTrs({ translation: [9, 9, 9], scale: [1, 1, 1] });
+        files[path] = text;
+      },
+      writeBinary: () => Promise.reject(new Error("unused")),
+    };
+    const rig = makeRig();
+    const host = { createEditRig: vi.fn(() => rig), pin: vi.fn() };
+    coordinator = new EditCoordinator({
+      io,
+      filePath: () => "3d/eg.gltf",
+      host: () => host,
+      lockedPrefixes: () => ["env__"],
+      notice: () => {},
+      confirmDiscard: vi.fn().mockResolvedValue(true),
+      onChange: vi.fn(),
+    });
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+    await coordinator.save();
+    expect(coordinator.uiModel().dirty).toBe(true);
   });
 
   it("discard bei dirty fragt nach; Ablehnung bleibt im Modus", async () => {
