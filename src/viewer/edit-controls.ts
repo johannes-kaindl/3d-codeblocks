@@ -50,6 +50,13 @@ export class EditRig implements EditRigLike {
   private readonly raycaster = new Raycaster();
   private selected: Object3D | null = null;
   private downAt: { x: number; y: number } | null = null;
+  // Eigene Merker statt `controls.dragging` im pointerup zu lesen: TransformControls
+  // haengt in seinem Konstruktor (`connect()`) bereits einen eigenen pointerup-Listener
+  // an domElement, VOR unserem eigenen (s.u.). Bei gleichem Event-Typ laufen DOM-Listener
+  // in Registrierungsreihenfolge — TransformControls setzt `dragging` also schon auf
+  // `false` zurueck, bevor unser Handler ihn lesen wuerde. Ein eigenes Flag, gesetzt
+  // beim Drag-Start (dragging-changed), macht die Klick-Erkennung unabhaengig davon.
+  private gizmoDragged = false;
 
   constructor(
     private readonly ctx: EditRigContext,
@@ -57,17 +64,15 @@ export class EditRig implements EditRigLike {
   ) {
     this.controls = new TransformControls(ctx.camera, ctx.domElement);
     this.controls.setMode("translate");
-    // three <r169: das Control selbst ist ein Object3D; ab r169 liefert getHelper()
-    // das anzuzeigende Objekt. Feature-Detection statt Versionspin.
-    const helper =
-      (this.controls as unknown as { getHelper?: () => Object3D }).getHelper?.() ??
-      (this.controls as unknown as Object3D);
-    ctx.scene.add(helper);
+    ctx.scene.add(this.helper());
 
     this.controls.addEventListener("dragging-changed", (event) => {
       const dragging = event.value === true;
       ctx.setOrbitEnabled(!dragging);
-      if (dragging) this.cb.onInteract();
+      if (dragging) {
+        this.gizmoDragged = true;
+        this.cb.onInteract();
+      }
       if (!dragging && this.selected) {
         const index = this.selected.userData.tdcbNodeIndex as number;
         this.cb.onTransformEnd(index, objectTrs(this.selected));
@@ -77,6 +82,15 @@ export class EditRig implements EditRigLike {
 
     ctx.domElement.addEventListener("pointerdown", this.handlePointerDown);
     ctx.domElement.addEventListener("pointerup", this.handlePointerUp);
+  }
+
+  /** three <r169: das Control selbst ist ein Object3D; ab r169 liefert getHelper() das
+   *  anzuzeigende Objekt. Feature-Detection statt Versionspin. */
+  private helper(): Object3D {
+    return (
+      (this.controls as unknown as { getHelper?: () => Object3D }).getHelper?.() ??
+      (this.controls as unknown as Object3D)
+    );
   }
 
   setMode(mode: "translate" | "scale"): void {
@@ -104,10 +118,7 @@ export class EditRig implements EditRigLike {
     this.ctx.domElement.removeEventListener("pointerdown", this.handlePointerDown);
     this.ctx.domElement.removeEventListener("pointerup", this.handlePointerUp);
     this.controls.detach();
-    const helper =
-      (this.controls as unknown as { getHelper?: () => Object3D }).getHelper?.() ??
-      (this.controls as unknown as Object3D);
-    this.ctx.scene.remove(helper);
+    this.ctx.scene.remove(this.helper());
     this.controls.dispose();
     this.ctx.setOrbitEnabled(true);
     this.ctx.requestRender();
@@ -120,10 +131,14 @@ export class EditRig implements EditRigLike {
   private readonly handlePointerUp = (event: PointerEvent): void => {
     const down = this.downAt;
     this.downAt = null;
+    // Konsumieren, bevor irgendein early return greift: ein Gizmo-Drag darf nie als
+    // Auswahl-Klick durchrutschen, egal wie klein die Positionsdifferenz ausfiel.
+    const wasGizmoDrag = this.gizmoDragged;
+    this.gizmoDragged = false;
     if (!down) return;
     if (Math.abs(event.clientX - down.x) > CLICK_TOLERANCE_PX) return;
     if (Math.abs(event.clientY - down.y) > CLICK_TOLERANCE_PX) return;
-    if ((this.controls as unknown as { dragging?: boolean }).dragging) return;
+    if (wasGizmoDrag) return;
 
     const rect = this.ctx.domElement.getBoundingClientRect();
     const ndc = new Vector2(
