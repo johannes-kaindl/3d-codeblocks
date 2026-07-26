@@ -27,7 +27,7 @@ export interface EditRigCallbacks {
 export function topLevelIndex(root: Object3D, hit: Object3D): number | null {
   let node: Object3D | null = hit;
   while (node && node.parent !== root) node = node.parent;
-  const index = node?.userData.tdcbNodeIndex;
+  const index: unknown = node?.userData.tdcbNodeIndex;
   return typeof index === "number" ? index : null;
 }
 
