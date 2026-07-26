@@ -85,6 +85,11 @@ export class SettingsTab extends PluginSettingTab {
           },
         },
       },
+      {
+        name: "Locked node prefixes",
+        desc: "Comma-separated name prefixes protected from editing (e.g. env__).",
+        control: { type: "text", key: "lockedNodePrefixes" },
+      },
     ];
   }
 

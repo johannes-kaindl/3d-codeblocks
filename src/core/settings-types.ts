@@ -15,6 +15,7 @@ export interface PluginSettings {
   showGrid: boolean;
   maxContexts: number;
   panelPlacement: PanelPlacement;
+  lockedNodePrefixes: string;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   showGrid: false,
   maxContexts: 6,
   panelPlacement: "auto",
+  lockedNodePrefixes: "env__",
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;
@@ -34,6 +36,14 @@ function positiveNumber(value: unknown, fallback: number): number {
 
 function boolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+/** "env__, sky__" → ["env__", "sky__"] — leere Eintraege und Raender verworfen. */
+export function parseLockedPrefixes(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
 }
 
 function clampContexts(value: unknown): number {
@@ -66,5 +76,11 @@ export function mergeSettings(loaded: unknown): PluginSettings {
       raw.panelPlacement === "auto"
         ? raw.panelPlacement
         : DEFAULT_SETTINGS.panelPlacement,
+    // Anders als bei anderen Strings ist "" hier gueltig — es bedeutet "nichts
+    // sperren", nicht "kein Wert vorhanden".
+    lockedNodePrefixes:
+      typeof raw.lockedNodePrefixes === "string"
+        ? raw.lockedNodePrefixes
+        : DEFAULT_SETTINGS.lockedNodePrefixes,
   };
 }

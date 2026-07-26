@@ -41,6 +41,7 @@ describe("SettingsTab.getSettingDefinitions", () => {
       "showGrid",
       "maxContexts",
       "panelPlacement",
+      "lockedNodePrefixes",
     ]);
   });
 
@@ -136,6 +137,7 @@ describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
     expect((byName.get("Auto-rotate") as any).type).toBe("toggle");
     expect((byName.get("Maximum live 3D views") as any).type).toBe("slider");
     expect((byName.get("Default height") as any).type).toBe("text");
+    expect((byName.get("Locked node prefixes") as any).type).toBe("text");
   });
 
   it("setzt den gespeicherten Wert ins Widget", () => {
@@ -177,6 +179,21 @@ describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
     await text.onChangeHandler("500");
 
     expect(plugin.settings.defaultHeight).toBe(500);
+  });
+
+  it("zeichnet die Zeile fuer gesperrte Praefixe und speichert eine Aenderung", async () => {
+    const { tab, plugin } = makeTab();
+    tab.display();
+
+    const rows = (tab.containerEl as any).settings ?? [];
+    const row = rows.find((r: any) => r.name === "Locked node prefixes");
+    expect(row).toBeDefined();
+    expect(String(row.desc ?? "")).toContain("env__");
+
+    await row.widgets[0].onChangeHandler("sky__, env__");
+
+    expect(plugin.settings.lockedNodePrefixes).toBe("sky__, env__");
+    expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
   });
 
   it("raeumt vor jedem Neuzeichnen auf, statt zu verdoppeln", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, mergeSettings } from "../../src/core/settings-types";
+import { DEFAULT_SETTINGS, mergeSettings, parseLockedPrefixes } from "../../src/core/settings-types";
 
 describe("mergeSettings", () => {
   it("returns the defaults for null or undefined", () => {
@@ -15,6 +15,7 @@ describe("mergeSettings", () => {
       showGrid: false,
       maxContexts: 6,
       panelPlacement: "auto",
+      lockedNodePrefixes: "env__",
     });
   });
 
@@ -58,5 +59,21 @@ describe("panelPlacement", () => {
   it("falls back to the default for garbage", () => {
     expect(mergeSettings({ panelPlacement: "somewhere" }).panelPlacement).toBe("auto");
     expect(mergeSettings({ panelPlacement: 7 }).panelPlacement).toBe("auto");
+  });
+});
+
+describe("lockedNodePrefixes", () => {
+  it("Default env__, fremde Typen fallen auf den Default", () => {
+    expect(mergeSettings({}).lockedNodePrefixes).toBe("env__");
+    expect(mergeSettings({ lockedNodePrefixes: 42 }).lockedNodePrefixes).toBe("env__");
+    expect(mergeSettings({ lockedNodePrefixes: "sky__, env__" }).lockedNodePrefixes).toBe("sky__, env__");
+    expect(mergeSettings({ lockedNodePrefixes: "" }).lockedNodePrefixes).toBe("");
+  });
+});
+
+describe("parseLockedPrefixes", () => {
+  it("splittet an Kommas, trimmt, verwirft Leeres", () => {
+    expect(parseLockedPrefixes("env__, sky__ ,,")).toEqual(["env__", "sky__"]);
+    expect(parseLockedPrefixes("")).toEqual([]);
   });
 });
