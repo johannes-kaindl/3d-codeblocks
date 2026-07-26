@@ -102,6 +102,32 @@ describe("ViewerHost", () => {
     await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
     expect(created[0].setView).toHaveBeenCalledWith(null);
   });
+
+  // Leck-Regression: jeder Reload (onFileModified → render()) baute einen NEUEN Viewport,
+  // ohne den noch lebenden alten freizugeben — Renderer, Canvas, ResizeObserver und
+  // OrbitControls blieben pro Regenerierung liegen. Im Edit-Modus (`pin(true)`) fiel das
+  // nicht einmal ueber den Poster-Pfad wieder auf, weil der gepinnte Host gar nicht
+  // degradiert. `mount()` gibt den Vorgaenger deshalb IMMER frei.
+  it("releases the previous viewport before mounting a new one (reload leak)", async () => {
+    const { host, created } = makeHost();
+    const source = { provideBytes: bytes, format: "gltf" as const, inspectContainer: false, label: "x" };
+    await host.render(source);
+    await host.render(source);
+
+    expect(created).toHaveLength(2);
+    expect(created[0].disposed).toBe(1);
+    expect(created[1].disposed).toBe(0);
+  });
+
+  it("releases the previous viewport even while pinned (edit mode reload)", async () => {
+    const { host, created } = makeHost();
+    const source = { provideBytes: bytes, format: "gltf" as const, inspectContainer: false, label: "x" };
+    await host.render(source);
+    host.pin(true);
+    await host.render(source);
+
+    expect(created[0].disposed).toBe(1);
+  });
 });
 
 // Der ganze Zweig war ungetestet — deshalb blieb der Modus seit v0.1.0 unbenutzbar,

@@ -193,6 +193,15 @@ export class ViewerHost {
   // --- intern ---------------------------------------------------------------
 
   private async mount(bytes: ArrayBuffer, source: RenderSource): Promise<void> {
+    // Vorgaenger IMMER freigeben, bevor ein neuer Viewport entsteht. Ohne das leckt
+    // jeder Reload (`onFileModified` → `render()` → hier) einen kompletten Satz
+    // WebGL-Ressourcen: Renderer, Canvas, ResizeObserver, OrbitControls. Der
+    // Poster-Pfad (`degradeToPoster`) raeumte frueher zufaellig mit auf — er ist aber
+    // im Edit-Modus per `pin(true)` genau ausgeschaltet, also ausgerechnet im
+    // Regenerierungs-Loop, der am haeufigsten neu mountet. Fuer alle Aufrufer sicher:
+    // `releaseViewport()` ist ein No-op ohne lebenden Viewport.
+    this.releaseViewport();
+
     const colors = this.deps.readColors(this.stage);
     const settings = this.deps.settings();
 
