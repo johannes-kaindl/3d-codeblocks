@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Edit mode**: move and scale top-level nodes of glTF/GLB models via a gizmo
+  (**Edit model** in the hover toolbar or the 3D-view sidebar) or precise number
+  fields in the sidebar. Rotation is deliberately not offered.
+- Edits are saved to a `<name>.edit.gltf`/`.edit.glb` **next to** the file — the
+  original is never modified. Re-entering edit mode re-applies saved edits by node
+  name onto the fresh original, so edits survive file regeneration.
+- New setting **Locked node prefixes** (default `env__`): nodes whose names match a
+  prefix cannot be selected or edited.
+- Edit mode works in all three viewing paths (code block, embed, file view — the
+  latter two are operated via the sidebar) and pauses auto-rotate while active.
+- The file view now reloads when its file changes on disk and follows theme changes.
+
+### Fixed
+
+- The **Auto-rotate** setting now applies to already-open viewports immediately
+  instead of only after a reload.
+- Reloading a model (file regeneration) no longer leaks a WebGL context per reload.
+- Discarding edits while the model reloads in the background now shows a notice
+  instead of silently doing nothing.
+
 ## [0.1.3] — 2026-07-26
 
 ### Added
