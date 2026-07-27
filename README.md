@@ -92,7 +92,8 @@ Enter edit mode with the **pencil** button (**Edit model**) in the hover toolbar
 the same button in the 3D-view sidebar. Click a node to select it — a gizmo appears —
 then use **Move**/**Scale** to switch what the gizmo does, or type exact numbers into the
 sidebar's translation/scale fields. **Reset node** reverts the selected node only;
-**Save edits**/**Discard edits** act on the whole session.
+**Save edits**/**Discard edits** act on the whole session. While edit mode is active,
+auto-rotate is paused so the model holds still; it resumes when you leave.
 
 **Originals are never modified — edits are saved to a `<name>.edit.gltf` (or
 `.edit.glb`) next to the file**, overwriting an existing edit file of the same name.
