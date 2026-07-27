@@ -391,7 +391,7 @@ describe("EditCoordinator", () => {
           resolveConfirm = resolve;
         }),
     );
-    const { coordinator, host } = makeCoordinator(
+    const { coordinator, host, notices } = makeCoordinator(
       { "3d/eg.gltf": contractGltfText() },
       { confirmDiscard: confirm },
     );
@@ -412,6 +412,9 @@ describe("EditCoordinator", () => {
     expect(coordinator.active).toBe(true);
     expect(coordinator.uiModel().dirty).toBe(true);
     expect(host.pin).toHaveBeenLastCalledWith(true);
+    // ... aber STUMM darf er auch nicht sein: im GUI-Smoke sah der Abbruch wie ein
+    // toter Discard-Knopf aus (Edits bleiben, Modus bleibt an, keine Rueckmeldung).
+    expect(notices.some((n) => n.includes("try Discard again"))).toBe(true);
   });
 
   it("reapplyAfterReload: Session ueberlebt die Regeneration per Name", async () => {

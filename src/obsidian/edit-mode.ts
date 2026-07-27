@@ -311,7 +311,14 @@ export class EditCoordinator {
       // Bump die hier nur gelesene Epoche trotzdem entwertet.
       const epoch = this.epoch;
       if (!(await this.deps.confirmDiscard())) return;
-      if (epoch !== this.epoch) return;
+      if (epoch !== this.epoch) {
+        // Waehrend der Dialog offen war, hat ein Reload die Session ersetzt (Epoch
+        // gewechselt). Der Abbruch ist korrekt — aber STUMM sah er im GUI-Smoke wie
+        // ein toter Discard-Knopf aus: Edits bleiben, Modus bleibt an, nichts meldet
+        // sich. Melden statt schlucken; ein erneutes Discard trifft die frische Session.
+        this.deps.notice("The model reloaded while the dialog was open — please try Discard again.");
+        return;
+      }
     }
     for (const edit of session.changes()) {
       session.resetNode(edit.index);
