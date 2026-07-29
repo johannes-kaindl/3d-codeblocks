@@ -134,6 +134,29 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
       wurde dabei ein bearbeiteter Node umbenannt/entfernt, erscheint die Notice „N
       edited node(s) no longer exist: …" statt die Session stillschweigend zu verlieren.
 
+## Unapplied-edits-Badge (2026-07-29)
+
+Der Hinweis, der den Smoke-#5-Befund schließt: außerhalb des Edit-Modus zeigt der Viewer
+weiter das Original — der Badge sagt, dass daneben ein ungenutzter Änderungswunsch liegt.
+
+- [ ] **1. Erscheinen** — Block mit `eg.gltf`, `eg.edit.gltf` existiert bereits (aus dem
+      Edit-Smoke oben) → oben **links** im Viewport steht „Unapplied edits" mit
+      Stift-Icon. Tooltip nennt den Pfad `…/eg.edit.gltf`.
+- [ ] **2. Direkt nach dem Speichern** — mit einer Datei OHNE Edit-Datei starten:
+      Edit-Modus → verschieben → **Save edits** → Edit-Modus verlassen → der Badge
+      erscheint **ohne** Reload der Notiz.
+- [ ] **3. Im Edit-Modus unsichtbar** — Edit-Modus betreten → Badge verschwindet
+      (dort sind die Edits ohnehin zu sehen) → verlassen → Badge ist zurück.
+- [ ] **4. Verschwinden** — `eg.edit.gltf` im Datei-Explorer löschen → der Badge
+      verschwindet ohne Reload.
+- [ ] **5. Alle Wege** — derselbe Zustand in `![[eg.gltf]]`-Embed und in der FileView
+      (Datei im Explorer anklicken).
+- [ ] **6. Kein Bedien-Hindernis** — auf dem Badge ziehen: der Orbit reagiert normal,
+      der Badge fängt den Drag nicht ab.
+- [ ] **7. Nicht bei der Edit-Datei selbst** — `eg.edit.gltf` direkt öffnen → **kein**
+      Badge (man schaut ja genau auf den Wunsch).
+- [ ] **8. Theme** — hell ↔ dunkel: Badge bleibt lesbar (nur Theme-Variablen).
+
 ## Befunde
 
 _Hier notieren, was auffällt._
