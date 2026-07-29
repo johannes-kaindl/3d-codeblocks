@@ -11,7 +11,8 @@ import { detectFormat } from "../core/format";
 import { parseLockedPrefixes } from "../core/settings-types";
 import { EditCoordinator, type EditIo } from "./edit-mode";
 import { readModel } from "./file-source";
-import { buildBox, type BoxParts } from "./render-box";
+import { buildBox, syncBadge, type BoxParts } from "./render-box";
+import { editBadgeState } from "../core/edit-badge";
 import { readOnlyController } from "./read-only-controller";
 import type { TrackedView } from "./tracked-view";
 import {
@@ -35,6 +36,7 @@ export class ModelFileView extends FileView implements TrackedView {
   private parts: BoxParts | null = null;
   private host: ViewerHost | null = null;
   private loadedMtime: number | null = null;
+  private badge: HTMLElement | null = null;
   private unloaded = false;
   /** Laufendes Render-Promise (für Tests abwartbar) — wie bei `ModelEmbed`. */
   rendering: Promise<void> = Promise.resolve();
@@ -73,6 +75,22 @@ export class ModelFileView extends FileView implements TrackedView {
       Rueckmeldung, dass der Modus laeuft. `parts` fehlt vor dem ersten Render. */
   private syncEditFrame(): void {
     this.parts?.viewport.toggleClass("tdcb-editing", this.edit.active);
+    this.syncBadge();
+  }
+
+  /** "Unapplied edits"-Badge (Smoke-#5-Befund) — aufgerufen bei jedem Edit-Zustands-
+      wechsel, nach dem Render und aus `main.ts` bei Vault-Dateiereignissen. */
+  syncBadge(): void {
+    if (!this.parts || this.unloaded) return;
+    this.badge = syncBadge(
+      this.parts.viewport,
+      this.badge,
+      editBadgeState({
+        modelPath: this.file?.path ?? null,
+        editing: this.edit.active,
+        exists: (path) => this.deps.editIo.exists(path),
+      }),
+    );
   }
 
   getViewType(): string {
@@ -158,6 +176,10 @@ export class ModelFileView extends FileView implements TrackedView {
       inspectContainer: needsContainerInspection(file.path),
       label: file.basename,
     });
+
+    // Erst hier existiert `parts` (und nach einem Dateiwechsel ein FRISCHES) — der
+    // erste Badge-Zustand kann nicht frueher gezeichnet werden.
+    this.syncBadge();
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
@@ -186,5 +208,10 @@ export class ModelFileView extends FileView implements TrackedView {
     this.host = null;
     this.parts = null;
     this.loadedMtime = null;
+    // MIT zuruecksetzen: `parts` wird beim naechsten Render neu gebaut, der alte
+    // Badge zeigt dann in verworfenes DOM. Bliebe die Referenz stehen, wuerde
+    // `syncBadge()` sie als "schon vorhanden" behandeln und den Hinweis im neuen
+    // Viewport nie zeichnen (Dateiwechsel im selben Pane).
+    this.badge = null;
   }
 }

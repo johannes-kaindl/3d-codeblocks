@@ -100,6 +100,12 @@ auto-rotate is paused so the model holds still; it resumes when you leave.
 Editing a `.edit.` file itself saves in place — it is already a user edit, not the
 generated original.
 
+Because of that, **the viewer keeps showing the original once you leave edit mode** —
+your saved work is a change *request*, not the model itself. A small **Unapplied edits**
+badge appears in the top-left corner whenever an edit file sits next to the model, so the
+state is visible rather than surprising. It disappears once the edits are folded back
+into the original by whatever generates it (or once you delete the edit file).
+
 Re-entering edit mode re-reads the fresh original and re-applies the existing edit file
 on top of it, matched by node **name** (a notice reports "Loaded existing edits for N
 node(s)"). This is what makes edits survive regeneration: rerun whatever produced the

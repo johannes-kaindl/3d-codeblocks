@@ -120,6 +120,17 @@ function findStage(el: any): any {
   return undefined;
 }
 
+/** Wie `findStage`, aber fuer eine beliebige Klasse -- token-genau, damit
+    "tdcb-badge-icon" nicht als "tdcb-badge" durchgeht. */
+function findByClass(el: any, cls: string): any {
+  if (hasClass(el, cls)) return el;
+  for (const child of el.children ?? []) {
+    const found = findByClass(child, cls);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** Token-genau pruefen (der Mock fuehrt `className` als Token-Liste). */
 function hasClass(el: any, cls: string): boolean {
   return String(el.className).split(/\s+/).includes(cls);
@@ -355,5 +366,55 @@ describe("registerModelEmbeds", () => {
     const embed = creator({ app, containerEl: makeFakeEl() }, fileAt("a.gltf"), "");
 
     expect(tracked).toContain(embed);
+  });
+});
+
+// Smoke-#5-Befund, Embed-Weg: derselbe Badge wie beim Codeblock. Der Embed hat keine
+// Toolbar, an der er mit haengen wuerde -- er zieht ueber `syncEditFrame()` und den
+// Render-Abschluss nach.
+describe("ModelEmbed -- Unapplied-edits-Badge", () => {
+  it("zeigt den Badge nach dem Render, wenn eine .edit.-Datei existiert", async () => {
+    const { deps } = makeDeps({ editIo: makeEditIo({ "model.edit.gltf": "{}" }) });
+
+    const el = makeFakeEl();
+    const embed = new ModelEmbed(el, fileAt("model.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    const badge = findByClass(el, "tdcb-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.title).toContain("model.edit.gltf");
+  });
+
+  it("zeigt keinen Badge ohne Edit-Datei", async () => {
+    const { deps } = makeDeps({ editIo: makeEditIo() });
+
+    const el = makeFakeEl();
+    const embed = new ModelEmbed(el, fileAt("model.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
+
+    expect(findByClass(el, "tdcb-badge")).toBeUndefined();
+  });
+
+  it("verschwindet im Edit-Modus und kehrt danach zurueck", async () => {
+    const editFiles: Record<string, string> = {
+      "model.gltf": contractGltfText(),
+      "model.edit.gltf": contractGltfText(),
+    };
+    const { deps } = makeDeps({ editIo: makeEditIo(editFiles) });
+    withEditRig(deps.factory);
+
+    const el = makeFakeEl();
+    const embed = new ModelEmbed(el, fileAt("model.gltf"), deps);
+    embed.loadFile();
+    await embed.rendering;
+    expect(findByClass(el, "tdcb-badge")).toBeTruthy();
+
+    await (embed as any).edit.enter();
+    expect(findByClass(el, "tdcb-badge")).toBeUndefined();
+
+    (embed as any).edit.exitSilently();
+    expect(findByClass(el, "tdcb-badge")).toBeTruthy();
   });
 });

@@ -304,3 +304,64 @@ describe("ModelFileView as a ViewportController", () => {
     expect(view.controller.label()).toBe("weltmodell/3d/haus.glb");
   });
 });
+
+// Smoke-#5-Befund, FileView-Weg. `main.ts` ruft `syncBadge()` bei jedem vault-
+// `create`/`delete`/`rename` -- genau so wie diese Tests es tun.
+describe("ModelFileView -- Unapplied-edits-Badge", () => {
+  it("zeigt den Badge, wenn eine .edit.-Datei neben der geoeffneten Datei liegt", async () => {
+    const { view } = makeView({ editIo: makeEditIo({ "model.edit.gltf": "{}" }) });
+
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+    view.syncBadge();
+
+    const badge = findByClass((view as any).parts.viewport, "tdcb-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.title).toContain("model.edit.gltf");
+  });
+
+  it("zeigt keinen Badge ohne Edit-Datei", async () => {
+    const { view } = makeView({ editIo: makeEditIo() });
+
+    const file = fileAt("model.gltf");
+    await view.onLoadFile(file);
+    (view as unknown as { file: TFile }).file = file;
+    view.syncBadge();
+
+    expect(findByClass((view as any).parts.viewport, "tdcb-badge")).toBeUndefined();
+  });
+
+  // `teardown()` verwirft `parts` -- die gemerkte Badge-Referenz zeigt danach in totes
+  // DOM. Wuerde sie stehen bleiben, haette `syncBadge()` sie als "schon vorhanden"
+  // behandelt und im neuen Viewport nie gezeichnet.
+  it("zeichnet den Badge nach einem Dateiwechsel im NEUEN Viewport", async () => {
+    const { view } = makeView({
+      editIo: makeEditIo({ "a.edit.gltf": "{}", "b.edit.gltf": "{}" }),
+    });
+
+    const first = fileAt("a.gltf");
+    await view.onLoadFile(first);
+    (view as unknown as { file: TFile }).file = first;
+    view.syncBadge();
+    expect(findByClass((view as any).parts.viewport, "tdcb-badge")).toBeTruthy();
+
+    const second = fileAt("b.gltf");
+    await view.onLoadFile(second);
+    (view as unknown as { file: TFile }).file = second;
+    view.syncBadge();
+
+    const badge = findByClass((view as any).parts.viewport, "tdcb-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.title).toContain("b.edit.gltf");
+  });
+});
+
+function findByClass(el: any, cls: string): any {
+  if (hasClass(el, cls)) return el;
+  for (const child of el.children ?? []) {
+    const found = findByClass(child, cls);
+    if (found) return found;
+  }
+  return undefined;
+}

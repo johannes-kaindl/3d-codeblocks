@@ -133,6 +133,36 @@
   }
 }
 
+/* "Es gibt gespeicherte, noch nicht uebernommene Edits" (Smoke-#5-Befund). Oben LINKS,
+   weil oben rechts die Hover-Toolbar sitzt — und dauerhaft sichtbar statt bei Hover:
+   es ist ein Zustandshinweis, kein Bedienelement. `pointer-events: none`, damit er
+   Orbit-Drags im Viewport nicht abfaengt. */
+.tdcb-badge {
+  position: absolute;
+  top: var(--size-4-2);
+  left: var(--size-4-2);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  padding: var(--size-4-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  pointer-events: none;
+}
+
+.tdcb-badge-icon {
+  display: flex;
+  align-items: center;
+}
+
+.tdcb-badge-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
 .tdcb-toolbar {
   position: absolute;
   top: var(--size-4-2);

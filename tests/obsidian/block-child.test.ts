@@ -816,6 +816,106 @@ describe("edit mode wiring", () => {
   });
 });
 
+// Smoke-#5-Befund: nach "Save edits" zeigt der Viewer wieder das Original, und die
+// Arbeit sah verloren aus. Der Badge macht den Zustand sichtbar (`core/edit-badge.ts`
+// entscheidet, hier haengt nur die Verdrahtung).
+describe("ModelBlock -- Unapplied-edits-Badge", () => {
+  it("zeigt den Badge, wenn neben dem geladenen Modell eine .edit.-Datei liegt", async () => {
+    const { deps, app } = makeDeps({ editIo: makeEditIo({ "model.edit.gltf": "{}" }) });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    const badge = findByClass(el, "tdcb-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.title).toContain("model.edit.gltf");
+  });
+
+  it("zeigt keinen Badge ohne Edit-Datei", async () => {
+    const { deps, app } = makeDeps({ editIo: makeEditIo() });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+
+    expect(findByClass(el, "tdcb-badge")).toBeUndefined();
+  });
+
+  // Der Pfad, den `main.ts` ueber die vault-Events `create`/`delete`/`rename` bedient:
+  // ohne ihn erschiene bzw. verschwaende der Hinweis erst beim naechsten Neuzeichnen.
+  it("nimmt den Badge zurueck, sobald die Edit-Datei verschwindet", async () => {
+    const files: Record<string, string> = { "model.edit.gltf": "{}" };
+    const { deps, app } = makeDeps({ editIo: makeEditIo(files) });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+    expect(findByClass(el, "tdcb-badge")).toBeTruthy();
+
+    delete files["model.edit.gltf"];
+    block.syncBadge();
+
+    expect(findByClass(el, "tdcb-badge")).toBeUndefined();
+  });
+
+  it("baut den Badge bei wiederholtem Sync nicht doppelt", async () => {
+    const { deps, app } = makeDeps({ editIo: makeEditIo({ "model.edit.gltf": "{}" }) });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+    // `syncToolbar()` haengt an `resize` und feuert beim Ziehen einer Pane-Grenze im
+    // Sekundentakt -- jeder Aufruf nimmt den Badge mit.
+    block.syncBadge();
+    block.syncToolbar(true);
+
+    expect(findAllByClass(el, "tdcb-badge")).toHaveLength(1);
+  });
+
+  it("verschwindet im Edit-Modus (dort sind die Edits ohnehin zu sehen) und kehrt danach zurueck", async () => {
+    const files: Record<string, string> = {
+      "model.gltf": contractGltfText(),
+      "model.edit.gltf": contractGltfText(),
+    };
+    const { deps, app } = makeDeps({ panelVisible: () => false, editIo: makeEditIo(files) });
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.gltf"));
+
+    const originalCreate = deps.factory.create;
+    deps.factory.create = (opts: any) => {
+      const viewport = originalCreate(opts);
+      viewport.createEditRig = vi.fn(() => ({
+        setMode: vi.fn(),
+        select: vi.fn(),
+        applyTrs: vi.fn(),
+        dispose: vi.fn(),
+      }));
+      return viewport;
+    };
+
+    const el = makeFakeEl();
+    const block = new ModelBlock(el, "file: model.gltf", "note.md", deps);
+    block.onload();
+    await block.loadNow();
+    expect(findByClass(el, "tdcb-badge")).toBeTruthy();
+
+    const edit = (block as any).edit;
+    await edit.enter();
+    expect(findByClass(el, "tdcb-badge")).toBeUndefined();
+
+    edit.exitSilently();
+    expect(findByClass(el, "tdcb-badge")).toBeTruthy();
+  });
+});
+
 /** Rekursiv nach `.tdcb-toolbar` suchen -- die Leiste haengt inzwischen im
     Viewport-Wrapper (`.tdcb-viewport`), nicht mehr in `.tdcb-stage` selbst (Wrapper-Fix,
     zweite Review-Runde): `ViewerHost` leert die Buehne in drei Pfaden komplett. */
@@ -848,6 +948,15 @@ function findByClass(el: any, cls: string): any {
     if (found) return found;
   }
   return undefined;
+}
+
+/** Alle Treffer statt nur des ersten -- deckt doppelt gebaute Elemente auf, die ein
+    `findByClass` (erster Treffer) nie sehen wuerde. */
+function findAllByClass(el: any, cls: string): any[] {
+  const out: any[] = [];
+  if (hasClass(el, cls)) out.push(el);
+  for (const child of el.children ?? []) out.push(...findAllByClass(child, cls));
+  return out;
 }
 
 function findStage(el: any): any {

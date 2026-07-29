@@ -195,6 +195,24 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       }),
     );
 
+    // Entsteht/verschwindet eine `.edit.`-Datei, muss der "Unapplied edits"-Badge
+    // sofort nachziehen — `modify` allein reicht nicht: der erste Save ERZEUGT die
+    // Datei (`create`), Verwerfen im Datei-Explorer LOESCHT sie (`delete`). Ohne
+    // diese drei Abos erschiene der Hinweis erst, wenn der Block aus einem anderen
+    // Grund neu zeichnet. Bewusst ohne Pfadfilter: der Badge-Zustand ist pro View
+    // billig (ein `getAbstractFileByPath`), und ein `rename` kann jede der beiden
+    // Seiten (Original wie Edit-Datei) betreffen.
+    //
+    // Drei einzelne Abos statt einer Schleife ueber die Event-Namen: `vault.on` ist
+    // pro Event getypt (`rename` hat einen zweiten Parameter), eine Union als
+    // Event-Name trifft keine der Ueberladungen.
+    const syncBadges = () => {
+      for (const view of this.views) view.syncBadge?.();
+    };
+    this.registerEvent(this.app.vault.on("create", syncBadges));
+    this.registerEvent(this.app.vault.on("delete", syncBadges));
+    this.registerEvent(this.app.vault.on("rename", syncBadges));
+
     // Theme-Wechsel: Hintergrund und STL-Material folgen sofort.
     this.registerEvent(
       this.app.workspace.on("css-change", () => {

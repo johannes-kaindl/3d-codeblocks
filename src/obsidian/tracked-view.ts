@@ -15,4 +15,8 @@ export interface TrackedView {
   /** Leiste an-/abhaengen, wenn sich Placement oder Sidebar-Sichtbarkeit aendern.
       Optional: nur `ModelBlock` hat ueberhaupt eine Hover-Toolbar. */
   syncToolbar?(): void;
+  /** "Unapplied edits"-Badge neu bewerten, wenn im Vault eine `.edit.`-Datei
+      entsteht, verschwindet oder umbenannt wird (main.ts abonniert das).
+      Optional: `GltfBlock` hat gar keine Datei, an der Edits haengen koennten. */
+  syncBadge?(): void;
 }

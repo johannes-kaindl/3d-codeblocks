@@ -21,7 +21,8 @@ import type { SceneColors } from "../viewer/scene";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
 import { EditCoordinator, type EditIo } from "./edit-mode";
 import { readModel, resolveModelPath } from "./file-source";
-import { buildBox, renderHint, renderMessage, type BoxParts } from "./render-box";
+import { buildBox, renderHint, renderMessage, syncBadge, type BoxParts } from "./render-box";
+import { editBadgeState } from "../core/edit-badge";
 import {
   ViewerHost,
   describeError,
@@ -67,6 +68,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   private observer: IntersectionObserver | null = null;
   private unsubscribeActive: (() => void) | null = null;
   private toolbar: HTMLElement | null = null;
+  private badge: HTMLElement | null = null;
   private unloaded = false;
   private edit: EditCoordinator | null = null;
 
@@ -284,6 +286,11 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // entfernt die Toolbar und kehrt VOR dem Toggle zurueck → Edit-Modus verlassen liesse
     // den Akzent-Rahmen dauerhaft stehen.
     this.parts.viewport.toggleClass("tdcb-editing", this.edit?.active ?? false);
+    // Ebenfalls unbedingt und VOR den Returns unten, aus demselben Grund wie der
+    // Rahmen: der Badge haengt nicht an der Toolbar-Sichtbarkeit. Bei
+    // `panelPlacement: "sidebar"` wird die Leiste nie gebaut — der Zustandshinweis
+    // muss trotzdem erscheinen.
+    this.syncBadge();
 
     const { panelPlacement } = this.deps.settings();
     const wanted = toolbarVisible(panelPlacement, this.deps.panelVisible());
@@ -302,6 +309,22 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     // weil `syncToolbar()` nur den initialen Ladeweg abdeckt. `viewport` ist Geschwister
     // der Buehne, nicht Kind, und ueberlebt deshalb alle drei.
     this.toolbar = buildToolbar(this.parts.viewport, this, this.edit?.uiModel() ?? null);
+  }
+
+  /** Zeigt dieser Block das Original, obwohl daneben eine `.edit.`-Datei liegt?
+   *  Aufgerufen aus `syncToolbar()` (deckt Laden und jeden Edit-Zustandswechsel ab)
+   *  und aus `main.ts`, wenn im Vault eine Datei entsteht/verschwindet/umbenannt wird. */
+  syncBadge(): void {
+    if (!this.parts || this.unloaded) return;
+    this.badge = syncBadge(
+      this.parts.viewport,
+      this.badge,
+      editBadgeState({
+        modelPath: this.file?.path ?? null,
+        editing: this.edit?.active ?? false,
+        exists: (path) => this.deps.editIo.exists(path),
+      }),
+    );
   }
 
   private observeVisibility(): void {

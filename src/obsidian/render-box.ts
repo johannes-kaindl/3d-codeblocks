@@ -1,5 +1,7 @@
 // DOM-Geruest eines Blocks. Bewusst ohne Entscheidungslogik: diese Datei konsumiert
 // nur das ViewModel und zeichnet (UI-STANDARD §6). Kein innerHTML, nur createEl.
+import { setIcon } from "obsidian";
+import type { BadgeState } from "../core/edit-badge";
 import type { ViewModel } from "../core/view-model";
 
 export interface BoxParts {
@@ -63,4 +65,42 @@ export function renderMessage(host: HTMLElement, vm: ViewModel, onReload?: () =>
 export function renderHint(host: HTMLElement, warnings: string[]): void {
   host.empty();
   for (const warning of warnings) host.createDiv({ text: warning });
+}
+
+/** Badge fuer "es gibt gespeicherte, noch nicht uebernommene Edits" an- oder abhaengen.
+ *
+ *  Gibt das neue Element (oder `null`) zurueck; der Aufrufer haelt es und reicht es
+ *  beim naechsten Aufruf als `current` wieder herein — dieselbe Form wie die Toolbar
+ *  in `block-child.ts`. Idempotent: ein sichtbarer Badge wird aktualisiert statt neu
+ *  gebaut, damit haeufige Aufrufer (`syncToolbar` haengt an `resize`) nicht im
+ *  Sekundentakt DOM wegwerfen.
+ *
+ *  Verankert im `viewport`, nicht in der `stage`: `ViewerHost` leert die Buehne in
+ *  Poster-Modus, Reaktivierung und Fehler-Reload komplett (siehe `BoxParts.viewport`) —
+ *  ein dort haengender Badge waere nach jedem dieser Wege weg. Und nicht in `root`,
+ *  weil die absolute Positionierung sich auf den Viewport beziehen muss. */
+export function syncBadge(
+  viewport: HTMLElement,
+  current: HTMLElement | null,
+  state: BadgeState,
+): HTMLElement | null {
+  if (!state.visible) {
+    current?.remove();
+    return null;
+  }
+
+  const el = current ?? viewport.createDiv({ cls: "tdcb-badge" });
+  if (current === null) {
+    // Icon und Label nur EINMAL bauen: das Label ist konstant, und ein `setText()`
+    // auf dem Container wuerde `setIcon`s SVG mit wegraeumen. Veraenderlich ist nur
+    // der Tooltip (er nennt den Pfad) — der haengt am Container und braucht kein
+    // Wiederfinden des Kind-Elements.
+    setIcon(el.createSpan({ cls: "tdcb-badge-icon" }), "pencil");
+    el.createSpan({ cls: "tdcb-badge-label", text: state.label });
+  }
+  el.title = state.title;
+  // Der Badge ist ein Zustandshinweis, kein Steuerelement: `aria-label` statt einer
+  // Rolle, damit Screenreader ihn vorlesen, ohne ihn als bedienbar anzukuendigen.
+  el.setAttribute("aria-label", state.title);
+  return el;
 }

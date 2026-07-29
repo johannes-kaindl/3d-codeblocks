@@ -15,7 +15,8 @@ import { embedHeightFromAttrs } from "../core/embed-src";
 import { detectFormat } from "../core/format";
 import { parseLockedPrefixes } from "../core/settings-types";
 import { EditCoordinator, type EditIo } from "./edit-mode";
-import { buildBox, type BoxParts } from "./render-box";
+import { buildBox, syncBadge, type BoxParts } from "./render-box";
+import { editBadgeState } from "../core/edit-badge";
 import { readModel } from "./file-source";
 import { readOnlyController } from "./read-only-controller";
 import type { TrackedView } from "./tracked-view";
@@ -67,6 +68,7 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   private parts: BoxParts | null = null;
   private host: ViewerHost | null = null;
   private loadedMtime: number | null = null;
+  private badge: HTMLElement | null = null;
   private unloaded = false;
   /** Laufendes Render-Promise (für Tests abwartbar). */
   rendering: Promise<void> = Promise.resolve();
@@ -107,6 +109,22 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
       Rueckmeldung, dass der Modus laeuft. `parts` fehlt vor dem ersten Render. */
   private syncEditFrame(): void {
     this.parts?.viewport.toggleClass("tdcb-editing", this.edit.active);
+    this.syncBadge();
+  }
+
+  /** "Unapplied edits"-Badge (Smoke-#5-Befund) — aufgerufen bei jedem Edit-Zustands-
+      wechsel, nach dem Render und aus `main.ts` bei Vault-Dateiereignissen. */
+  syncBadge(): void {
+    if (!this.parts || this.unloaded) return;
+    this.badge = syncBadge(
+      this.parts.viewport,
+      this.badge,
+      editBadgeState({
+        modelPath: this.file.path,
+        editing: this.edit.active,
+        exists: (path) => this.deps.editIo.exists(path),
+      }),
+    );
   }
 
   /** Obsidian ruft dies OHNE Argument nach dem Erstellen — die Datei kam über den
@@ -179,6 +197,11 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
       inspectContainer: needsContainerInspection(file.path),
       label: file.basename,
     });
+
+    // Erst hier existiert `parts` — der erste Badge-Zustand kann nicht frueher
+    // gezeichnet werden (anders als beim Codeblock, wo `syncToolbar()` das im
+    // `onload()` schon erledigt).
+    this.syncBadge();
   }
 
   private embedHeight(): number {

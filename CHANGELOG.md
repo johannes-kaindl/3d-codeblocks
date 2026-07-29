@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Unapplied edits** badge: when a `<name>.edit.gltf`/`.edit.glb` sits next to the
+  displayed model, a small hint appears in the top-left corner of the viewport. Outside
+  edit mode the viewer deliberately shows the original — the edit file is a change
+  request, not the model — which previously looked as if saved work had been lost. The
+  badge appears in all viewing paths (code block, embed, file view) and updates without
+  a reload when the edit file is created, deleted or renamed.
+
 ## [0.2.0] — 2026-07-27
 
 ### Added
