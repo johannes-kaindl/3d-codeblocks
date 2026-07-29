@@ -1975,7 +1975,7 @@ describe("Edit-Sektion", () => {
 **Files:**
 - Modify: `README.md` (Abschnitt „Edit mode": was es tut, `.edit.`-Namensregel, Locked-Präfix-Setting, Grenzen: nur TRS/Top-Level, kein Undo, STL nicht)
 - Modify: `docs/SMOKE.md` (neue Punkte, s. u.)
-- Modify: `/Users/Shared/code/obsidian-plugins/REGISTRY.md` (ein Eintrag)
+- Modify: `../REGISTRY.md` (Dach-Repo `obsidian-plugins`, ein Eintrag)
 - Kein Test — reine Doku.
 
 - [ ] **Step 1: README-Abschnitt schreiben** (englisch, im Ton der bestehenden Abschnitte; ausdrücklich: „Originals are never modified — edits are saved to a `<name>.edit.gltf` next to the file").

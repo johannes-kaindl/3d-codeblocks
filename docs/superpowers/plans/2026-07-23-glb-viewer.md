@@ -1804,7 +1804,7 @@ git commit -m "feat: Codeblock-Processor, Kontext-Budget und Settings verdrahten
 
 **Files:**
 - Modify: `README.md`
-- Modify: `/Users/Shared/code/obsidian-plugins/REGISTRY.md`
+- Modify: `../REGISTRY.md` (Dach-Repo `obsidian-plugins`)
 - Create: `docs/SMOKE.md`
 
 - [ ] **Step 1: README auf Dach-Standard umschreiben**
@@ -1817,7 +1817,7 @@ Der bisherige Seed-Inhalt (Idee, offene Fragen) ist mit der Spec überholt. Neue
 
 - [ ] **Step 3: Registry-Eintrag ergänzen (Kit-first-Regel Punkt 2)**
 
-In `/Users/Shared/code/obsidian-plugins/REGISTRY.md` eine Zeile in der passenden Kategorie ergänzen — das Ökosystem hatte bislang **kein** 3D-/WebGL-Primitiv:
+In `../REGISTRY.md` (Dach-Repo `obsidian-plugins`) eine Zeile in der passenden Kategorie ergänzen — das Ökosystem hatte bislang **kein** 3D-/WebGL-Primitiv:
 
 > **WebGL-Viewport im Codeblock, leckfrei** (`MarkdownRenderChild.onunload` → `dispose()` traversiert Geometrien/Materialien/Texturen + `forceContextLoss()`; on-demand-Rendering statt rAF-Dauerloop; `IntersectionObserver` + LRU-Kontext-Budget gegen das Browser-Limit von ~8–16 Kontexten; Poster-Frame via `toDataURL` beim Degradieren) | `3d-codeblocks/src/viewer/viewport.ts` + `src/obsidian/block-child.ts` + `src/core/context-budget.ts` (pure, TDD) | Muster-Referenz, erstes Exemplar (2026-07-23) — three.js gebündelt; **Draco/Meshopt bewusst ausgeschlossen** (worker-basiert, Obsidian-Renderer verbietet Worker)
 

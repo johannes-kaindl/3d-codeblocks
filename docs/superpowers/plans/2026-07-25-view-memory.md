@@ -2376,7 +2376,7 @@ git commit -m "feat(obsidian): geteilter Nur-Lese-Controller für Embed und File
 - Modify: `src/main.ts` (drei Befehle, `panelVisible`, `layout-change`-Abo)
 - Modify: `src/obsidian/settings.ts` (Dropdown)
 - Modify: `README.md`, `CHANGELOG.md`, `docs/SMOKE.md`
-- Modify: `/Users/Shared/code/obsidian-plugins/REGISTRY.md`
+- Modify: `../REGISTRY.md` (Dach-Repo `obsidian-plugins`)
 
 **Interfaces:**
 - Consumes: alles Vorherige.
@@ -2489,7 +2489,7 @@ An `docs/SMOKE.md` die zehn Punkte aus §8 der Spec anhängen (Ansicht speichern
 
 - [ ] **Step 7: Add the REGISTRY entry**
 
-In `/Users/Shared/code/obsidian-plugins/REGISTRY.md` eine Zeile ergänzen — `hudPlacement` steht damit bei n=2:
+In `../REGISTRY.md` (Dach-Repo `obsidian-plugins`) eine Zeile ergänzen — `hudPlacement` steht damit bei n=2:
 
 ```markdown
 | **Bedienung Sidebar-oder-Overlay entscheiden**: pure Funktion `(placement, paneVisible) → 'panel'|'toolbar'|'none'`; Nutzer-Einstellung `sidebar\|toolbar\|auto`, Fallback aufs Overlay wenn das Pane zu ist | `vim-dojo/src/hudPlacement.ts` (`resolveHudTarget`) · `3d-codeblocks/src/core/panel-target.ts` (`resolvePanelTarget`) | n=2 → **Kit-Kandidat** |
@@ -2505,8 +2505,8 @@ Dann Obsidian neu laden und die Punkte aus `docs/SMOKE.md` durchgehen. Der wicht
 ```bash
 git add src/main.ts src/obsidian/settings.ts src/obsidian/tracked-view.ts README.md CHANGELOG.md docs/SMOKE.md
 git commit -m "feat: Befehle, Placement-Setting und Doku für gespeicherte Ansichten"
-git -C /Users/Shared/code/obsidian-plugins add REGISTRY.md
-git -C /Users/Shared/code/obsidian-plugins commit -m "docs(registry): Sidebar-oder-Overlay-Entscheidung bei n=2 (Kit-Kandidat)"
+git -C .. add REGISTRY.md
+git -C .. commit -m "docs(registry): Sidebar-oder-Overlay-Entscheidung bei n=2 (Kit-Kandidat)"
 ```
 
 ---
