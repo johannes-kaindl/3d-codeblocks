@@ -338,8 +338,7 @@ export class EditCoordinator {
     const epoch = ++this.epoch;
 
     const byName = old.editsByName();
-    this.rig?.dispose();
-    this.rig = null;
+    this.disposeRig();
 
     let json: unknown;
     try {
@@ -382,11 +381,29 @@ export class EditCoordinator {
     this.deps.onChange();
   }
 
+  /** Rig freigeben, ohne dass ein Fehler darin den Aufrufer mitreisst.
+   *
+   *  Gelernt an einem realen Fall (GUI-Test 2026-07-29): `TransformControls.dispose()`
+   *  warf in three r169 immer, und weil der Fehler ungebremst nach oben lief, blieb
+   *  `exitSilently()` auf halber Strecke stehen — `session` und `rig` blieben gesetzt,
+   *  der Edit-Modus liess sich nicht mehr verlassen, und in `onunload()` wurde der
+   *  WebGL-Kontext nie freigegeben. Die Ursache ist in `edit-controls.ts` behoben; der
+   *  Catch hier ist die zweite Verteidigungslinie: Aufraeumen ist Pflicht, das Rig ist
+   *  dabei die unwichtigste Partei — was auch immer darin schiefgeht, der Modus muss
+   *  hinterher verlassen sein. */
+  private disposeRig(): void {
+    try {
+      this.rig?.dispose();
+    } catch (error) {
+      console.error("[three-d-codeblocks] edit rig dispose failed", error);
+    }
+    this.rig = null;
+  }
+
   /** Beim Unload — bewusst ohne Confirm (Edits sind fluechtig, Spec §4). */
   exitSilently(): void {
     this.epoch += 1;
-    this.rig?.dispose();
-    this.rig = null;
+    this.disposeRig();
     this.session = null;
     this.selected = null;
     this.deps.host()?.pin(false);

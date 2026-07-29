@@ -15,6 +15,15 @@ All notable changes to this project are documented here. The format follows
   badge appears in all viewing paths (code block, embed, file view) and updates without
   a reload when the edit file is created, deleted or renamed.
 
+### Fixed
+
+- **Leaving edit mode failed silently.** `TransformControls.dispose()` throws in
+  three r169 (`this.traverse is not a function` — the class moved from `Object3D` to
+  `Controls`, but its `dispose()` still calls `traverse`). The error aborted everything
+  that followed it: edit mode could not be left, the viewport stayed pinned so
+  auto-rotate and orbit never resumed, and unloading a block never disposed its WebGL
+  context. Also hardened: a failing rig teardown can no longer block the exit.
+
 ## [0.2.0] — 2026-07-27
 
 ### Added

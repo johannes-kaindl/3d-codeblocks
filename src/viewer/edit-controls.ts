@@ -2,7 +2,7 @@
 //
 // Nur translate/scale — der rotate-Modus wird nie aktiviert (Kontrakt-Soll: das
 // outpost-Datenmodell sind achsenparallele Boxen, Rotationen sind nicht abbildbar).
-import { type Camera, type Object3D, Raycaster, type Scene, Vector2 } from "three";
+import { type Camera, type Mesh, type Object3D, Raycaster, type Scene, Vector2 } from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import type { EditRigLike } from "../core/edit-session";
 import type { NodeTrs } from "../core/gltf-patch";
@@ -164,10 +164,36 @@ export class EditRig implements EditRigLike {
     this.ctx.domElement.removeEventListener("pointerup", this.handlePointerUp);
     this.controls.detach();
     this.ctx.scene.remove(this.helper());
-    this.controls.dispose();
+    this.disposeControls();
     this.ctx.setOrbitEnabled(true);
     this.ctx.requestRender();
     this.ctx.onDispose?.();
+  }
+
+  /** `TransformControls.dispose()` ist in three r169 kaputt und wird deshalb NICHT
+   *  gerufen: die Klasse erbt seit r169 von `Controls` statt von `Object3D`, ihr
+   *  `dispose()` ruft aber weiterhin `this.traverse(...)` — jeder Aufruf endet in
+   *  `TypeError: this.traverse is not a function`.
+   *
+   *  Das war nicht kosmetisch: der Fehler riss alles mit, was NACH ihm kommt. Im Rig
+   *  blieben Orbit deaktiviert und Autorotate pausiert (`setOrbitEnabled`/`onDispose`),
+   *  im `EditCoordinator` blieben `rig` und `session` stehen — der Edit-Modus liess
+   *  sich also gar nicht mehr verlassen — und in `ModelBlock.onunload()` wurde der
+   *  Host nie disposed, der WebGL-Kontext also nie freigegeben.
+   *
+   *  Hier steht deshalb selbst, was das kaputte `dispose()` tun wollte: Listener
+   *  loesen und die Geometrien/Materialien des Gizmos freigeben. Bleibt richtig, wenn
+   *  three sein `dispose()` repariert — es ist dieselbe Arbeit. */
+  private disposeControls(): void {
+    const controls = this.controls as unknown as { disconnect?: () => void };
+    controls.disconnect?.();
+    this.helper().traverse((child) => {
+      const part = child as Partial<Mesh>;
+      part.geometry?.dispose();
+      const material = part.material;
+      if (Array.isArray(material)) for (const m of material) m.dispose();
+      else material?.dispose();
+    });
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {

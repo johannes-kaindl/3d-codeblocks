@@ -139,24 +139,57 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 Der Hinweis, der den Smoke-#5-Befund schließt: außerhalb des Edit-Modus zeigt der Viewer
 weiter das Original — der Badge sagt, dass daneben ein ungenutzter Änderungswunsch liegt.
 
-- [ ] **1. Erscheinen** — Block mit `eg.gltf`, `eg.edit.gltf` existiert bereits (aus dem
+> [!check] Durchlauf 2026-07-30 — alle acht Punkte grün
+> Gefahren gegen die laufende Obsidian-Instanz (1.13.4) im outpost-Vault, über den
+> Electron-Debug-Port statt von Hand: echte Toolbar-Klicks, echtes WebGL, beide Themes.
+> Dabei gefunden: der three-r169-`dispose()`-Fehler (siehe `## Befunde`) — der Badge
+> selbst lief auf Anhieb wie entworfen.
+
+- [x] **1. Erscheinen** — Block mit `eg.gltf`, `eg.edit.gltf` existiert bereits (aus dem
       Edit-Smoke oben) → oben **links** im Viewport steht „Unapplied edits" mit
       Stift-Icon. Tooltip nennt den Pfad `…/eg.edit.gltf`.
-- [ ] **2. Direkt nach dem Speichern** — mit einer Datei OHNE Edit-Datei starten:
+- [x] **2. Direkt nach dem Speichern** — mit einer Datei OHNE Edit-Datei starten:
       Edit-Modus → verschieben → **Save edits** → Edit-Modus verlassen → der Badge
       erscheint **ohne** Reload der Notiz.
-- [ ] **3. Im Edit-Modus unsichtbar** — Edit-Modus betreten → Badge verschwindet
+- [x] **3. Im Edit-Modus unsichtbar** — Edit-Modus betreten → Badge verschwindet
       (dort sind die Edits ohnehin zu sehen) → verlassen → Badge ist zurück.
-- [ ] **4. Verschwinden** — `eg.edit.gltf` im Datei-Explorer löschen → der Badge
+- [x] **4. Verschwinden** — `eg.edit.gltf` im Datei-Explorer löschen → der Badge
       verschwindet ohne Reload.
-- [ ] **5. Alle Wege** — derselbe Zustand in `![[eg.gltf]]`-Embed und in der FileView
+- [x] **5. Alle Wege** — derselbe Zustand in `![[eg.gltf]]`-Embed und in der FileView
       (Datei im Explorer anklicken).
-- [ ] **6. Kein Bedien-Hindernis** — auf dem Badge ziehen: der Orbit reagiert normal,
+- [x] **6. Kein Bedien-Hindernis** — auf dem Badge ziehen: der Orbit reagiert normal,
       der Badge fängt den Drag nicht ab.
-- [ ] **7. Nicht bei der Edit-Datei selbst** — `eg.edit.gltf` direkt öffnen → **kein**
+- [x] **7. Nicht bei der Edit-Datei selbst** — `eg.edit.gltf` direkt öffnen → **kein**
       Badge (man schaut ja genau auf den Wunsch).
-- [ ] **8. Theme** — hell ↔ dunkel: Badge bleibt lesbar (nur Theme-Variablen).
+- [x] **8. Theme** — hell ↔ dunkel: Badge bleibt lesbar (nur Theme-Variablen).
 
 ## Befunde
 
 _Hier notieren, was auffällt._
+
+### 2026-07-30 · `TransformControls.dispose()` wirft — der Edit-Modus ließ sich nicht verlassen
+
+Beim Badge-Durchlauf aufgefallen, betrifft aber **nicht** den Badge: three r169 hat
+`TransformControls` von `Object3D` auf `Controls` umgestellt, sein `dispose()` ruft aber
+weiterhin `this.traverse(...)`. Jeder Aufruf endete in `TypeError: this.traverse is not
+a function` — live reproduziert: nach `exitSilently()` blieben `active`, `rig` und
+`session` **unverändert** stehen.
+
+Weil der Fehler ungebremst nach oben lief, riss er alles mit, was danach kam:
+
+- `EditRig.dispose()` erreichte `setOrbitEnabled(true)`, `requestRender()` und
+  `onDispose()` nicht → Orbit blieb gesperrt, Autorotate blieb pausiert, ein Reset
+  wurde nicht mehr gezeichnet.
+- `EditCoordinator.exitSilently()` erreichte `session = null` nicht → der Edit-Modus
+  ließ sich nicht verlassen.
+- `ModelBlock.onunload()` ruft `host.dispose()` **hinter** `exitSilently()` → der
+  WebGL-Kontext wurde beim Entladen eines Blocks nie freigegeben.
+
+Das erklärt rückwirkend Smoke #5, Schritt 7 („🟡 Discard verwarf scheinbar nichts, Modus
+blieb offen"). Die damalige Epoch-Bail-Hypothese (Reload während des Dialogs, Verdacht
+obsidian-git) trägt nicht: der Fall trat **ohne** jede Notice auf.
+
+Behoben: `edit-controls.ts` erledigt die Aufräumarbeit selbst (`disconnect()` + Helper
+freigeben) statt das kaputte `dispose()` zu rufen; `edit-mode.ts` kapselt den
+Rig-Teardown zusätzlich in try/catch, damit ein Fehler dort den Ausstieg nie wieder
+blockieren kann.

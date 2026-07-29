@@ -433,6 +433,43 @@ describe("EditCoordinator", () => {
     expect(coordinator.availability().ok).toBe(false);
     expect(coordinator.availability().reason).toContain("glTF");
   });
+
+  // Realer Fall aus dem GUI-Test 2026-07-29: `TransformControls.dispose()` warf in
+  // three r169 immer (`this.traverse is not a function`). Der Fehler lief ungebremst
+  // nach oben und riss alles mit, was danach kam -- der Edit-Modus liess sich nicht
+  // mehr verlassen, und in `onunload()` wurde der WebGL-Kontext nie freigegeben, weil
+  // `host.dispose()` dort HINTER `exitSilently()` steht.
+  it("exitSilently: ein werfendes Rig-dispose verhindert das Verlassen NICHT", async () => {
+    const { coordinator, rig, host } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
+    rig.dispose.mockImplementation(() => {
+      throw new TypeError("this.traverse is not a function");
+    });
+    await coordinator.enter();
+    expect(coordinator.active).toBe(true);
+
+    expect(() => coordinator.exitSilently()).not.toThrow();
+
+    expect(coordinator.active).toBe(false);
+    // Der Viewport muss auch entpinnt werden -- sonst bliebe Autorotate fuer immer
+    // pausiert und der Orbit gesperrt.
+    expect(host.pin).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reapplyAfterReload: ein werfendes Rig-dispose stoppt den Reload nicht", async () => {
+    const { coordinator, rig } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
+    await coordinator.enter();
+    coordinatorSelect(coordinator, 0);
+    coordinator.uiModel().applyTrs(moved);
+    rig.dispose.mockImplementation(() => {
+      throw new TypeError("this.traverse is not a function");
+    });
+
+    await coordinator.reapplyAfterReload();
+
+    // Session lebt weiter und traegt den Edit -- genau der Zweck dieser Methode.
+    expect(coordinator.active).toBe(true);
+    expect(coordinator.uiModel().dirty).toBe(true);
+  });
 });
 
 /** Auswahl herstellen wie es das Rig taete: ueber den onSelect-Callback. */
