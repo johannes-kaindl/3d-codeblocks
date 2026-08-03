@@ -175,6 +175,56 @@ describe("ViewerHost with viewMode 'on-click'", () => {
 
     expect(budget.register).toHaveBeenCalled();
   });
+
+  // Smoke-#4-Befund "Sidebar-Knoepfe erscheinen nicht beim Klick aufs Modell":
+  // `active.set` haengt allein an `budget.touch` (wrapBudgetWithActive), und dessen
+  // einzige Quellen sind OrbitControls-`start` und Doppelklick — beides setzt einen
+  // lebenden Viewport voraus. Der Reaktivierungs-Klick meldete sich deshalb nie als
+  // Interaktion: das Modell wurde live, die Sidebar blieb beim Platzhalter.
+  it("meldet den Klick aufs Standbild als Interaktion (sonst bleibt die Sidebar leer)", async () => {
+    const { host, budget, stage } = makeHost({ settings: () => onClick });
+    await host.render(source);
+    expect(budget.touch).not.toHaveBeenCalled();
+
+    playOverlay(stage).click();
+    await settle();
+
+    expect(budget.touch).toHaveBeenCalled();
+  });
+
+  // Der Zeitpunkt ist Teil des Fixes: `ContextManager.touch` ist auf einer noch nicht
+  // registrierten id ein No-op, ein `touch` VOR dem Mount wuerde den LRU-Stempel also
+  // nicht auffrischen — das frisch reaktivierte Modell waere sofort wieder das aelteste.
+  it("meldet die Interaktion erst nach der Registrierung", async () => {
+    const order: string[] = [];
+    const { host, budget, stage } = makeHost({ settings: () => onClick });
+    budget.register.mockImplementation(() => order.push("register"));
+    budget.touch.mockImplementation(() => order.push("touch"));
+
+    await host.render(source);
+    playOverlay(stage).click();
+    await settle();
+
+    expect(order).toEqual(["register", "touch"]);
+  });
+
+  // Kein Aktiv-Setzen ohne lebenden Viewport: schlaegt das Nachladen fehl, waere ein
+  // "aktives" Modell ohne Kamera in der Sidebar nur eine Zusage, die niemand einloest.
+  it("meldet nichts, wenn die Reaktivierung im Fehler endet", async () => {
+    let fail = false;
+    const { host, budget, stage } = makeHost({ settings: () => onClick });
+    const failing = {
+      ...source,
+      provideBytes: () => (fail ? Promise.reject(new Error("gone")) : bytes()),
+    };
+    await host.render(failing);
+    fail = true;
+
+    playOverlay(stage).click();
+    await settle();
+
+    expect(budget.touch).not.toHaveBeenCalled();
+  });
 });
 
 describe("ViewerHost edit support", () => {

@@ -286,6 +286,14 @@ export class ViewerHost {
     this.activated = true;
     this.stage.empty();
     await this.render(this.source);
+    // Der Klick aufs Standbild IST eine Nutzerinteraktion — nur meldete er sich nie als
+    // eine (Smoke-#4-Befund "Sidebar-Knoepfe erscheinen nicht beim Klick"). Ein Standbild
+    // hat keine OrbitControls, und `start`/Doppelklick sind die einzigen Quellen von
+    // `onInteract` — also blieb `active.set` aus und die Sidebar zeigte weiter
+    // "Click a 3D model to control it here.", obwohl der Nutzer genau das getan hatte.
+    // Erst NACH `render`, weil `touch` auf einer noch nicht registrierten id ein No-op
+    // ist; ohne lebenden Viewport (Ladefehler) wird nichts gemeldet.
+    if (!this.disposed && this.viewport) this.deps.budget.touch(this.id);
   }
 
   private releaseViewport(): void {

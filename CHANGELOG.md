@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Clicking a still image did not fill the sidebar.** With the view mode set to
+  *activate on click* — and whenever the context budget had turned a model into a still
+  image — the click brought the model back to life but left the **3D view** sidebar
+  showing "Click a 3D model to control it here.", so the controls seemed broken. A still
+  image has no orbit controls, and those were the only source of the "this model is being
+  used" signal; the reactivating click now reports itself as the interaction it is.
+
 ## [0.3.0] — 2026-08-01
 
 ### Added
