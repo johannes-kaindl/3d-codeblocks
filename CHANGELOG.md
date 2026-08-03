@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The **active model** is easier to spot: its frame is stronger and its title now carries
+  the accent colour too. The sidebar controls whichever model you used last, which was
+  hard to tell apart when several models sit in one note — the title is exactly the name
+  the sidebar shows, so the two now point at each other.
+
 ### Fixed
 
 - **Clicking a still image did not fill the sidebar.** With the view mode set to

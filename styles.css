@@ -10,7 +10,20 @@
    `.tdcb-block` ist ein Kind-Div von `buildBox` (render-box.ts). Deshalb Nachfahren-Selektor,
    kein Compound wie bei `.tdcb-block.tdcb-fill` (dort traegt dasselbe Element beide Klassen). */
 .tdcb-active .tdcb-stage {
-  box-shadow: 0 0 0 2px var(--interactive-accent);
+  box-shadow: 0 0 0 3px var(--interactive-accent);
+  /* Die eigene Kante mitfaerben: sonst liegt ein neutraler 1px-Rand zwischen Buehne und
+     Akzent-Schatten und nimmt ihm die Deutlichkeit. */
+  border-color: var(--interactive-accent);
+}
+
+/* Der Titel traegt denselben Akzent wie der Rahmen — er ist genau der Text, den die
+   Sidebar als Label zeigt (`controller.label()`). Damit beantwortet der Block die Frage
+   "bezieht sich die Leiste auf mich?" auch dann, wenn mehrere Etagen untereinander
+   stehen und der Rahmen allein nicht zuordenbar ist. Bloecke ohne `title:` behalten
+   nur den Rahmen. */
+.tdcb-active .tdcb-title {
+  color: var(--text-accent);
+  font-weight: var(--font-semibold);
 }
 
 .tdcb-title {
