@@ -24,6 +24,7 @@ npm test           # Pfad-Guard + vitest run
 npm run lint       # eslint src (0 Warnungen erlaubt)
 npm run gate       # lint + typecheck(+test) + test + check:pure + check:bundle
 npm run deploy     # build + Kopie nach $OBSIDIAN_PLUGIN_DIR
+npm run smoke:gui  # GUI-Smoke gegen ein laufendes Obsidian (CDP; s. scripts/gui-smoke.ts)
 npm run release    # Release via ../tools/release/ (braucht das Dach-Verzeichnis)
 ```
 

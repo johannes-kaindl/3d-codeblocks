@@ -193,3 +193,34 @@ Behoben: `edit-controls.ts` erledigt die Aufräumarbeit selbst (`disconnect()` +
 freigeben) statt das kaputte `dispose()` zu rufen; `edit-mode.ts` kapselt den
 Rig-Teardown zusätzlich in try/catch, damit ein Fehler dort den Ausstieg nie wieder
 blockieren kann.
+
+## Aktiver Block & Standbild-Klick (2026-08-03)
+
+Der Fall aus Smoke #4 („Sidebar-Knöpfe erscheinen nicht beim Klick aufs Modell") plus
+die Sichtbarkeit des Aktiv-Bezugs. **Automatisiert** — dieser Abschnitt läuft als
+Treiber, nicht von Hand:
+
+```bash
+osascript -e 'quit app "Obsidian"'
+open -a Obsidian --args --remote-debugging-port=9222
+OBSIDIAN_PLUGIN_DIR="<vault>/.obsidian/plugins/3d-codeblocks" npm run deploy
+npm run smoke:gui
+```
+
+Der Treiber (`scripts/gui-smoke.ts`) legt eine temporäre Notiz mit zwei betitelten
+Blöcken an, stellt den Ansichtsmodus auf „erst auf Klick", öffnet die Sidebar und räumt
+danach wieder auf. Grundlage ist CORE-TEST-02: das Werkzeug gehört ins Repo, nicht in
+einen Session-Scratchpad — beim ersten Durchlauf am 2026-07-30 lag es dort und war beim
+nächsten Mal weg.
+
+- [ ] **1. Beide Blöcke starten als Standbild** — Modus „erst auf Klick" greift.
+- [ ] **2. Sidebar zeigt zunächst den Platzhalter** — „Click a 3D model to control it here."
+- [ ] **3. Klick aufs Standbild füllt die Sidebar** — die Regression zu `eb78941`: das
+      Modell wird live **und** die Leiste zeigt den Titel des geklickten Blocks.
+- [ ] **4. „Save view" ist bedienbar** — nicht nur sichtbar, sondern nicht deaktiviert.
+- [ ] **5. Genau ein Block ist aktiv markiert** — `.tdcb-active` hängt nicht an mehreren.
+- [ ] **6. Der Titel des aktiven Blocks hebt sich ab** — gemessen am *computed style*,
+      nicht an der Klasse: die Klasse hing auch vorher schon, sichtbar war sie zu wenig.
+- [ ] **7. Der Aktiv-Rahmen liegt auf der Bühne** — `box-shadow` gesetzt.
+- [ ] **8. Der Akzent folgt dem Theme** — hell ≠ dunkel (übersprungen, falls
+      `app.changeTheme` in der Obsidian-Version fehlt).
