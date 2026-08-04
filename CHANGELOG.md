@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-08-04
+
 ### Changed
 
 - The **active model** is easier to spot: its frame is stronger and its title now carries
