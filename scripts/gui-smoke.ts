@@ -31,6 +31,8 @@
  * bleibt die View leer und man debuggt ein Phantom (CORE-TEST-02).
  */
 
+import { execFileSync } from "node:child_process";
+
 const PLUGIN_ID = "three-d-codeblocks";
 const CONTROLS_VIEW = "three-d-controls";
 /** Wird im Vault angelegt und am Ende wieder entfernt (außer mit `--keep`). */
@@ -68,7 +70,7 @@ class Cdp {
     });
   }
 
-  static async attach(port: number): Promise<Cdp> {
+  static async attach(port: number, vault?: string): Promise<Cdp> {
     let targets: CdpTarget[];
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`);
@@ -82,13 +84,36 @@ class Cdp {
 
     // Das Hauptfenster ist die Seite mit Obsidians app-Schema; Popouts und DevTools
     // tragen andere URLs. Ohne diese Auswahl landet man im falschen Renderer.
-    const page = targets.find(
+    const pages = targets.filter(
       (t) => t.type === "page" && t.url.startsWith("app://obsidian.md") && t.webSocketDebuggerUrl,
     );
-    if (!page?.webSocketDebuggerUrl) {
-      const seen = targets.map((t) => `${t.type} ${t.url}`).join("\n  ");
+    if (pages.length === 0) {
+      const seen = targets.map((t) => `${t.type} ${t.url}`).join("\n  ") || "(keine)";
       throw new Error(`Kein Obsidian-Fenster unter den Targets gefunden:\n  ${seen}`);
     }
+
+    // Mehrere offene Vaults sind der Normalfall, nicht die Ausnahme. Blind das erste
+    // Fenster zu nehmen hiesse, den Smoke im falschen Vault zu fahren — und der
+    // Fehlschlag saehe aus wie ein Plugin-Defekt ("Plugin nicht aktiv"). Der Titel
+    // traegt den Vault-Namen ("<Notiz> - <Vault> - Obsidian x.y.z").
+    const matching = vault
+      ? pages.filter((t) => t.title.toLowerCase().includes(vault.toLowerCase()))
+      : pages;
+    if (matching.length === 0) {
+      throw new Error(
+        `Kein Fenster passt zu --vault ${vault}. Offen:\n  ${pages.map((t) => t.title).join("\n  ")}`,
+      );
+    }
+    if (matching.length > 1) {
+      throw new Error(
+        `Mehrere Obsidian-Fenster offen — mit --vault <name> eines waehlen:\n  ` +
+          matching.map((t) => t.title).join("\n  "),
+      );
+    }
+    const page = matching[0];
+    // Der Filter oben garantiert die URL, der Typ nicht — der Guard haelt beides zusammen.
+    if (!page.webSocketDebuggerUrl) throw new Error(`Fenster ohne Debugger-URL: ${page.title}`);
+    console.log(`Fenster: ${page.title}`);
 
     const socket = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => {
@@ -166,13 +191,29 @@ async function main(): Promise<void> {
   const port = Number(flag("port") ?? 9222);
   const keep = argv.includes("--keep");
   const modelArg = flag("model");
+  const vault = flag("vault");
 
   console.log(`GUI-Smoke — Obsidian auf Port ${port}`);
-  const cdp = await Cdp.attach(port);
+  const cdp = await Cdp.attach(port, vault);
+  // Ausserhalb des try, damit das `finally` ihn auch nach einem Abbruch mitten im Lauf
+  // zurueckschreiben kann — sonst bliebe der Vault im Smoke-Zustand stehen.
+  let previousViewMode: string | null = null;
 
   try {
-    // Ohne Fokus drosselt Chromium den Renderer; WebGL-Frames bleiben dann aus.
+    // Ohne Fokus drosselt Chromium den Renderer. `Page.bringToFront` allein genuegt auf
+    // macOS NICHT: es holt das Fenster innerhalb der App nach vorn, nicht die App nach
+    // vorn. Gemessen 2026-08-04 — im Hintergrund blieb das DOM der Notiz komplett leer
+    // (`.tdcb-block` = 0, kein Notiztext), obwohl `app.workspace` die Datei korrekt als
+    // aktiv meldete. Man debuggt dann ein Phantom: Zustand richtig, Anzeige nicht da.
     await cdp.send("Page.bringToFront");
+    if (process.platform === "darwin") {
+      try {
+        execFileSync("osascript", ["-e", 'tell application "Obsidian" to activate']);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch {
+        console.log("  (Hinweis: `osascript activate` schlug fehl — Fenster ggf. von Hand nach vorn holen)");
+      }
+    }
 
     const version = await cdp.evaluate<string>(`return window.app?.appId ? app.vault.getName() : "";`);
     if (!version) throw new Error("Obsidians `app` ist im Renderer nicht erreichbar.");
@@ -216,6 +257,12 @@ async function main(): Promise<void> {
       fence,
       "",
     ].join("\n");
+
+    // Den Vorwert merken und im `finally` zurückschreiben: der Smoke braucht "on-click",
+    // der Vault des Maintainers steht deswegen aber nicht darauf.
+    previousViewMode = await cdp.evaluate<string>(`
+      return app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings.viewMode;
+    `);
 
     await cdp.evaluate(`
       const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
@@ -294,7 +341,16 @@ async function main(): Promise<void> {
     // --- 5. Der aktive Block ist erkennbar ----------------------------------
     // `f53e88b`: Rahmen kräftiger + Titel im Akzent. Geprüft wird der EFFEKT im
     // echten Theme (computed style), nicht die Klasse — die Klasse hing schon vorher.
-    const highlight = await cdp.evaluate<{ active: number; sameAsPlain: boolean; shadow: string }>(`
+    // `found` ist nicht kosmetisch: ohne die Prüfung auf einen VORHANDENEN Aktiv-Titel
+    // wurde Punkt 6 grün, gerade WEIL kein Block aktiv war — der Vergleich lief dann
+    // gegen einen leeren String und meldete pflichtschuldig "unterscheidet sich".
+    // Aufgefallen in der Gegenprobe gegen einen Build ohne den Fix (2026-08-04).
+    const highlight = await cdp.evaluate<{
+      active: number;
+      found: boolean;
+      sameAsPlain: boolean;
+      shadow: string;
+    }>(`
       const colorOf = (el) => (el ? getComputedStyle(el).color : "");
       const activeTitle = document.querySelector(".tdcb-active .tdcb-title");
       const plainTitle = [...document.querySelectorAll(".tdcb-title")]
@@ -302,6 +358,7 @@ async function main(): Promise<void> {
       const stage = document.querySelector(".tdcb-active .tdcb-stage");
       return {
         active: document.querySelectorAll(".tdcb-active").length,
+        found: !!activeTitle && !!plainTitle,
         sameAsPlain: colorOf(activeTitle) === colorOf(plainTitle),
         shadow: stage ? getComputedStyle(stage).boxShadow : "",
       };
@@ -313,8 +370,12 @@ async function main(): Promise<void> {
     );
     record(
       "6. Der Titel des aktiven Blocks hebt sich ab",
-      !highlight.sameAsPlain,
-      highlight.sameAsPlain ? "gleiche Farbe wie ein inaktiver Titel" : "Akzentfarbe greift",
+      highlight.found && !highlight.sameAsPlain,
+      !highlight.found
+        ? "kein aktiver Titel vorhanden — nicht prüfbar"
+        : highlight.sameAsPlain
+          ? "gleiche Farbe wie ein inaktiver Titel"
+          : "Akzentfarbe greift",
     );
     record(
       "7. Der Aktiv-Rahmen liegt auf der Bühne",
@@ -323,32 +384,48 @@ async function main(): Promise<void> {
     );
 
     // --- 8. Beide Themes ----------------------------------------------------
-    // `app.changeTheme` ist undokumentiert; fehlt es, wird der Punkt übersprungen statt
-    // den Lauf abzubrechen — ein nicht prüfbarer Punkt ist kein roter Punkt.
-    const themes = await cdp.evaluate<{ ok: boolean; dark: string; light: string }>(`
-      if (typeof app.changeTheme !== "function") return { ok: false, dark: "", light: "" };
+    // Über die Body-Klassen, NICHT über `app.changeTheme`: der API-Aufruf schreibt das
+    // Ergebnis nach `.obsidian/appearance.json` und macht aus einem Vault, der bis dahin
+    // dem System folgte (kein `theme`-Schlüssel), einen fest eingestellten. Gemessen
+    // 2026-08-04 — ein Prüfwerkzeug darf die Einstellungen seines Wirts nicht umschreiben.
+    // Die Theme-Variablen hängen an `.theme-dark`/`.theme-light`, der Klassentausch misst
+    // also dasselbe und hinterlässt nichts.
+    const themes = await cdp.evaluate<{ dark: string; light: string }>(`
       const read = () => {
         const t = document.querySelector(".tdcb-active .tdcb-title");
         return t ? getComputedStyle(t).color : "";
       };
-      const wasDark = document.body.classList.contains("theme-dark");
-      app.changeTheme("obsidian"); await new Promise((r) => setTimeout(r, 300));
+      const body = document.body;
+      const wasDark = body.classList.contains("theme-dark");
+      const set = (dark) => {
+        body.classList.toggle("theme-dark", dark);
+        body.classList.toggle("theme-light", !dark);
+      };
+      set(true);
       const dark = read();
-      app.changeTheme("moonstone"); await new Promise((r) => setTimeout(r, 300));
+      set(false);
       const light = read();
-      app.changeTheme(wasDark ? "obsidian" : "moonstone");
-      return { ok: true, dark, light };
+      set(wasDark);
+      return { dark, light };
     `);
-    if (!themes.ok) {
-      console.log("  – 8. Theme-Wechsel übersprungen (app.changeTheme nicht verfügbar)");
-    } else {
-      record(
-        "8. Der Akzent folgt dem Theme (hell ≠ dunkel)",
-        themes.dark !== themes.light && themes.dark !== "" && themes.light !== "",
-        `dunkel ${themes.dark || "?"} · hell ${themes.light || "?"}`,
-      );
-    }
+    record(
+      "8. Der Akzent folgt dem Theme (hell ≠ dunkel)",
+      themes.dark !== themes.light && themes.dark !== "" && themes.light !== "",
+      `dunkel ${themes.dark || "?"} · hell ${themes.light || "?"}`,
+    );
   } finally {
+    // Aufräumen darf nie am Ergebnis hängen: auch ein abgebrochener Lauf gibt den Vault
+    // so zurück, wie er ihn vorgefunden hat.
+    if (previousViewMode !== null) {
+      await cdp
+        .evaluate(`
+          const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+          plugin.settings.viewMode = ${JSON.stringify(previousViewMode)};
+          await plugin.saveSettings?.();
+          return true;
+        `)
+        .catch(() => undefined);
+    }
     if (!keep) {
       await cdp
         .evaluate(`

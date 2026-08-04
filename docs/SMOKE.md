@@ -203,9 +203,19 @@ Treiber, nicht von Hand:
 ```bash
 osascript -e 'quit app "Obsidian"'
 open -a Obsidian --args --remote-debugging-port=9222
-OBSIDIAN_PLUGIN_DIR="<vault>/.obsidian/plugins/3d-codeblocks" npm run deploy
-npm run smoke:gui
+OBSIDIAN_PLUGIN_DIR="<vault>/.obsidian/plugins/three-d-codeblocks" npm run deploy
+npm run smoke:gui -- --vault <vault-name>
 ```
+
+`--vault` ist bei mehreren offenen Fenstern Pflicht — der Treiber bricht lieber ab, als
+im falschen Vault zu prüfen. Weitere Flags: `--model <pfad>`, `--port`, `--keep`
+(Notiz stehen lassen).
+
+> [!check] Durchlauf 2026-08-04 — **8/8 grün** (Obsidian 1.13.4, outpost-worldbuilding)
+> Gegengeprüft gegen einen Build **ohne** den Fix: 2/8, Punkt 3 rot mit genau dem
+> historischen Symptom („Sidebar blieb leer"). Der Smoke misst also den Defekt, statt
+> nur mitzulaufen. Diese Gegenprobe hat außerdem zwei Mängel im Treiber selbst
+> aufgedeckt — siehe `## Befunde`.
 
 Der Treiber (`scripts/gui-smoke.ts`) legt eine temporäre Notiz mit zwei betitelten
 Blöcken an, stellt den Ansichtsmodus auf „erst auf Klick", öffnet die Sidebar und räumt
@@ -224,3 +234,24 @@ nächsten Mal weg.
 - [ ] **7. Der Aktiv-Rahmen liegt auf der Bühne** — `box-shadow` gesetzt.
 - [ ] **8. Der Akzent folgt dem Theme** — hell ≠ dunkel (übersprungen, falls
       `app.changeTheme` in der Obsidian-Version fehlt).
+
+### 2026-08-04 · Drei Fallen beim automatisierten GUI-Smoke
+
+Alle drei beim ersten echten Lauf des getrackten Treibers gefunden, keine davon in einem
+Unit-Test sichtbar:
+
+1. **`Page.bringToFront` reicht auf macOS nicht.** Im Hintergrund blieb das DOM der Notiz
+   komplett leer (`.tdcb-block` = 0, kein Notiztext), während `app.workspace` die Datei
+   korrekt als aktiv meldete — Zustand richtig, Anzeige nicht da. Erst
+   `osascript -e 'tell application "Obsidian" to activate'` (die **App** nach vorn, nicht
+   nur das Fenster) rendert. CORE-TEST-02 nennt die Drosselung; der macOS-Zusatz fehlte.
+2. **Ein Prüfpunkt ohne Gegenstand war grün.** Punkt 6 verglich die Farbe des aktiven
+   Titels mit der eines inaktiven — ohne aktiven Block verglich er einen leeren String
+   mit einer echten Farbe und meldete „unterscheidet sich". Genau im Defektfall, den er
+   fangen sollte, war er grün. Jetzt prüft er erst die Existenz beider Elemente.
+3. **Das Prüfwerkzeug hat die Einstellungen seines Wirts umgeschrieben.**
+   `app.changeTheme` schreibt nach `.obsidian/appearance.json` und machte aus einem
+   Vault, der dem System folgte (kein `theme`-Schlüssel), einen fest eingestellten. Der
+   Theme-Punkt tauscht jetzt nur die Body-Klassen `theme-dark`/`theme-light` — dieselbe
+   Messung, ohne Spur. Ebenso wird der Ansichtsmodus im `finally` auf den Vorwert
+   zurückgeschrieben, auch nach einem Abbruch.
