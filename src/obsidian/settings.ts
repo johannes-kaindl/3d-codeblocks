@@ -14,14 +14,12 @@
 
 import {
   PluginSettingTab,
-  Setting,
   type App,
-  type SettingControl,
-  type SettingDefinitionControl,
   type SettingDefinitionItem,
 } from "obsidian";
 import { MAX_CONTEXTS_LIMIT, mergeSettings, type PluginSettings } from "../core/settings-types";
 import type ThreeDCodeblocksPlugin from "../main";
+import { renderSettingDefinitions } from "../vendor/kit-obsidian/settings_walker";
 
 export class SettingsTab extends PluginSettingTab {
   constructor(
@@ -112,63 +110,16 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   // ── Imperativer Fallback (Obsidian < 1.13) ───────────────────────────────
+  private cleanupPrevious: () => void = () => {};
+
   display(): void {
+    this.cleanupPrevious();
     this.containerEl.empty();
-    for (const item of this.getSettingDefinitions()) {
-      this.renderDefinitionItem(this.containerEl, item);
-    }
-  }
-
-  private renderDefinitionItem(containerEl: HTMLElement, item: SettingDefinitionItem): void {
-    if ((item as { type?: string }).type === "group" || (item as { type?: string }).type === "list") {
-      const group = item as { heading?: string; items?: SettingDefinitionItem[] };
-      if (group.heading) new Setting(containerEl).setName(group.heading).setHeading();
-      for (const sub of group.items ?? []) this.renderDefinitionItem(containerEl, sub);
-      return;
-    }
-
-    const def = item as SettingDefinitionControl;
-    const setting = new Setting(containerEl);
-    if (def.name) setting.setName(def.name);
-    if (typeof def.desc === "string") setting.setDesc(def.desc);
-    if (def.control) this.renderControl(setting, def.control);
-  }
-
-  private renderControl(setting: Setting, control: SettingControl): void {
-    const current = this.getControlValue(control.key);
-    const save = (value: unknown): void => {
-      void this.setControlValue(control.key, value);
-    };
-
-    switch (control.type) {
-      case "toggle":
-        setting.addToggle((toggle) => toggle.setValue(current as boolean).onChange(save));
-        break;
-      case "dropdown":
-        setting.addDropdown((dropdown) => {
-          for (const [key, label] of Object.entries(control.options)) dropdown.addOption(key, label);
-          dropdown.setValue(String(current)).onChange(save);
-        });
-        break;
-      case "slider":
-        setting.addSlider((slider) =>
-          // Der Wert wird seit neuerem Obsidian automatisch inline neben dem Slider gezeigt.
-          slider
-            .setLimits(control.min, control.max, control.step)
-            .setValue(current as number)
-            .onChange(save),
-        );
-        break;
-      case "number":
-        setting.addText((text) =>
-          // Die klassische API hat kein Zahlenfeld — ohne die Coercion kaeme der
-          // String "500" an und mergeSettings wuerde ihn stumm verwerfen.
-          text.setValue(String(current)).onChange((value) => save(Number(value))),
-        );
-        break;
-      default:
-        setting.addText((text) => text.setValue(String(current)).onChange(save));
-        break;
-    }
+    this.cleanupPrevious = renderSettingDefinitions(
+      this.containerEl,
+      this.getSettingDefinitions(),
+      this,
+      this.app,
+    );
   }
 }

@@ -110,6 +110,14 @@ function setParent(el: any, parent: any): void {
   el.parentEl = parent;
 }
 
+export class TFolder {
+  path = "";
+  name = "";
+  vault: any = {};
+  parent: any = null;
+  children: any[] = [];
+}
+
 export class TFile {
   path = "";
   name = "";
@@ -323,6 +331,26 @@ export function setIcon(el: any, name: string): void {
   el.dataset.icon = name;
 }
 
+export class AbstractInputSuggest<T> {
+  containerEl: any;
+  inputEl: HTMLInputElement;
+
+  constructor(
+    public app: any,
+    public inputEl_: HTMLInputElement,
+  ) {
+    this.inputEl = inputEl_;
+    this.containerEl = makeFakeEl();
+  }
+
+  onInputChanged(): void {}
+  getSuggestions(_input: string): T[] {
+    return [];
+  }
+  renderSuggestion(_value: T, _el: HTMLElement): void {}
+  selectSuggestion(_value: T, _evt: MouseEvent | KeyboardEvent): void {}
+}
+
 export function makeFakeApp(): any {
   return {
     vault: {
@@ -332,6 +360,7 @@ export function makeFakeApp(): any {
       process: vi.fn().mockResolvedValue(""),
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
+      getAllFolders: vi.fn().mockReturnValue([]),
     },
     workspace: {
       on: vi.fn().mockReturnValue({}),

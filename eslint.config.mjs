@@ -40,4 +40,12 @@ export default tseslint.config(
       "obsidianmd/ui/sentence-case": "off",
     },
   },
+  {
+    files: ["src/vendor/**/*.ts"],
+    rules: {
+      // Vendorte Kit-Module haben ggf. hoeheren minAppVersion als die Consumers.
+      // no-unsupported-api wird in diesen Dateien nicht erzwungen.
+      "obsidianmd/no-unsupported-api": "off",
+    },
+  },
 );
