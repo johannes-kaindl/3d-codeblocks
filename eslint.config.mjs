@@ -1,51 +1,30 @@
-// Obsidian-Guideline-Gate (PROF-OBS-08): type-checked gegen ECHTE obsidian-Typen.
-// KEIN Inline-`// eslint-disable` — genuin unvermeidbare Ausnahmen NUR als file-scoped
-// Override unten, mit Begruendung (Review verbietet Inline-disables).
-import tseslint from "typescript-eslint";
+// Kanonischer Kern — Quelle: obsidian-plugins/tools/release-template/eslint.config.mjs.
+// NIE von Hand editieren: tools/template_drift_check.py prueft Byte-Gleichheit gegen das
+// Template; Aenderungen passieren IM Template und rollen per Vendoring in alle Repos.
+//
+// Das ist der lokale Spiegel des Community-Store-Scanners — dieselbe Regelquelle
+// (eslint-plugin-obsidianmd), damit `npm run lint` == Store-Scan gilt. Repo-eigene
+// Abweichungen (parserOptions aufs richtige tsconfig, begruendete file-scoped
+// Overrides) gehoeren AUSSCHLIESSLICH nach ./eslint.overrides.mjs. Inline-
+// `eslint-disable` blockt scripts/check-no-inline-disables.mjs im lint-Script.
 import obsidianmd from "eslint-plugin-obsidianmd";
+import overrides from "./eslint.overrides.mjs";
 
-export default tseslint.config(
-  { ignores: ["main.js", "node_modules/", "tests/"] },
-  ...tseslint.configs.recommendedTypeChecked,
+export default [
+  {
+    ignores: [
+      "main.js",
+      "node_modules/**",
+      "coverage/**",
+      "tests/**",
+      "docs/**",
+      "scripts/**",
+      ".remember/**",
+      "*.config.mjs",
+      "*.config.ts",
+      "*.config.js",
+    ],
+  },
   ...obsidianmd.configs.recommended,
-  {
-    files: ["src/**/*.ts"],
-    languageOptions: {
-      parserOptions: {
-        project: ["./tsconfig.json"],
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
-  // --- file-scoped Overrides (mit Begruendung) ------------------------------
-  {
-    files: ["src/main.ts"],
-    rules: {
-      // "3D Codeblocks" (Plugin-Eigenname) und "embedRegistry" (API-Name) sind keine
-      // Satzwörter — sentence-case wäre hier eine Falschschreibung.
-      "obsidianmd/ui/sentence-case": "off",
-    },
-  },
-  {
-    files: ["src/obsidian/settings.ts"],
-    rules: {
-      // Kein Override mehr fuer prefer-setting-definitions: die Regel war hier als
-      // "Versionskonflikt-Fehlalarm" abgeschaltet, das war ein Denkfehler. minAppVersion
-      // 1.5.0 und getSettingDefinitions() schliessen sich nicht aus — beide Renderpfade
-      // koennen aus DERSELBEN Definition bedient werden (s. settings.ts). Der
-      // Store-Scanner prueft dieselbe Regel und laesst sich nicht abschalten.
-      //
-      // "3D" ist ein Fachbegriff, kein Satzanfang — die Regel wuerde daraus "3d"
-      // machen ("Maximum live 3d views"), was schlicht falsch geschrieben ist.
-      "obsidianmd/ui/sentence-case": "off",
-    },
-  },
-  {
-    files: ["src/vendor/**/*.ts"],
-    rules: {
-      // Vendorte Kit-Module haben ggf. hoeheren minAppVersion als die Consumers.
-      // no-unsupported-api wird in diesen Dateien nicht erzwungen.
-      "obsidianmd/no-unsupported-api": "off",
-    },
-  },
-);
+  ...overrides,
+];
