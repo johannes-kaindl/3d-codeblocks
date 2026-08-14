@@ -53,6 +53,12 @@ const SMOKE_NOTE_STL = "_tdcb-gui-smoke-stl.md";
 const SMOKE_NOTE_FILES = "_tdcb-gui-smoke-files.md";
 const SMOKE_NOTE_GLTF = "_tdcb-gui-smoke-gltf.md";
 const SMOKE_NOTE_MIX = "_tdcb-gui-smoke-mix.md";
+const SMOKE_NOTE_EDIT = "_tdcb-gui-smoke-edit.md";
+const EDIT_BLOCK_TITLE = "Edit-Probe";
+/** Eigenes Prüfmodell für den Edit-Modus: eine Kopie, in der ein Top-Level-Knoten das
+ *  gesperrte Präfix trägt. Beide Seiten des Locked-Prüfpunkts sind so beim Namen
+ *  bekannt, ohne etwas über das Vault-Modell anzunehmen. */
+const SMOKE_MODEL_EDIT = "_tdcb-smoke-edit.gltf";
 /** Kopie des Prüfmodells (Endung kommt vom Original). Der Basis-Abschnitt ändert die
  *  Datei — an einem echten Vault-Artefakt darf er das nicht. */
 const SMOKE_MODEL_BASE = "_tdcb-smoke-model";
@@ -2050,6 +2056,414 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
   );
 }
 
+// --- Abschnitt: Edit mode (docs/SMOKE.md 2026-07-26) ------------------------
+
+/** Einen Knopf im Edit-Bereich des Panels klicken. Nicht `clickPanelButton` nehmen:
+ *  im Panel gibt es ZWEI `.tdcb-panel-actions` — die des Viewers (Save view/Fit) und
+ *  die des Edit-Modus. Die erste zu erwischen, waehrend man die zweite meint, ergibt
+ *  einen Klick, der ankommt und nichts tut. */
+async function clickEditButton(cdp: Cdp, label: string): Promise<boolean> {
+  return cdp.evaluate<boolean>(`
+    const section = document.querySelector(".tdcb-panel-edit");
+    const button = [...(section?.querySelectorAll("button") ?? [])]
+      .find((b) => b.textContent === ${JSON.stringify(label)});
+    if (!button || button.disabled) return false;
+    button.click();
+    await new Promise((r) => setTimeout(r, 700));
+    return true;
+  `);
+}
+
+/** Ein Raster ueber den Viewport klicken und einsammeln, welche Knoten dabei
+ *  ausgewaehlt wurden. Warum ein Raster und kein gezielter Klick: welcher Knoten unter
+ *  welchem Pixel liegt, haengt an Modell und Kamera — ein fester Punkt waere eine
+ *  Annahme ueber fremde Geometrie. Das Raster fragt stattdessen, WAS ueberhaupt
+ *  auswaehlbar ist, und genau darauf ruht der Locked-Pruefpunkt. */
+const SELECTION_SWEEP = `
+  const clickCanvasAt = async (canvas, x, y) => {
+    const opts = {
+      clientX: x, clientY: y, bubbles: true, cancelable: true,
+      pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1,
+    };
+    canvas.dispatchEvent(new PointerEvent("pointerdown", opts));
+    canvas.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 }));
+    await new Promise((r) => setTimeout(r, 110));
+    const label = document.querySelector(".tdcb-panel-edit-label");
+    return label && label.textContent.trim() ? label.textContent.trim() : null;
+  };
+
+  // Draufsicht mit etwas Abstand: von schräg oben verdecken sich die Knoten gegenseitig,
+  // und ein Raster trifft dann immer dieselben zwei. Von oben liegen sie nebeneinander.
+  const spreadForSweep = async () => {
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    if (!controller) return false;
+    controller.applyView({ azimuth: 0, elevation: 89, distance: 1.35 });
+    await new Promise((r) => setTimeout(r, 900));
+    return true;
+  };
+
+  const sweepSelection = async () => {
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!canvas) return { names: [], clicks: 0 };
+    await spreadForSweep();
+    const rect = canvas.getBoundingClientRect();
+    const names = new Set();
+    let clicks = 0;
+    for (let ix = 1; ix <= 9; ix++) {
+      for (let iy = 1; iy <= 7; iy++) {
+        const x = Math.round(rect.left + (rect.width * ix) / 10);
+        const y = Math.round(rect.top + (rect.height * iy) / 8);
+        const hit = await clickCanvasAt(canvas, x, y);
+        clicks++;
+        if (hit) names.add(hit);
+      }
+    }
+    return { names: [...names], clicks };
+  };
+
+  /** Klicken, bis EINE Auswahl steht — und dann aufhoeren. Der Sweep endet sonst
+   *  womoeglich auf einem Klick ins Leere, der die Auswahl wieder aufhebt; die
+   *  Zahlenfelder des Panels sind dann weg und der naechste Pruefpunkt misst nichts
+   *  (gemessen 2026-08-14). */
+  /** Denselben Knoten wiederfinden. Ohne das misst ein Pruefpunkt, der eine
+   *  Verschiebung nachsehen will, irgendeinen anderen Knoten und wird gruen, weil dort
+   *  natuerlich Zahlen stehen — gemessen 2026-08-14: der Wiedereinstieg meldete
+   *  [5,2,-10] fuer einen Knoten, der nie bewegt worden war. */
+  const selectNodeNamed = async (wanted) => {
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!canvas) return null;
+    await spreadForSweep();
+    const rect = canvas.getBoundingClientRect();
+    for (let ix = 1; ix <= 9; ix++) {
+      for (let iy = 1; iy <= 7; iy++) {
+        const hit = await clickCanvasAt(
+          canvas,
+          Math.round(rect.left + (rect.width * ix) / 10),
+          Math.round(rect.top + (rect.height * iy) / 8),
+        );
+        if (hit === wanted) return hit;
+      }
+    }
+    return null;
+  };
+
+  const selectAnyNode = async () => {
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!canvas) return null;
+    await spreadForSweep();
+    const rect = canvas.getBoundingClientRect();
+    for (let ix = 1; ix <= 9; ix++) {
+      for (let iy = 1; iy <= 7; iy++) {
+        const hit = await clickCanvasAt(
+          canvas,
+          Math.round(rect.left + (rect.width * ix) / 10),
+          Math.round(rect.top + (rect.height * iy) / 8),
+        );
+        if (hit) return hit;
+      }
+    }
+    return null;
+  };
+`;
+
+/** Die zuletzt gezeigten Notices einsammeln. Sie verschwinden nach wenigen Sekunden —
+ *  gelesen wird deshalb direkt nach der Aktion, nicht am Ende des Pruefpunkts. */
+async function notices(cdp: Cdp): Promise<string> {
+  return cdp.evaluate<string>(`
+    return [...document.querySelectorAll(".notice")].map((n) => n.textContent.trim()).join(" | ");
+  `);
+}
+
+async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
+  await setSetting(cdp, "viewMode", "immediate");
+  await setSetting(cdp, "autoRotate", false);
+  await setSetting(cdp, "maxContexts", 6);
+  await setSetting(cdp, "lockedNodePrefixes", "env__");
+  await closeExtraLeaves(cdp);
+
+  // Ein eigenes Prüfmodell: der letzte Top-Level-Knoten bekommt das gesperrte Präfix.
+  // So kennt der Lauf beide Seiten beim Namen, ohne etwas über das Vault-Modell
+  // annehmen zu müssen — und das Original bleibt unangetastet.
+  createdNotes.add(SMOKE_MODEL_EDIT);
+  createdNotes.add(SMOKE_MODEL_EDIT.replace(/\.gltf$/, ".edit.gltf"));
+  const probe = await cdp.evaluate<{ locked: string; free: string[] } | null>(`
+    const source = app.vault.getAbstractFileByPath(${JSON.stringify(model)});
+    if (!source || !source.path.endsWith(".gltf")) return null;
+    const doc = JSON.parse(await app.vault.read(source));
+    const top = doc.scenes?.[doc.scene ?? 0]?.nodes ?? [];
+    if (top.length < 2) return null;
+    const lockedIndex = top[top.length - 1];
+    doc.nodes[lockedIndex].name = "env__" + (doc.nodes[lockedIndex].name ?? "node");
+    const path = ${JSON.stringify(SMOKE_MODEL_EDIT)};
+    const text = JSON.stringify(doc);
+    const existing = app.vault.getAbstractFileByPath(path);
+    if (existing) await app.vault.modify(existing, text);
+    else await app.vault.create(path, text);
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      locked: doc.nodes[lockedIndex].name,
+      free: top.slice(0, -1).map((i) => doc.nodes[i].name ?? ("#" + i)),
+    };
+  `);
+  if (!probe) {
+    skipped(
+      "Edit mode (E1-E8)",
+      "Prüfmodell ist kein Text-glTF mit mindestens zwei Top-Level-Knoten — daraus lässt sich kein gesperrter Knoten bauen",
+    );
+    return;
+  }
+
+  await openNote(
+    cdp,
+    SMOKE_NOTE_EDIT,
+    [
+      "# GUI-Smoke Edit mode (automatisch erzeugt)",
+      "",
+      `${fence}3d`,
+      `file: ${SMOKE_MODEL_EDIT}`,
+      `title: ${EDIT_BLOCK_TITLE}`,
+      fence,
+      "",
+    ].join("\n"),
+    "preview",
+  );
+  await cdp.evaluate(
+    `await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-controls`)}); return true;`,
+  );
+  const awake = await pollUntil(
+    cdp,
+    `
+      const canvas = document.querySelector(".tdcb-block canvas");
+      if (!canvas) return 0;
+      const rect = canvas.getBoundingClientRect();
+      const opts = {
+        clientX: Math.round(rect.left + rect.width / 2), clientY: Math.round(rect.top + rect.height / 2),
+        bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1,
+      };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", opts));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 }));
+      const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+      return controller && controller.label() === ${JSON.stringify(EDIT_BLOCK_TITLE)} ? 1 : 0;
+    `,
+    30_000,
+  );
+  if (!awake) {
+    record("E1. Edit-Modus betreten", false, `Block nicht weckbar — ${await describeScene(cdp)}`);
+    return;
+  }
+
+  // --- E1. Betreten -------------------------------------------------------
+  const entered = await clickEditButton(cdp, "Edit model");
+  const editState = await cdp.evaluate<{ modes: string[]; hint: string; editing: number }>(`
+    const section = document.querySelector(".tdcb-panel-edit");
+    const modes = [...(section?.querySelectorAll(".tdcb-panel-edit-modes button") ?? [])]
+      .map((b) => b.textContent.trim());
+    return {
+      modes,
+      hint: section ? section.textContent : "",
+      editing: document.querySelectorAll(".tdcb-editing").length,
+    };
+  `);
+  record(
+    "E1. 'Edit model' schaltet den Bearbeitungsmodus ein",
+    entered &&
+      editState.modes.includes("Move") &&
+      editState.modes.includes("Scale") &&
+      editState.editing > 0,
+    entered
+      ? `Modi ${editState.modes.join("/") || "keine"} · ${editState.editing} Viewport(s) mit .tdcb-editing`
+      : "'Edit model' war nicht bedienbar",
+  );
+
+  // --- E2. Auswahl per Klick ---------------------------------------------
+  const sweep = await cdp.evaluate<{ names: string[]; clicks: number }>(`
+    ${SELECTION_SWEEP}
+    return await sweepSelection();
+  `);
+  record(
+    "E2. Ein Klick aufs Modell wählt einen Knoten aus",
+    sweep.names.length > 0,
+    `${sweep.names.length} Knoten in ${sweep.clicks} Rasterklicks: ${sweep.names.join(", ") || "keiner"}`,
+  );
+
+  // --- E3. Verschieben und speichern -------------------------------------
+  // Verschoben wird über die Zahlenfelder des Panels, nicht über den Gizmo: der Gizmo
+  // ist eine 3D-Trefferfläche in der Szene, deren Pixelposition von Modell und Kamera
+  // abhängt — ein Drag darauf wäre eine Wette. Der Feld-Weg geht durch dieselbe Kette
+  // (`applyTrs` → Session → dirty → Save), nur der Griff daran ist ein anderer; dass
+  // der Gizmo-Drag selbst ungeprüft bleibt, sagt der Lauf unten an.
+  const moved = await cdp.evaluate<{
+    selected: string | null;
+    before: number[];
+    after: number[];
+    saveEnabled: boolean;
+  }>(`
+    ${SELECTION_SWEEP}
+    const selected = await selectAnyNode();
+    const section = document.querySelector(".tdcb-panel-edit");
+    const row = section?.querySelector(".tdcb-panel-edit-row");
+    const inputs = [...(row?.querySelectorAll("input") ?? [])];
+    if (inputs.length < 3) return { selected, before: [], after: [], saveEnabled: false };
+    const before = inputs.map((i) => Number(i.value));
+    // Klein verschieben, nicht weit: der Knoten muss beim Wiedereinstieg noch unter
+    // demselben Rasterpunkt liegen — ein Sprung um 7 Einheiten trug ihn aus dem Raster
+    // heraus, und E5 fand ihn nicht mehr (gemessen 2026-08-14).
+    inputs[0].value = String(before[0] + 2);
+    inputs[0].dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
+    const fresh = [...document.querySelectorAll(".tdcb-panel-edit-row input")].map((i) => Number(i.value));
+    const save = [...document.querySelectorAll(".tdcb-panel-edit button")].find((b) => b.textContent === "Save edits");
+    return { selected, before, after: fresh.slice(0, 3), saveEnabled: !!save && !save.disabled };
+  `);
+  const savedClick = await clickEditButton(cdp, "Save edits");
+  const saveNotice = await notices(cdp);
+  const editFile = await pollUntil<string>(
+    cdp,
+    `
+      const path = ${JSON.stringify(SMOKE_MODEL_EDIT.replace(/\.gltf$/, ".edit.gltf"))};
+      const file = app.vault.getAbstractFileByPath(path);
+      return file ? path : null;
+    `,
+    15_000,
+  );
+  record(
+    "E3. Verschieben macht 'Save edits' bedienbar und schreibt die .edit-Datei",
+    moved.saveEnabled &&
+      moved.after[0] === moved.before[0] + 2 &&
+      savedClick &&
+      editFile !== null &&
+      saveNotice.includes("Edits saved to"),
+    `${moved.selected ?? "nichts"} ${JSON.stringify(moved.before)} → ${JSON.stringify(moved.after)} · Datei: ${editFile ?? "keine"} · Notice: ${saveNotice || "keine"}`,
+  );
+
+  // --- E4. Das Original bleibt unangetastet ------------------------------
+  // Die Zusage des ganzen Entwurfs: der Editor schreibt einen Änderungswunsch daneben,
+  // nicht in die Geometrie-Wahrheit hinein.
+  const original = await cdp.evaluate<{ changed: boolean; size: number }>(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_MODEL_EDIT)});
+    const text = await app.vault.read(file);
+    const doc = JSON.parse(text);
+    const top = doc.scenes?.[doc.scene ?? 0]?.nodes ?? [];
+    const moved = top.some((i) => JSON.stringify(doc.nodes[i].translation ?? []) === "null");
+    return { changed: moved, size: text.length };
+  `);
+  record(
+    "E4. Die Original-Datei wird dabei nicht angefasst",
+    !original.changed,
+    `${original.size} Zeichen, Knoten unverändert`,
+  );
+
+  // --- E5. Wiedereinstieg ------------------------------------------------
+  // Nach dem Speichern ist die Session sauber — `discard` verlässt den Modus dann ohne
+  // Rückfrage, das ist der ruhige Weg hinaus.
+  await clickEditButton(cdp, "Discard edits");
+  const reentered = await clickEditButton(cdp, "Edit model");
+  const reenterNotice = await notices(cdp);
+  // GENAU den Knoten wiederfinden, der in E3 bewegt wurde: irgendeine andere Auswahl
+  // wäre wertlos — dort stehen auch Zahlen, nur eben nicht die gespeicherten.
+  const restored = await cdp.evaluate<{ found: string | null; values: number[] }>(`
+    ${SELECTION_SWEEP}
+    const found = await selectNodeNamed(${JSON.stringify(moved.selected ?? "")});
+    const values = [...document.querySelectorAll(".tdcb-panel-edit-row input")].map((i) => Number(i.value));
+    return { found, values: values.slice(0, 3) };
+  `);
+  const expected = moved.after[0];
+  record(
+    "E5. Beim Wiedereinstieg sitzt die gespeicherte Verschiebung wieder",
+    reentered &&
+      reenterNotice.includes("Loaded existing edits") &&
+      restored.found === moved.selected &&
+      restored.values[0] === expected,
+    `Notice: ${reenterNotice || "keine"} · ${restored.found ?? "Knoten nicht wiedergefunden"}: ${JSON.stringify(restored.values)} (erwartet ${expected} auf der ersten Achse)`,
+  );
+
+  // --- E6. Gesperrtes Präfix ---------------------------------------------
+  // Der Punkt braucht beide Hälften: dass der gesperrte Knoten NICHT auswählbar ist,
+  // heißt nur etwas, wenn er es ohne Sperre wäre. Sonst wäre er auch dann grün, wenn
+  // ihn schlicht kein Rasterklick trifft — ein Prüfpunkt ohne Gegenstand.
+  const withLock = await cdp.evaluate<{ names: string[]; clicks: number }>(`
+    ${SELECTION_SWEEP}
+    return await sweepSelection();
+  `);
+  const lockedNames = withLock.names;
+  await clickEditButton(cdp, "Discard edits");
+  await cdp.evaluate<boolean>(`
+    const modal = [...document.querySelectorAll(".modal-button-container button")]
+      .find((b) => b.textContent === "Discard");
+    if (modal) modal.click();
+    await new Promise((r) => setTimeout(r, 500));
+    return true;
+  `);
+  await setSetting(cdp, "lockedNodePrefixes", "");
+  await clickEditButton(cdp, "Edit model");
+  const openSweep = await cdp.evaluate<{ names: string[]; clicks: number }>(`
+    ${SELECTION_SWEEP}
+    return await sweepSelection();
+  `);
+  record(
+    "E6. Ein 'env__'-Knoten ist gesperrt — und ohne Sperre wäre er auswählbar",
+    openSweep.names.includes(probe.locked) && !lockedNames.includes(probe.locked),
+    `ohne Sperre: ${openSweep.names.join(", ") || "nichts"} · mit Sperre: ${lockedNames.join(", ") || "nichts"} · gesperrt heißt ${probe.locked}`,
+  );
+  await setSetting(cdp, "lockedNodePrefixes", "env__");
+
+  // --- E7. Dirty-Discard mit Rückfrage -----------------------------------
+  const dirty = await cdp.evaluate<boolean>(`
+    ${SELECTION_SWEEP}
+    await selectAnyNode();
+    const inputs = [...document.querySelectorAll(".tdcb-panel-edit-row input")];
+    if (inputs.length < 3) return false;
+    inputs[1].value = String(Number(inputs[1].value) + 5);
+    inputs[1].dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 600));
+    const save = [...document.querySelectorAll(".tdcb-panel-edit button")].find((b) => b.textContent === "Save edits");
+    return !!save && !save.disabled;
+  `);
+  await clickEditButton(cdp, "Discard edits");
+  const dialog = await cdp.evaluate<{ text: string; buttons: string[] }>(`
+    const modal = document.querySelector(".modal-button-container");
+    return {
+      text: modal?.closest(".modal")?.textContent?.trim() ?? "",
+      buttons: [...(modal?.querySelectorAll("button") ?? [])].map((b) => b.textContent.trim()),
+    };
+  `);
+  const kept = await cdp.evaluate<boolean>(`
+    const keep = [...document.querySelectorAll(".modal-button-container button")]
+      .find((b) => b.textContent === "Keep editing");
+    if (!keep) return false;
+    keep.click();
+    await new Promise((r) => setTimeout(r, 700));
+    return !!document.querySelector(".tdcb-panel-edit-modes");
+  `);
+  await clickEditButton(cdp, "Discard edits");
+  const discarded = await cdp.evaluate<boolean>(`
+    const discard = [...document.querySelectorAll(".modal-button-container button")]
+      .find((b) => b.textContent === "Discard");
+    if (!discard) return false;
+    discard.click();
+    await new Promise((r) => setTimeout(r, 900));
+    return !document.querySelector(".tdcb-panel-edit-modes");
+  `);
+  record(
+    "E7. Ungespeicherte Änderungen fragen nach — 'Keep editing' bleibt, 'Discard' verlässt",
+    dirty && dialog.text.includes("Discard unsaved edits?") && kept && discarded,
+    `dirty ${dirty} · Dialog "${dialog.text.slice(0, 40)}" [${dialog.buttons.join(", ")}] · blieb ${kept} · verließ ${discarded}`,
+  );
+
+  skipped(
+    "SMOKE.md Edit mode Punkt 6 (Abnahme-Test im outpost-Repo)",
+    "prüft ein Python-Skript im Konsumenten-Repo, nicht dieses Plugin",
+  );
+  skipped(
+    "SMOKE.md Edit mode Punkt 7 (Regeneration bei offenem Edit-Modus)",
+    "braucht einen Erzeuger, der die Datei umbenennt, während der Modus offen ist — noch von Hand",
+  );
+  skipped(
+    "Gizmo-Drag selbst",
+    "der Griff ist eine 3D-Trefferfläche in der Szene; E3 fährt dieselbe Kette über die Zahlenfelder",
+  );
+}
+
 // --- Ablauf -----------------------------------------------------------------
 
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
@@ -2057,6 +2471,7 @@ const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => 
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
   { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
+  { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
 ];
 
 async function main(): Promise<void> {

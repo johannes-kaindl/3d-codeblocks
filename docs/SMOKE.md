@@ -189,6 +189,33 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 
 ## Edit mode (2026-07-26)
 
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui -- --section edit`
+> Die Punkte 1–5 fährt der CDP-Treiber (Abschnitt `edit`): **7 Prüfpunkte.**
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | 1. Betreten | E1 (Modus an, `.tdcb-editing` am Viewport, Move/Scale da) · E2 (Klick wählt einen Knoten) |
+> | 2. Speichern | E3 (Verschiebung macht „Save edits" bedienbar, Notice + `.edit.gltf` entstehen) · E4 (das Original bleibt unangetastet) |
+> | 3. Wiedereinstieg | E5 (Notice „Loaded existing edits" **und** derselbe Knoten trägt wieder seinen gespeicherten Wert) |
+> | 4. Locked-Präfix | E6 (beide Hälften: mit `env__` nie auswählbar, ohne Sperre sehr wohl) |
+> | 5. Dirty-Discard | E7 (Rückfrage erscheint, „Keep editing" bleibt, „Discard" verlässt) |
+> | 6. Abnahme-Test | nicht automatisiert — prüft ein Python-Skript im Konsumenten-Repo |
+> | 7. Regeneration im Modus | nicht automatisiert — braucht einen Erzeuger, der während des offenen Modus umbenennt |
+>
+> **Der Gizmo-Drag selbst bleibt ungeprüft** und der Lauf sagt das an: der Griff ist eine
+> 3D-Trefferfläche in der Szene, seine Pixelposition hängt an Modell und Kamera — ein Drag
+> darauf wäre eine Wette. E3 fährt dieselbe Kette (`applyTrs` → Session → dirty → Save)
+> über die Zahlenfelder des Panels.
+>
+> **Zwei Dinge, die der Treiber selbst herstellt:** Er baut sein eigenes Prüfmodell (eine
+> Kopie, in der ein Top-Level-Knoten das gesperrte Präfix trägt) — sonst wüsste er nicht,
+> welcher Knoten gesperrt sein *sollte*. Und er wählt Knoten über ein Klick-Raster aus der
+> Draufsicht: von schräg oben verdecken sie sich gegenseitig, das Raster traf dann immer
+> dieselben zwei von sechs.
+>
+> **Gegenprobe (2026-08-14):** Laden der `.edit`-Datei stillgelegt → nur E5 rot;
+> Präfix-Sperre ausgehebelt → nur E6 rot (und E2 sieht folgerichtig einen Knoten mehr).
+
 - [ ] **1. Betreten** — Block mit `eg.gltf` → **Edit model** (Pencil in der Hover-Leiste
       oder in der Sidebar) → Raum anklicken → Gizmo erscheint, Rahmen um den Raum sichtbar.
 - [ ] **2. Speichern** — Raum mit dem Gizmo verschieben → **Save edits** → Notice „Edits
