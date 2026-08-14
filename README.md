@@ -3,7 +3,36 @@
 View 3D artifacts (GLB, glTF, STL) inside Obsidian — orbit, zoom and pan without
 leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed.
 
-## Four ways to show a model
+## Features
+
+- Open `.glb`, `.gltf` and `.stl` files in their own pane, or embed them with `![[…]]`
+  the way you would embed a PDF.
+- Two code blocks: `3d` for a file reference with an optional title and height, `gltf`
+  for glTF JSON written straight into the note.
+- Orbit, zoom and pan; **save a camera angle into the block**, so the view travels with
+  the note and shows up in git diffs.
+- **Edit mode:** move and scale the top-level nodes of a glTF/GLB model. Edits go to a
+  separate `.edit.gltf` file — the original is never modified.
+- Theme-aware default material for STL, which carries none of its own.
+- No continuous render loop: a frame is drawn only when something changes.
+
+## Requirements
+
+- Obsidian **1.5.0** or newer.
+- WebGL support in the renderer — standard on desktop. Mobile works, but large models
+  are slow and the browser's limit on simultaneous 3D views is reached sooner.
+- **Uncompressed glTF.** Draco- and Meshopt-compressed files cannot be read (see
+  [Supported formats](#supported-formats)).
+
+## Install
+
+Not in the community store yet. To try it: build with `npm install && npm run build`,
+then copy `main.js`, `manifest.json` and `styles.css` into
+`<vault>/.obsidian/plugins/three-d-codeblocks/`.
+
+## Usage
+
+### Four ways to show a model
 
 **1. Open a file.** Click a `.gltf`, `.glb` or `.stl` in the file explorer — it opens
 in its own pane, full size, fully interactive.
@@ -37,13 +66,7 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 ```
 ````
 
-## Why
-
-Generated 3D output — a floor plan, a scan, a CAD export — usually lives next to the
-note that discusses it, but you have to leave Obsidian to look at it. This plugin keeps
-it in place: regenerate the file, and the view updates without a restart.
-
-## Supported formats
+### Supported formats
 
 | Extension | Notes |
 |---|---|
@@ -54,7 +77,7 @@ it in place: regenerate the file, and the view updates without a restart.
 which Obsidian's renderer forbids. Such files are detected and reported in plain
 language instead of failing with a parser error — export uncompressed.
 
-## Block keys
+### Block keys
 
 | Key | Required | Meaning |
 |---|---|---|
@@ -66,7 +89,7 @@ language instead of failing with a parser error — export uncompressed.
 Unknown keys are reported below the viewport rather than silently ignored — a typo like
 `heigth:` should not look like a plugin bug.
 
-## Saving a camera angle
+### Saving a camera angle
 
 Turn the model to the angle you want, then press **Save view** — in the sidebar (open it
 with the **Open 3D view controls** command) or the pin button that appears when you hover
@@ -82,7 +105,7 @@ no code block to save into.
 The **Controls placement** setting decides where the buttons show up: the sidebar when
 it is open, the hover toolbar otherwise (default), or always just one of the two.
 
-## Edit mode
+### Edit mode
 
 Move and scale the top-level nodes of a `.gltf` or `.glb` model — a floor, a wall, a
 prop — without leaving Obsidian. Not available for `gltf` code blocks (JSON-in-note) or
@@ -120,7 +143,8 @@ current selection and **Discard edits** for the whole session.
 **Locked node prefixes** (setting, default `env__`) protects nodes by name — a node whose
 name starts with one of the comma-separated prefixes cannot be selected or edited at all.
 
-**Limits:**
+#### Limits
+
 - Translation and scale only — no rotation, by design (the contract this editor follows
   doesn't need it, and it keeps the gizmo and the file diff simple).
 - Top-level nodes only, no multi-select.
@@ -136,7 +160,7 @@ Editing files with shared meshes is still unsupported — those nodes cannot be 
 all. One mesh per node avoids it; most generators (CAD exports, floor-plan scripts)
 already produce models this way.
 
-## Settings
+## Configuration
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -153,17 +177,20 @@ and silently kill the oldest ones. Rather than let that happen at random, the pl
 decides which inline viewport turns into a still image. Opened files (way 1) are always
 fully interactive and never counted against this limit.
 
-## Performance
+## How it works
+
+Generated 3D output — a floor plan, a scan, a CAD export — usually lives next to the
+note that discusses it, but you have to leave Obsidian to look at it. This plugin keeps
+it in place: regenerate the file, and the view updates without a restart.
 
 There is no continuous render loop. A frame is drawn only when something changes —
 an open note with several 3D blocks costs no GPU time while you read it. Blocks build
 their viewport when they scroll into view and release it again when they leave.
 
-## Installation
-
-Not in the community store yet. To try it: build with `npm install && npm run build`,
-then copy `main.js`, `manifest.json` and `styles.css` into
-`<vault>/.obsidian/plugins/three-d-codeblocks/`.
+The code is split so that each layer can be tested on its own: `src/core/` holds the pure
+logic (config parsing, format detection, camera fitting, context budget) and imports
+neither `obsidian` nor `three` — enforced by `check:pure`. `src/viewer/` wraps three.js
+and knows nothing about Obsidian. `src/obsidian/` connects the two and owns the lifecycle.
 
 ## Development
 
@@ -172,11 +199,6 @@ npm install
 npm run dev     # watch build
 npm run gate    # lint + typecheck + tests + purity + bundle size
 ```
-
-`src/core/` holds the pure logic (config parsing, format detection, camera fitting,
-context budget) and imports neither `obsidian` nor `three` — enforced by `check:pure`.
-`src/viewer/` wraps three.js and knows nothing about Obsidian. `src/obsidian/` connects
-the two and owns the lifecycle.
 
 Design and plan: `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 Manual test checklist: `docs/SMOKE.md`.
