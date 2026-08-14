@@ -59,6 +59,102 @@ const EDIT_BLOCK_TITLE = "Edit-Probe";
  *  gesperrte Präfix trägt. Beide Seiten des Locked-Prüfpunkts sind so beim Namen
  *  bekannt, ohne etwas über das Vault-Modell anzunehmen. */
 const SMOKE_MODEL_EDIT = "_tdcb-smoke-edit.gltf";
+/** Notfall-STL, falls im Vault keine liegt: ein Wuerfel in ASCII-STL (sechs Normalen, damit
+ *  mehr als eine Flaechenhelligkeit im Bild landet und der Pruefpunkt nicht an seiner
+ *  eigenen Schwelle wackelt). Der Treiber
+ *  bringt sonst keine Testdaten mit — hier lohnt die Ausnahme, weil der STL-Punkt sonst
+ *  in jedem Vault ohne STL dauerhaft uebersprungen wird und die Lade-/Material-Kette
+ *  fuer dieses Format nie jemand faehrt. Eine echte STL aus dem Vault hat Vorrang. */
+const SMOKE_MODEL_STL = "_tdcb-smoke-model.stl";
+const FALLBACK_STL = [
+  "solid tdcb",
+  "facet normal 0 0 -1",
+  " outer loop",
+  "  vertex 0 0 0",
+  "  vertex 0 10 0",
+  "  vertex 10 10 0",
+  " endloop",
+  "endfacet",
+  "facet normal 0 0 -1",
+  " outer loop",
+  "  vertex 0 0 0",
+  "  vertex 10 10 0",
+  "  vertex 10 0 0",
+  " endloop",
+  "endfacet",
+  "facet normal 0 0 1",
+  " outer loop",
+  "  vertex 0 0 10",
+  "  vertex 10 0 10",
+  "  vertex 10 10 10",
+  " endloop",
+  "endfacet",
+  "facet normal 0 0 1",
+  " outer loop",
+  "  vertex 0 0 10",
+  "  vertex 10 10 10",
+  "  vertex 0 10 10",
+  " endloop",
+  "endfacet",
+  "facet normal 0 -1 0",
+  " outer loop",
+  "  vertex 0 0 0",
+  "  vertex 10 0 0",
+  "  vertex 10 0 10",
+  " endloop",
+  "endfacet",
+  "facet normal 0 -1 0",
+  " outer loop",
+  "  vertex 0 0 0",
+  "  vertex 10 0 10",
+  "  vertex 0 0 10",
+  " endloop",
+  "endfacet",
+  "facet normal 0 1 0",
+  " outer loop",
+  "  vertex 0 10 0",
+  "  vertex 0 10 10",
+  "  vertex 10 10 10",
+  " endloop",
+  "endfacet",
+  "facet normal 0 1 0",
+  " outer loop",
+  "  vertex 0 10 0",
+  "  vertex 10 10 10",
+  "  vertex 10 10 0",
+  " endloop",
+  "endfacet",
+  "facet normal -1 0 0",
+  " outer loop",
+  "  vertex 0 0 0",
+  "  vertex 0 0 10",
+  "  vertex 0 10 10",
+  " endloop",
+  "endfacet",
+  "facet normal -1 0 0",
+  " outer loop",
+  "  vertex 0 0 0",
+  "  vertex 0 10 10",
+  "  vertex 0 10 0",
+  " endloop",
+  "endfacet",
+  "facet normal 1 0 0",
+  " outer loop",
+  "  vertex 10 0 0",
+  "  vertex 10 10 0",
+  "  vertex 10 10 10",
+  " endloop",
+  "endfacet",
+  "facet normal 1 0 0",
+  " outer loop",
+  "  vertex 10 0 0",
+  "  vertex 10 10 10",
+  "  vertex 10 0 10",
+  " endloop",
+  "endfacet",
+  "endsolid tdcb",
+  "",
+].join("\n");
 /** Kopie des Prüfmodells (Endung kommt vom Original). Der Basis-Abschnitt ändert die
  *  Datei — an einem echten Vault-Artefakt darf er das nicht. */
 const SMOKE_MODEL_BASE = "_tdcb-smoke-model";
@@ -400,6 +496,11 @@ const SAMPLER = `
     }
     const data = ctx.getImageData(0, 0, off.width, off.height).data;
     const seen = new Set();
+    // Wie viel Flaeche nimmt etwas anderes als der Hintergrund ein? Die Farbzahl allein
+    // ist bei einfachen Koerpern knapp (ein Wuerfel kommt auf drei Toene und sitzt damit
+    // genau auf der Schwelle) — der Deckungsgrad hat Reserve und sagt zugleich mehr:
+    // "das Modell ist zu sehen", nicht nur "irgendetwas ist bunt".
+    const counts = new Map();
     let r = 0, g = 0, b = 0;
     // FNV-1a über die quantisierten Pixel: beantwortet "hat sich das Bild geändert",
     // wo Mittelwert und Farbzahl gleich bleiben können (eine Verschiebung etwa).
@@ -407,14 +508,17 @@ const SAMPLER = `
     for (let i = 0; i < data.length; i += 4) {
       const quantised = ((data[i] >> 3) << 10) | ((data[i + 1] >> 3) << 5) | (data[i + 2] >> 3);
       seen.add(quantised);
+      counts.set(quantised, (counts.get(quantised) ?? 0) + 1);
       hash = Math.imul(hash ^ quantised, 16777619);
       r += data[i];
       g += data[i + 1];
       b += data[i + 2];
     }
     const n = data.length / 4;
+    const background = Math.max(...counts.values());
     return {
       colors: seen.size,
+      coverage: Math.round(((n - background) / n) * 100),
       avg: [Math.round(r / n), Math.round(g / n), Math.round(b / n)],
       hash: hash >>> 0,
     };
@@ -1652,35 +1756,46 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   );
 
   // --- B16. STL -----------------------------------------------------------
-  const stl = await cdp.evaluate<string | null>(`
-    const file = app.vault.getFiles().find((f) => /\\.stl$/i.test(f.path));
-    return file ? file.path : null;
+  // Eine echte STL aus dem Vault hat Vorrang; gibt es keine, legt der Lauf seine eigene
+  // an, statt den Punkt zu überspringen — sonst fährt die STL-Kette in einem Vault ohne
+  // STL nie jemand, und "übersprungen" liest sich nach dem dritten Mal wie "abgedeckt".
+  const stl = await cdp.evaluate<string>(`
+    const existing = app.vault.getFiles().find((f) => /\\.stl$/i.test(f.path));
+    if (existing) return existing.path;
+    const path = ${JSON.stringify(SMOKE_MODEL_STL)};
+    const current = app.vault.getAbstractFileByPath(path);
+    const body = ${JSON.stringify(FALLBACK_STL)};
+    if (current) await app.vault.modify(current, body);
+    else await app.vault.create(path, body);
+    await new Promise((r) => setTimeout(r, 300));
+    return path;
   `);
-  if (!stl) {
-    skipped("B16. STL", "keine .stl im Vault — mit einer STL-Datei im Vault läuft der Punkt mit");
-  } else {
+  createdNotes.add(SMOKE_MODEL_STL);
+  {
     await openNote(
       cdp,
       SMOKE_NOTE_STL,
       [`${fence}3d`, `file: ${stl}`, "title: STL", fence, ""].join("\n"),
       "preview",
     );
-    const stlStats = await pollUntil<{ colors: number; message: string }>(
+    const stlStats = await pollUntil<{ coverage: number; colors: number; message: string }>(
       cdp,
       `
         ${SAMPLER}
         const canvas = document.querySelector(".tdcb-block canvas");
         const stats = canvas ? sample(canvas) : null;
-        if (!stats || stats.colors < 3) return null;
+        if (!stats || stats.coverage < 5) return null;
         const box = document.querySelector(".tdcb-message-error");
-        return { colors: stats.colors, message: box ? box.textContent.trim() : "" };
+        return { coverage: stats.coverage, colors: stats.colors, message: box ? box.textContent.trim() : "" };
       `,
       30_000,
     );
     record(
       "B16. Eine STL-Datei lädt und ist sichtbar",
       stlStats !== null && stlStats.message === "",
-      stlStats ? `${stlStats.colors} Farbtöne · ${stl}` : `nichts gezeichnet (${stl})`,
+      stlStats
+        ? `${stlStats.coverage}% der Fläche belegt · ${stlStats.colors} Farbtöne · ${stl}`
+        : `nichts gezeichnet (${stl})`,
     );
   }
 
