@@ -45,6 +45,17 @@ const SMOKE_NOTE_BAD = "_tdcb-gui-smoke-bad-view.md";
 /** Eigener Titel je Abschnitt: nur so ist ein Controller aus dem vorigen Abschnitt
  *  von dem des aktuellen zu unterscheiden. */
 const VIEW_BLOCK_TITLE = "Ansicht-Probe";
+const BASIS_BLOCK_TITLE = "Basis-Probe";
+const SMOKE_NOTE_BASIS = "_tdcb-gui-smoke-basis.md";
+const SMOKE_NOTE_MANY = "_tdcb-gui-smoke-many.md";
+const SMOKE_NOTE_ERRORS = "_tdcb-gui-smoke-errors.md";
+const SMOKE_NOTE_STL = "_tdcb-gui-smoke-stl.md";
+/** Kopie des Prüfmodells (Endung kommt vom Original). Der Basis-Abschnitt ändert die
+ *  Datei — an einem echten Vault-Artefakt darf er das nicht. */
+const SMOKE_MODEL_BASE = "_tdcb-smoke-model";
+/** Existierende Datei mit nicht unterstützter Endung: ohne sie meldet der Prüfling
+ *  "File not found" statt "Unsupported format" und der Prüfpunkt misst den falschen Fall. */
+const SMOKE_WRONG_EXT = "_tdcb-smoke-model.obj";
 
 // --- CDP-Minimalbrücke ------------------------------------------------------
 // Node ≥21 bringt `WebSocket` global mit — keine Dependency nötig.
@@ -332,6 +343,21 @@ function parseViewLine(line: string | null): ViewValues | null {
   return { azimuth: parts[0], elevation: parts[1], distance: parts[2] };
 }
 
+/** Zwei Ansichten als "praktisch dieselbe" vergleichen. 1.5° statt 0: eine `view:`-Zeile
+ *  trägt ganze Grad, der Rückweg über die Kamera rundet erneut — eine Abweichung von
+ *  einem Grad ist erwartbar. Dass sie sich nicht aufschaukelt, ist eine eigene Frage
+ *  (Prüfpunkt V3b). */
+function near(a: ViewValues | null, b: unknown): boolean {
+  const left = a;
+  const right = b as ViewValues | null;
+  if (!left || !right) return false;
+  return (
+    Math.abs(left.azimuth - right.azimuth) <= 1.5 &&
+    Math.abs(left.elevation - right.elevation) <= 1.5 &&
+    Math.abs(left.distance - right.distance) < 0.05
+  );
+}
+
 /** Den Knopf mit dieser Beschriftung im Sidebar-Panel klicken. */
 async function clickPanelButton(cdp: Cdp, label: string): Promise<boolean> {
   return cdp.evaluate<boolean>(`
@@ -340,6 +366,197 @@ async function clickPanelButton(cdp: Cdp, label: string): Promise<boolean> {
       .find((b) => b.textContent === ${JSON.stringify(label)});
     if (!button || button.disabled) return false;
     button.click();
+    return true;
+  `);
+}
+
+/** Ein WebGL-Canvas (oder ein `<img>`) auf Farbinhalt abtasten — als Renderer-Schnipsel
+ *  zum Einspleissen. Beantwortet zwei Fragen, die man am DOM allein nicht stellen kann:
+ *  "ist ueberhaupt etwas gezeichnet" (mehr als eine Farbe) und "welcher Grundton"
+ *  (Hintergrund, also Theme). Die Kanaele werden auf 5 Bit quantisiert, sonst zaehlt
+ *  Kantenglaettung jede Nuance als eigene Farbe und `colors` saettigt immer.
+ *  `preserveDrawingBuffer: true` in `viewer/viewport.ts` ist die Voraussetzung dafuer,
+ *  dass `drawImage` von einem WebGL-Canvas ueberhaupt etwas liefert. */
+const SAMPLER = `
+  const sample = (source) => {
+    if (!source) return null;
+    const off = document.createElement("canvas");
+    off.width = 32;
+    off.height = 24;
+    const ctx = off.getContext("2d");
+    try {
+      ctx.drawImage(source, 0, 0, off.width, off.height);
+    } catch (e) {
+      return null;
+    }
+    const data = ctx.getImageData(0, 0, off.width, off.height).data;
+    const seen = new Set();
+    let r = 0, g = 0, b = 0;
+    // FNV-1a über die quantisierten Pixel: beantwortet "hat sich das Bild geändert",
+    // wo Mittelwert und Farbzahl gleich bleiben können (eine Verschiebung etwa).
+    let hash = 2166136261;
+    for (let i = 0; i < data.length; i += 4) {
+      const quantised = ((data[i] >> 3) << 10) | ((data[i + 1] >> 3) << 5) | (data[i + 2] >> 3);
+      seen.add(quantised);
+      hash = Math.imul(hash ^ quantised, 16777619);
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+    }
+    const n = data.length / 4;
+    return {
+      colors: seen.size,
+      avg: [Math.round(r / n), Math.round(g / n), Math.round(b / n)],
+      hash: hash >>> 0,
+    };
+  };
+`;
+
+/** Durch eine Notiz mit mehreren Bloecken scrollen und dabei einsammeln, was gezeichnet
+ *  hat — als Renderer-Schnipsel; er gibt `{ drawn, titles, live, frozen, images }` zurueck
+ *  und setzt `sample` aus `SAMPLER` voraus.
+ *
+ *  Warum ueberhaupt scrollen: Obsidians Lesemodus baut nur den sichtbaren Ausschnitt auf.
+ *  Bei fuenf Bloecken à 400px stehen drei davon nie im DOM, wenn niemand scrollt — ein
+ *  Pruefpunkt, der einfach zaehlt, misst dann zwei statt fuenf und liest sich wie ein
+ *  Ladefehler des Plugins (gemessen 2026-08-14). Deshalb sammelt der Sweep pro Block,
+ *  OB er einmal gezeichnet hat, statt am Ende einen Endzustand zu zaehlen: was
+ *  weitergescrollt wurde, raeumt Obsidian wieder ab.
+ *
+ *  Gezaehlt wird ausschliesslich im Lesemodus-Container. Ein Markdown-Blatt haelt den
+ *  Quelltext-Container daneben weiter im DOM (mit denselben Bloecken, ohne Canvas) —
+ *  `document.querySelectorAll` sieht die Notiz sonst doppelt. */
+const SCROLL_SWEEP = `
+  const preview = document.querySelector(".markdown-preview-view");
+  if (!preview) return { drawn: [], titles: [], live: 0, frozen: 0, images: 0 };
+  const drawn = new Set();
+  const titles = new Set();
+  for (let step = 0; step <= 14; step++) {
+    preview.scrollTop = step * 260;
+    await new Promise((r) => setTimeout(r, 700));
+    for (const block of preview.querySelectorAll(".tdcb-block")) {
+      const title = (block.querySelector(".tdcb-title")?.textContent ?? "").trim();
+      if (!title) continue;
+      titles.add(title);
+      const canvas = block.querySelector("canvas");
+      const stats = canvas ? sample(canvas) : null;
+      if (stats && stats.colors >= 3) drawn.add(title);
+    }
+    if (preview.scrollTop + preview.clientHeight >= preview.scrollHeight - 4) break;
+  }
+  return {
+    drawn: [...drawn],
+    titles: [...titles],
+    live: preview.querySelectorAll(".tdcb-block canvas").length,
+    frozen: preview.querySelectorAll(".tdcb-play").length,
+    images: preview.querySelectorAll("img.tdcb-poster").length,
+  };
+`;
+
+/** Echter Maus-Drag auf einem Canvas, als Renderer-Ausdruck (`null` = geklappt, sonst
+ *  die Fehlerursache als Text). Bewusst ueber Pointer-Events statt ueber `applyView`:
+ *  das misst die Naht OrbitControls → `cameraToView`, die kein Unit-Test hat.
+ *  `pointerId`/`isPrimary` sind Pflicht — ohne sie schlaegt `setPointerCapture` fehl,
+ *  OrbitControls' Handler bricht ab und der Pruefpunkt wird rot, ohne dass am Plugin
+ *  etwas fehlt. `button`/`buttons` waehlen die Taste: 0/1 = links (Orbit),
+ *  2/2 = rechts (Pan). */
+const dragCanvas = (canvasExpr: string, dx: number, dy: number, button = 0): string => `
+  await (async () => {
+    const canvas = ${canvasExpr};
+    if (!canvas) return "kein Canvas gefunden";
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return "Canvas hat keine Flaeche";
+    const cx = Math.round(rect.left + rect.width / 2);
+    const cy = Math.round(rect.top + rect.height / 2);
+    const opts = (x, y) => ({
+      clientX: x, clientY: y, bubbles: true, cancelable: true,
+      pointerId: 1, pointerType: "mouse", isPrimary: true,
+      button: ${button}, buttons: ${button === 2 ? 2 : 1},
+    });
+    try {
+      canvas.dispatchEvent(new PointerEvent("pointerdown", opts(cx, cy)));
+      for (let step = 1; step <= 6; step++) {
+        canvas.dispatchEvent(new PointerEvent("pointermove", opts(cx + step * ${Math.round(dx / 6)}, cy + step * ${Math.round(dy / 6)})));
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      canvas.dispatchEvent(new PointerEvent("pointerup", opts(cx + ${dx}, cy + ${dy})));
+    } catch (e) {
+      return String(e && e.message ? e.message : e);
+    }
+    await new Promise((r) => setTimeout(r, 250));
+    return null;
+  })()
+`;
+
+/** Die Notiz im Live Preview neu aufbauen. Zwei Fallen in einem Helfer:
+ *  Im Legacy-Quelltextmodus (`livePreview: false`) rendert Obsidian den Codeblock gar
+ *  nicht — die Sidebar zeigt dann noch den Controller aus dem Lesemodus, `canSave()`
+ *  meldet `true`, und ein Write laeuft still ins Leere, weil sein Block im DOM nicht
+ *  mehr existiert. Das liest sich wie ein Schreibfehler im Plugin und ist keiner.
+ *  Und: eine bereits offene Markdown-View uebernimmt den Wechsel Legacy → Live Preview
+ *  nicht im laufenden Betrieb, sie muss neu aufgebaut werden. Beides gemessen
+ *  2026-08-14 im outpost-Vault (steht auf `livePreview: false`).
+ *  Den Vorwert schreibt der Aufrufer zurueck — es ist eine Einstellung des Wirts. */
+async function openInLivePreview(cdp: Cdp, path: string): Promise<void> {
+  await cdp.evaluate(`
+    app.vault.setConfig("livePreview", true);
+    await new Promise((r) => setTimeout(r, 300));
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+    const current = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+    if (current) current.detach();
+    await new Promise((r) => setTimeout(r, 400));
+    const leaf = app.workspace.getLeaf(true);
+    await leaf.openFile(file, { state: { mode: "source" } });
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    await new Promise((r) => setTimeout(r, 1200));
+    return true;
+  `);
+}
+
+/** Warten, aber auf der NODE-Seite. `Cdp.send` bricht nach 30 s ab — ein `waitFor` im
+ *  Renderer, das laenger wartet, reisst deshalb den ganzen Lauf ab statt den einen Punkt
+ *  rot zu machen (gemessen 2026-08-14: fuenf Modelle brauchen im Kaltstart laenger).
+ *  Jede Runde ist ein eigener, kurzer `Runtime.evaluate`. */
+async function pollUntil<T>(
+  cdp: Cdp,
+  expression: string,
+  timeoutMs = 60_000,
+  stepMs = 1000,
+): Promise<T | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await cdp.evaluate<T | null>(expression);
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+  return null;
+}
+
+/** Im Hauptbereich genau ein Blatt stehen lassen. Ohne das misst ein Punkt, der Blöcke
+ *  zaehlt, die Summe aus mehreren offenen Ansichten derselben Notiz: gemessen
+ *  2026-08-14 meldete "fuenf Bloecke" zehn, weil ein Split und die neu geoeffnete Notiz
+ *  gleichzeitig offen standen — und die Zahl sah nach einem Plugin-Fehler aus.
+ *  Nebeneffekt, der genauso wichtig ist: `getMostRecentLeaf(rootSplit)` ist danach
+ *  eindeutig, sonst oeffnet die naechste Notiz womoeglich in der Sidebar. */
+async function closeExtraLeaves(cdp: Cdp): Promise<void> {
+  await cdp.evaluate(`
+    const leaves = [];
+    app.workspace.iterateRootLeaves((leaf) => leaves.push(leaf));
+    for (const leaf of leaves.slice(1)) leaf.detach();
+    await new Promise((r) => setTimeout(r, 500));
+    return true;
+  `);
+}
+
+/** Eine Einstellung des Pruefling-Plugins zur Laufzeit setzen. Der Vorwert wird nicht
+ *  hier gemerkt, sondern in `main` als Gesamt-Schnappschuss zurueckgeschrieben — sonst
+ *  haengt die Wiederherstellung daran, dass jeder Abschnitt sauber zu Ende laeuft. */
+async function setSetting(cdp: Cdp, key: string, value: unknown): Promise<void> {
+  await cdp.evaluate(`
+    const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+    plugin.settings[${JSON.stringify(key)}] = ${JSON.stringify(value)};
+    await plugin.saveSettings?.();
+    await new Promise((r) => setTimeout(r, 400));
     return true;
   `);
 }
@@ -537,27 +754,7 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
     const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
     const controller = plugin.active.get();
     const before = controller.getView();
-    const canvas = document.querySelector(".tdcb-active canvas");
-    if (!canvas) return { before, after: null, error: "kein Canvas im aktiven Block" };
-    const rect = canvas.getBoundingClientRect();
-    const cx = Math.round(rect.left + rect.width / 2);
-    const cy = Math.round(rect.top + rect.height / 2);
-    const opts = (x, y) => ({
-      clientX: x, clientY: y, bubbles: true, cancelable: true,
-      pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1,
-    });
-    let error = null;
-    try {
-      canvas.dispatchEvent(new PointerEvent("pointerdown", opts(cx, cy)));
-      for (let step = 1; step <= 6; step++) {
-        canvas.dispatchEvent(new PointerEvent("pointermove", opts(cx + step * 18, cy + step * 5)));
-        await new Promise((r) => setTimeout(r, 16));
-      }
-      canvas.dispatchEvent(new PointerEvent("pointerup", opts(cx + 108, cy + 30)));
-    } catch (e) {
-      error = String(e && e.message ? e.message : e);
-    }
-    await new Promise((r) => setTimeout(r, 200));
+    const error = ${dragCanvas(`document.querySelector(".tdcb-active canvas")`, 108, 30)};
     return { before, after: controller.getView(), error };
   `);
   const moved =
@@ -601,19 +798,6 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
   const viewAfterReload = await cdp.evaluate<unknown>(`
     return app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get()?.getView() ?? null;
   `);
-  const near = (a: ViewValues | null, b: unknown): boolean => {
-    const left = a;
-    const right = b as ViewValues | null;
-    if (!left || !right) return false;
-    // 1.5° statt 0: die Zeile trägt ganze Grad, der Rückweg über die Kamera rundet
-    // erneut. Eine Abweichung von einem Grad ist deshalb erwartbar — dass sie sich
-    // NICHT aufschaukelt, prüft der nächste Punkt.
-    return (
-      Math.abs(left.azimuth - right.azimuth) <= 1.5 &&
-      Math.abs(left.elevation - right.elevation) <= 1.5 &&
-      Math.abs(left.distance - right.distance) < 0.05
-    );
-  };
   record(
     "V3. Die gemerkte Ansicht steht nach dem Neuöffnen wieder da",
     reactivated && near(viewBeforeReload, viewAfterReload),
@@ -713,23 +897,7 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
   const previousLivePreview = await cdp.evaluate<boolean>(
     `return app.vault.getConfig("livePreview") === true;`,
   );
-  await cdp.evaluate(`
-    // Erst umstellen, dann die View NEU aufbauen: eine bereits offene Markdown-View
-    // übernimmt den Wechsel Legacy-Editor → Live Preview nicht im laufenden Betrieb.
-    // Ohne den Neuaufbau steht der Block zwar da, der Schreibweg findet seine Stelle
-    // im Dokument aber nicht — save() läuft dann still ins Leere (gemessen 2026-08-14).
-    app.vault.setConfig("livePreview", true);
-    await new Promise((r) => setTimeout(r, 300));
-    const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_VIEW)});
-    const current = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
-    if (current) current.detach();
-    await new Promise((r) => setTimeout(r, 400));
-    const leaf = app.workspace.getLeaf(true);
-    await leaf.openFile(file, { state: { mode: "source" } });
-    app.workspace.setActiveLeaf(leaf, { focus: true });
-    await new Promise((r) => setTimeout(r, 1200));
-    return true;
-  `);
+  await openInLivePreview(cdp, SMOKE_NOTE_VIEW);
   const liveInEditor = await activateBlock(cdp, 0, VIEW_BLOCK_TITLE);
   const panelState = await cdp.evaluate<{ label: string; save: string }>(`
     const actions = document.querySelector(".tdcb-panel-actions");
@@ -961,11 +1129,544 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
   );
 }
 
+// --- Abschnitt: Basis-Checkliste (docs/SMOKE.md, Punkte 1-10 + "Zusätzlich") ------
+
+/** Eine eigene Kopie des Modells anlegen. Zwei Gründe: der Abschnitt ändert die Datei
+ *  (Punkt "Regenerierung") und darf das an einem echten Vault-Artefakt nicht tun; und
+ *  ein Modell, das dem Lauf gehört, wird am Ende mit allem anderen abgeräumt.
+ *  `readBinary`/`createBinary` statt `read`/`create`, damit auch `.glb` durchgeht. */
+async function copyProbeModel(cdp: Cdp, model: string): Promise<string> {
+  const extension = model.slice(model.lastIndexOf("."));
+  const copy = `${SMOKE_MODEL_BASE}${extension}`;
+  createdNotes.add(copy);
+  await cdp.evaluate(`
+    const source = app.vault.getAbstractFileByPath(${JSON.stringify(model)});
+    const bytes = await app.vault.readBinary(source);
+    const existing = app.vault.getAbstractFileByPath(${JSON.stringify(copy)});
+    if (existing) await app.vault.modifyBinary(existing, bytes);
+    else await app.vault.createBinary(${JSON.stringify(copy)}, bytes);
+    await new Promise((r) => setTimeout(r, 300));
+    return true;
+  `);
+  return copy;
+}
+
+async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
+  // Der Grundfall ist der Standardmodus: der Block rendert ohne Zutun. Den Vorwert
+  // schreibt `main` aus seinem Schnappschuss zurück, nicht dieser Abschnitt — sonst
+  // hinge die Wiederherstellung daran, dass er sauber zu Ende läuft.
+  await setSetting(cdp, "viewMode", "immediate");
+  await setSetting(cdp, "maxContexts", 6);
+  // Die Selbstdrehung MUSS aus. Sie ist kein Prüfgegenstand, aber sie bewegt die Kamera
+  // dauernd von allein — mit ihr wird "Drehen bewegt die Kamera" grün, ohne dass die
+  // Maus etwas bewirkt hätte, und "Doppelklick setzt zurück" rot, obwohl er es tut.
+  // Gemessen 2026-08-14: im outpost-Vault steht `autoRotate` auf `true`, der erste Lauf
+  // meldete deshalb einen Rücksetz-Fehler, den es nicht gibt (37° → 26° reine Drift).
+  await setSetting(cdp, "autoRotate", false);
+  await closeExtraLeaves(cdp);
+  const probe = await copyProbeModel(cdp, model);
+
+  const noteBody = [
+    "# GUI-Smoke Basis (automatisch erzeugt, wird nach dem Lauf gelöscht)",
+    "",
+    `${fence}3d`,
+    `file: ${probe}`,
+    `title: ${BASIS_BLOCK_TITLE}`,
+    fence,
+    "",
+  ].join("\n");
+  await openNote(cdp, SMOKE_NOTE_BASIS, noteBody, "preview");
+  await cdp.evaluate(
+    `await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-controls`)}); return true;`,
+  );
+
+  // --- B1. Grundfall: der Block zeigt wirklich ein Modell ------------------
+  // Gemessen wird nicht "ein Canvas hängt im DOM", sondern dass darauf mehr als eine
+  // Farbe steht. Ein Canvas entsteht auch dann, wenn das Laden scheitert oder der
+  // Kontext verloren geht — der Prüfpunkt wäre grün und der Block schwarz.
+  const rendered = await cdp.evaluate<{ colors: number; width: number } | null>(`
+    ${SAMPLER}
+    ${waitFor(
+      `
+      const canvas = document.querySelector(".tdcb-block canvas");
+      if (!canvas || canvas.clientWidth === 0) return 0;
+      const stats = sample(canvas);
+      if (!stats || stats.colors < 3) return 0;
+      return { colors: stats.colors, width: canvas.clientWidth };
+    `,
+      20_000,
+    )}
+  `);
+  record(
+    "B1. Der Block rendert ein sichtbares Modell (nicht nur ein Canvas)",
+    rendered !== null,
+    rendered ? `${rendered.colors} Farbtöne · ${rendered.width}px breit` : await describeScene(cdp),
+  );
+  if (!rendered) {
+    skipped("B2-B12", "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
+    return;
+  }
+
+  // --- B2. Orbit ----------------------------------------------------------
+  // Erst ein Klick OHNE Bewegung: er weckt den Controller (die Sidebar bedient das
+  // zuletzt berührte Modell), verdreht die Kamera aber noch nicht — nur so gibt es
+  // einen Vorher-Wert, gegen den sich der Drag messen lässt.
+  const orbit = await cdp.evaluate<{
+    before: ViewValues | null;
+    after: ViewValues | null;
+    error: string | null;
+  }>(`
+    const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+    const wake = ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 0, 0)};
+    const controller = plugin.active.get();
+    if (!controller) return { before: null, after: null, error: wake ?? "Klick weckte keinen Controller" };
+    const before = controller.getView();
+    const error = ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 120, 36)};
+    return { before, after: controller.getView(), error };
+  `);
+  record(
+    "B2. Orbit per echter Maus dreht die Kamera",
+    orbit.error === null &&
+      orbit.before !== null &&
+      JSON.stringify(orbit.before) !== JSON.stringify(orbit.after),
+    orbit.error ?? `${JSON.stringify(orbit.before)} → ${JSON.stringify(orbit.after)}`,
+  );
+
+  // --- B3. Zoom -----------------------------------------------------------
+  // Das Rad geht an OrbitControls' eigenen `wheel`-Handler; `deltaY < 0` ist
+  // Heranzoomen. Geprüft wird die Änderung, nicht die Richtung: die Richtung ist
+  // OrbitControls-Konvention und nicht das, was dieses Plugin zusagt.
+  const zoom = await cdp.evaluate<{
+    before: ViewValues | null;
+    after: ViewValues | null;
+    error: string | null;
+  }>(`
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!controller || !canvas) return { before: null, after: null, error: "kein Controller/Canvas" };
+    const before = controller.getView();
+    const rect = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new WheelEvent("wheel", {
+      deltaY: -300, bubbles: true, cancelable: true,
+      clientX: Math.round(rect.left + rect.width / 2),
+      clientY: Math.round(rect.top + rect.height / 2),
+    }));
+    await new Promise((r) => setTimeout(r, 500));
+    return { before, after: controller.getView(), error: null };
+  `);
+  record(
+    "B3. Das Mausrad ändert die Distanz",
+    zoom.error === null &&
+      zoom.before !== null &&
+      zoom.after !== null &&
+      Math.abs(zoom.before.distance - zoom.after.distance) > 0.01,
+    zoom.error ?? `Distanz ${zoom.before?.distance} → ${zoom.after?.distance}`,
+  );
+
+  // --- B4. Pan ------------------------------------------------------------
+  // Pan verschiebt den Blickpunkt, nicht die Bahn — es steht deshalb bewusst NICHT in
+  // `ViewSpec` (orbit-relativ, s. `core/view-spec.ts`). Am Controller ist die Wirkung
+  // also nicht sichtbar; gemessen wird sie am Bild. Dass die drei Winkel dabei
+  // unverändert bleiben, ist die zweite Hälfte der Aussage und steht im Detail.
+  const pan = await cdp.evaluate<{
+    changed: boolean;
+    view: string;
+    error: string | null;
+  }>(`
+    ${SAMPLER}
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!controller || !canvas) return { changed: false, view: "", error: "kein Controller/Canvas" };
+    const beforeView = JSON.stringify(controller.getView());
+    const before = sample(canvas);
+    const error = ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 96, 0, 2)};
+    const after = sample(canvas);
+    if (!before || !after) return { changed: false, view: "", error: error ?? "Canvas nicht lesbar" };
+    const afterView = JSON.stringify(controller.getView());
+    return {
+      changed: before.hash !== after.hash,
+      view: beforeView === afterView ? "Winkel unverändert (erwartet)" : beforeView + " → " + afterView,
+      error,
+    };
+  `);
+  record(
+    "B4. Pan (rechte Maustaste) verschiebt das Bild",
+    pan.error === null && pan.changed,
+    pan.error ?? `${pan.changed ? "Bild verändert" : "Bild identisch"} · ${pan.view}`,
+  );
+
+  // --- B5. Doppelklick setzt zurück ---------------------------------------
+  // Nach B2-B4 steht die Kamera irgendwo. Der Rückweg zielt auf den Zustand aus B2,
+  // also auf die eingepasste Ansicht — nicht auf einen festen Winkel: welche Ansicht
+  // "eingepasst" heißt, hängt am Modell und ist nichts, was der Smoke behaupten darf.
+  const reset = await cdp.evaluate<{ after: ViewValues | null; error: string | null }>(`
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!controller || !canvas) return { after: null, error: "kein Controller/Canvas" };
+    const rect = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new MouseEvent("dblclick", {
+      bubbles: true, cancelable: true,
+      clientX: Math.round(rect.left + rect.width / 2),
+      clientY: Math.round(rect.top + rect.height / 2),
+    }));
+    await new Promise((r) => setTimeout(r, 800));
+    return { after: controller.getView(), error: null };
+  `);
+  record(
+    "B5. Doppelklick setzt die Ansicht auf den Einpass-Zustand zurück",
+    reset.error === null && near(orbit.before, reset.after),
+    reset.error ?? `${JSON.stringify(orbit.before)} (Start) → ${JSON.stringify(reset.after)}`,
+  );
+
+  // --- B6. Layout: die Notiz im Split ------------------------------------
+  // Nicht das CSS anfassen, sondern die Pane wirklich teilen: der `ResizeObserver` in
+  // `viewer-host.ts` hängt am Container, und nur ein echter Layout-Wechsel beweist,
+  // dass er greift. Geprüft wird der RENDERER-Puffer (`canvas.width`), nicht die
+  // CSS-Breite — die folgt auch dann, wenn three das Bild bloß verzerrt hochskaliert.
+  const layout = await cdp.evaluate<{
+    beforeCss: number;
+    beforeBuffer: number;
+    afterCss: number;
+    afterBuffer: number;
+  }>(`
+    const canvas = document.querySelector(".tdcb-block canvas");
+    const beforeCss = canvas.clientWidth;
+    const beforeBuffer = canvas.width;
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_BASIS)});
+    const split = app.workspace.getLeaf("split");
+    await split.openFile(file, { state: { mode: "preview" } });
+    await (async () => {
+      ${waitFor("return canvas.clientWidth < beforeCss ? 1 : 0;")}
+    })();
+    const afterCss = canvas.clientWidth;
+    const afterBuffer = canvas.width;
+    split.detach();
+    await new Promise((r) => setTimeout(r, 800));
+    return { beforeCss, beforeBuffer, afterCss, afterBuffer };
+  `);
+  record(
+    "B6. Im Split schrumpft der Viewport mit — auch der Renderer-Puffer",
+    layout.afterCss < layout.beforeCss && layout.afterBuffer < layout.beforeBuffer,
+    `CSS ${layout.beforeCss}→${layout.afterCss}px · Puffer ${layout.beforeBuffer}→${layout.afterBuffer}px`,
+  );
+
+  // --- B7. Theme ----------------------------------------------------------
+  // Über die Body-Klassen, NICHT über `app.changeTheme`: der API-Aufruf schreibt nach
+  // `.obsidian/appearance.json` und macht aus einem system-folgenden Vault einen fest
+  // eingestellten (s. Abschnitt "aktiver Block", Punkt 8). Der Klassentausch allein
+  // genügt hier aber nicht: die Szenenfarbe wird nicht per CSS gesetzt, sondern in
+  // `main.ts` beim `css-change`-Ereignis neu aus den Variablen gelesen — ohne das
+  // `trigger` bliebe der WebGL-Hintergrund stehen und der Punkt wäre falsch-rot.
+  const theme = await cdp.evaluate<{
+    dark: [number, number, number] | null;
+    light: [number, number, number] | null;
+  }>(`
+    ${SAMPLER}
+    const canvas = document.querySelector(".tdcb-block canvas");
+    const body = document.body;
+    const wasDark = body.classList.contains("theme-dark");
+    const apply = async (dark) => {
+      body.classList.toggle("theme-dark", dark);
+      body.classList.toggle("theme-light", !dark);
+      app.workspace.trigger("css-change");
+      await new Promise((r) => setTimeout(r, 900));
+      const stats = sample(canvas);
+      return stats ? stats.avg : null;
+    };
+    const dark = await apply(true);
+    const light = await apply(false);
+    await apply(wasDark);
+    return { dark, light };
+  `);
+  const themeDistance =
+    theme.dark && theme.light
+      ? theme.dark.reduce((sum, value, index) => sum + Math.abs(value - (theme.light as number[])[index]), 0)
+      : 0;
+  record(
+    "B7. Der Viewport folgt dem Theme (hell ≠ dunkel)",
+    themeDistance > 30,
+    `dunkel rgb(${theme.dark?.join(",") ?? "?"}) · hell rgb(${theme.light?.join(",") ?? "?"}) · Abstand ${themeDistance}`,
+  );
+
+  // --- B8. Regenerierung --------------------------------------------------
+  // Der Loop-Fall, für den dieses Plugin entstanden ist: ein Skript erzeugt die Datei
+  // neu, während die Notiz offen ist. Geändert wird die KOPIE, nicht das Original —
+  // und geprüft wird das Bild, nicht der Dateiinhalt: dass die Datei anders ist, weiß
+  // der Smoke ohnehin, die Frage ist, ob der Viewport das mitbekommt.
+  if (!probe.endsWith(".gltf")) {
+    skipped("B8. Regenerierung", `Prüfmodell ist ${probe} — die Änderung braucht Text-glTF`);
+  } else {
+    const regenerated = await cdp.evaluate<{ before: number | null; after: number | null; moved: string }>(`
+      ${SAMPLER}
+      const canvasNow = () => document.querySelector(".tdcb-block canvas");
+      const before = sample(canvasNow());
+      const file = app.vault.getAbstractFileByPath(${JSON.stringify(probe)});
+      const doc = JSON.parse(await app.vault.read(file));
+      // Einen Knoten weit genug verschieben, dass das Bild sich sicher ändert. Welcher
+      // ist gleichgültig — der Punkt misst die Reaktion, nicht die Geometrie.
+      const node = (doc.nodes ?? [])[0];
+      if (!node) return { before: before ? before.hash : null, after: null, moved: "kein Knoten in der Datei" };
+      node.translation = [(node.translation?.[0] ?? 0) + 25, (node.translation?.[1] ?? 0) + 15, node.translation?.[2] ?? 0];
+      await app.vault.modify(file, JSON.stringify(doc));
+      const after = await (async () => {
+        ${waitFor(`
+          const stats = sample(canvasNow());
+          return stats && before && stats.hash !== before.hash ? stats.hash : 0;
+        `, 12_000)}
+      })();
+      return { before: before ? before.hash : null, after, moved: node.name ?? "(namenlos)" };
+    `);
+    record(
+      "B8. Eine extern neu erzeugte Datei erneuert die Ansicht ohne Neustart",
+      regenerated.before !== null && regenerated.after !== null,
+      regenerated.before === null
+        ? "Ausgangsbild nicht lesbar"
+        : regenerated.after === null
+          ? `Bild blieb unverändert, nachdem "${regenerated.moved}" verschoben wurde`
+          : `"${regenerated.moved}" verschoben → Bild neu`,
+    );
+  }
+
+  // --- B9. Kein Leck beim Tippen im Block ---------------------------------
+  // Der teuerste Fehler dieser Plugin-Gattung: Obsidian baut den Codeblock bei jedem
+  // Tastendruck neu auf, und jede nicht freigegebene Szene hält einen WebGL-Kontext.
+  // Nach ein paar Minuten Tippen ist das Kontext-Limit des Browsers erreicht und
+  // fremde Plugins gehen mit unter. Getippt wird im ECHTEN Editor-Puffer (nicht per
+  // `vault.modify`), weil nur der den Live-Preview-Neuaufbau auslöst, um den es geht.
+  const previousLivePreview = await cdp.evaluate<boolean>(
+    `return app.vault.getConfig("livePreview") === true;`,
+  );
+  await openInLivePreview(cdp, SMOKE_NOTE_BASIS);
+  const leak = await cdp.evaluate<{ before: number; after: number; blocks: number; typed: number }>(`
+    const count = () => document.querySelectorAll("canvas").length;
+    const editor = app.workspace.activeEditor?.editor;
+    if (!editor) return { before: 0, after: 0, blocks: 0, typed: 0 };
+    await (async () => {
+      ${waitFor(`return document.querySelectorAll(".tdcb-block canvas").length > 0 ? 1 : 0;`, 15_000)}
+    })();
+    const before = count();
+    let typed = 0;
+    for (let round = 0; round < 8; round++) {
+      const lines = editor.getValue().split("\\n");
+      const index = lines.findIndex((l) => l.startsWith("title:"));
+      if (index === -1) break;
+      editor.replaceRange("x", { line: index, ch: lines[index].length });
+      typed++;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    // Dem Aufräumen Zeit lassen: die Freigabe hängt an Obsidians Unload-Zyklus, ein
+    // sofortiger Zähler misst den Übergangszustand und wäre zufällig rot.
+    await new Promise((r) => setTimeout(r, 2500));
+    return { before, after: count(), blocks: document.querySelectorAll(".tdcb-block").length, typed };
+  `);
+  record(
+    "B9. Achtmal im Block getippt hinterlässt keine verwaisten Canvas",
+    leak.typed === 8 && leak.blocks === 1 && leak.after <= leak.before,
+    `${leak.typed} Änderungen · ${leak.before} → ${leak.after} Canvas im Dokument · ${leak.blocks} Block`,
+  );
+  await cdp.evaluate(
+    `app.vault.setConfig("livePreview", ${JSON.stringify(previousLivePreview)}); return true;`,
+  );
+
+  // --- B10. Fünf Blöcke in einer Notiz ------------------------------------
+  const manyBody = [
+    "# GUI-Smoke fünf Blöcke (automatisch erzeugt)",
+    "",
+    ...[1, 2, 3, 4, 5].flatMap((n) => [`${fence}3d`, `file: ${probe}`, `title: Etage ${n}`, fence, ""]),
+  ].join("\n");
+  await closeExtraLeaves(cdp);
+  await openNote(cdp, SMOKE_NOTE_MANY, manyBody, "preview");
+  await pollUntil(
+    cdp,
+    `return document.querySelector(".markdown-preview-view .tdcb-block canvas") ? 1 : 0;`,
+    40_000,
+  );
+  const many = await cdp.evaluate<{ drawn: string[]; titles: string[] }>(`
+    ${SAMPLER}
+    ${SCROLL_SWEEP}
+  `);
+  record(
+    "B10. Beim Durchscrollen zeigen alle fünf Blöcke ein Modell",
+    many.drawn.length === 5 && many.titles.length === 5,
+    `${many.drawn.length}/${many.titles.length} gezeichnet — nicht gezeichnet: ${many.titles.filter((t) => !many.drawn.includes(t)).join(", ") || "keiner"}`,
+  );
+
+  // --- B11. Kontext-Budget ------------------------------------------------
+  // "Maximum live 3D views" auf 2: der Rest muss zum Standbild werden, nicht schwarz.
+  // Die Grenze wirkt beim Aufbau, nicht rückwirkend — deshalb erst umstellen, dann die
+  // Notiz neu aufbauen. Ohne den Neuaufbau bliebe alles live und der Punkt grün, ohne
+  // dass die Einstellung je gegriffen hätte.
+  await setSetting(cdp, "maxContexts", 2);
+  await reopenNote(cdp, SMOKE_NOTE_MANY, "preview");
+  await pollUntil(
+    cdp,
+    `return document.querySelector(".markdown-preview-view .tdcb-block canvas") ? 1 : 0;`,
+    40_000,
+  );
+  const budget = await cdp.evaluate<{
+    drawn: string[];
+    titles: string[];
+    live: number;
+    frozen: number;
+    images: number;
+  }>(`
+    ${SAMPLER}
+    ${SCROLL_SWEEP}
+  `);
+  record(
+    "B11. 'Maximum live 3D views' = 2 hält nur zwei Ansichten live",
+    budget.titles.length === 5 && budget.live <= 2 && budget.frozen >= 1,
+    `${budget.live} live · ${budget.frozen} eingefroren (${budget.images} mit Standbild) · ${budget.titles.length} Blöcke gesehen`,
+  );
+
+  // --- B12. Poster-Qualität -----------------------------------------------
+  // Das eingefrorene Bild muss das Modell zeigen. Ist es leer, war der Zeichenpuffer
+  // beim `toDataURL` schon geleert (`preserveDrawingBuffer` in `viewer/viewport.ts`) —
+  // ein Fehler, den man am DOM nicht sieht, weil das `<img>` ordentlich dahängt.
+  const poster = await cdp.evaluate<{ found: number; drawn: number; sample: number | null }>(`
+    ${SAMPLER}
+    const images = [...document.querySelectorAll(".markdown-preview-view img.tdcb-poster")];
+    const stats = images.map((img) => (img.complete && img.naturalWidth > 0 ? sample(img) : null));
+    const usable = stats.filter((s) => s && s.colors >= 3);
+    return { found: images.length, drawn: usable.length, sample: usable[0] ? usable[0].colors : null };
+  `);
+  record(
+    "B12. Das Standbild zeigt das Modell, nicht eine leere Fläche",
+    poster.found > 0 && poster.drawn > 0,
+    poster.found === 0
+      ? "kein Standbild da — nicht prüfbar"
+      : `${poster.drawn}/${poster.found} Standbilder mit Bildinhalt (${poster.sample ?? 0} Farbtöne)`,
+  );
+  await setSetting(cdp, "maxContexts", 6);
+
+  // --- B13-B15. Fehlerfälle -----------------------------------------------
+  // Alle drei in einer Notiz: die Meldungen hängen am Block, nicht am Zustand des
+  // Plugins, und ein gemeinsamer Aufbau spart drei Ladezyklen.
+  createdNotes.add(SMOKE_WRONG_EXT);
+  await cdp.evaluate(`
+    const path = ${JSON.stringify(SMOKE_WRONG_EXT)};
+    if (!app.vault.getAbstractFileByPath(path)) await app.vault.create(path, "# nicht wirklich ein Modell");
+    return true;
+  `);
+  const errorBody = [
+    "# GUI-Smoke Fehlerfälle (automatisch erzeugt)",
+    "",
+    `${fence}3d`,
+    "file: _tdcb-gibt-es-nicht.glb",
+    "title: Fehlt",
+    fence,
+    "",
+    `${fence}3d`,
+    `file: ${SMOKE_WRONG_EXT}`,
+    "title: Endung",
+    fence,
+    "",
+    `${fence}3d`,
+    `file: ${probe}`,
+    "title: Tippfehler",
+    "heigth: 400",
+    fence,
+    "",
+  ].join("\n");
+  await closeExtraLeaves(cdp);
+  await openNote(cdp, SMOKE_NOTE_ERRORS, errorBody, "preview");
+  await pollUntil(
+    cdp,
+    `
+      const block = [...document.querySelectorAll(".tdcb-block")].find(
+        (b) => b.querySelector(".tdcb-title")?.textContent.trim() === "Tippfehler",
+      );
+      return block && block.querySelector("canvas") ? 1 : 0;
+    `,
+    40_000,
+  );
+  const errors = await cdp.evaluate<{ missing: string; format: string; hint: string; canvas: number }>(`
+    const byTitle = (title) =>
+      [...document.querySelectorAll(".tdcb-block")].find(
+        (b) => b.querySelector(".tdcb-title")?.textContent.trim() === title,
+      );
+
+    const messageIn = (title) => {
+      const block = byTitle(title);
+      if (!block) return "(Block fehlt)";
+      const box = block.querySelector(".tdcb-message-error, .tdcb-message");
+      return box ? box.textContent.trim() : "(keine Meldung)";
+    };
+    const typo = byTitle("Tippfehler");
+    const hint = typo?.querySelector(".tdcb-hint");
+    return {
+      missing: messageIn("Fehlt"),
+      format: messageIn("Endung"),
+      hint: hint ? hint.textContent.trim() : "(kein Hinweis)",
+      canvas: typo ? typo.querySelectorAll("canvas").length : 0,
+    };
+  `);
+  record(
+    "B13. Fehlende Datei nennt den Pfad",
+    errors.missing.includes("File not found") && errors.missing.includes("_tdcb-gibt-es-nicht.glb"),
+    errors.missing.slice(0, 80),
+  );
+  record(
+    "B14. Falsche Endung nennt die unterstützten Formate",
+    errors.format.includes("Unsupported format") && errors.format.includes("glb"),
+    errors.format.slice(0, 80),
+  );
+  record(
+    "B15. Ein Tippfehler im Schlüssel meldet sich, versteckt aber das Modell nicht",
+    errors.hint.toLowerCase().includes("heigth") && errors.canvas > 0,
+    `${errors.hint.slice(0, 60)} · ${errors.canvas} Canvas im selben Block`,
+  );
+
+  // --- B16. STL -----------------------------------------------------------
+  const stl = await cdp.evaluate<string | null>(`
+    const file = app.vault.getFiles().find((f) => /\\.stl$/i.test(f.path));
+    return file ? file.path : null;
+  `);
+  if (!stl) {
+    skipped("B16. STL", "keine .stl im Vault — mit einer STL-Datei im Vault läuft der Punkt mit");
+  } else {
+    await openNote(
+      cdp,
+      SMOKE_NOTE_STL,
+      [`${fence}3d`, `file: ${stl}`, "title: STL", fence, ""].join("\n"),
+      "preview",
+    );
+    const stlStats = await pollUntil<{ colors: number; message: string }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const canvas = document.querySelector(".tdcb-block canvas");
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.colors < 3) return null;
+        const box = document.querySelector(".tdcb-message-error");
+        return { colors: stats.colors, message: box ? box.textContent.trim() : "" };
+      `,
+      30_000,
+    );
+    record(
+      "B16. Eine STL-Datei lädt und ist sichtbar",
+      stlStats !== null && stlStats.message === "",
+      stlStats ? `${stlStats.colors} Farbtöne · ${stl}` : `nichts gezeichnet (${stl})`,
+    );
+  }
+
+  skipped(
+    "SMOKE.md Punkt 9 (Draco-GLB)",
+    "braucht eine Draco-komprimierte Datei im Vault — der Treiber bringt keine Testdaten mit",
+  );
+  skipped(
+    "SMOKE.md 'Zusätzlich' (Popout-Fenster)",
+    "ein Popout ist ein eigenes CDP-Target; der Treiber hängt bewusst an genau einem Fenster",
+  );
+  skipped("SMOKE.md Punkt 8 (Klick-Modus)", "vom Abschnitt 'aktiver Block' abgedeckt (Prüfpunkte 1-3)");
+}
+
 // --- Ablauf -----------------------------------------------------------------
 
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
+  { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
 ];
 
 async function main(): Promise<void> {
@@ -991,7 +1692,10 @@ async function main(): Promise<void> {
   const cdp = await Cdp.attach(port, vault);
   // Ausserhalb des try, damit das `finally` ihn auch nach einem Abbruch mitten im Lauf
   // zurueckschreiben kann — sonst bliebe der Vault im Smoke-Zustand stehen.
-  let previousViewMode: string | null = null;
+  // Ein Schnappschuss der GANZEN Einstellungen, nicht nur des einen Feldes: die
+  // Abschnitte stellen um, was sie brauchen (Ansichtsmodus, Kontext-Budget), und die
+  // Wiederherstellung darf nicht daran hängen, dass jeder von ihnen sauber zu Ende läuft.
+  let previousSettings: string | null = null;
 
   try {
     // Ohne Fokus drosselt Chromium den Renderer. `Page.bringToFront` allein genuegt auf
@@ -1074,17 +1778,12 @@ async function main(): Promise<void> {
     if (!model) throw new Error("Keine .glb/.gltf im Vault gefunden — mit --model <pfad> angeben.");
     console.log(`Modell: ${model}\n`);
 
-    // Den Vorwert merken und im `finally` zurückschreiben: der Smoke braucht "on-click",
-    // der Vault des Maintainers steht deswegen aber nicht darauf.
-    previousViewMode = await cdp.evaluate<string>(`
-      return app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings.viewMode;
+    // Den Vorwert merken und im `finally` zurückschreiben: der Smoke stellt Einstellungen
+    // um, der Vault des Maintainers steht deswegen aber nicht darauf.
+    previousSettings = await cdp.evaluate<string>(`
+      return JSON.stringify(app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings);
     `);
-    await cdp.evaluate(`
-      const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
-      plugin.settings.viewMode = "on-click";
-      await plugin.saveSettings?.();
-      return true;
-    `);
+    await setSetting(cdp, "viewMode", "on-click");
 
     for (const section of sections) {
       console.log(`── ${section.title}`);
@@ -1094,11 +1793,11 @@ async function main(): Promise<void> {
   } finally {
     // Aufräumen darf nie am Ergebnis hängen: auch ein abgebrochener Lauf gibt den Vault
     // so zurück, wie er ihn vorgefunden hat.
-    if (previousViewMode !== null) {
+    if (previousSettings !== null) {
       await cdp
         .evaluate(`
           const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
-          plugin.settings.viewMode = ${JSON.stringify(previousViewMode)};
+          Object.assign(plugin.settings, JSON.parse(${JSON.stringify(previousSettings)}));
           await plugin.saveSettings?.();
           return true;
         `)

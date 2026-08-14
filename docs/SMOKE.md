@@ -18,6 +18,37 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 
 ## Checkliste
 
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui -- --section basis`
+> Die Punkte 1–10 und „Zusätzlich zu beobachten" fährt der CDP-Treiber
+> (`scripts/gui-smoke.ts`, Abschnitt `basis`) gegen ein laufendes Obsidian:
+> **15 Prüfpunkte, 37/37 im Gesamtlauf.** Von Hand abzuhaken ist hier nichts mehr; die
+> Beschreibungen bleiben stehen, weil sie begründen, was jeder Punkt prüft.
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | 1. Grundfall | B1 (Modell ist *gezeichnet*, nicht nur ein Canvas) · B2 (Orbit) · B3 (Zoom per Rad) · B4 (Pan mit rechter Taste) |
+> | 2. Kamera zurücksetzen | B5 (Doppelklick trifft den Einpass-Zustand wieder genau) |
+> | 3. Mehrere Blöcke | B10 (durchscrollen, jeder der fünf Blöcke zeichnet) |
+> | 4. Regenerierung | B8 (Datei extern verändert → Bild folgt ohne Neustart) |
+> | 5. Theme | B7 (Hintergrund folgt hell↔dunkel — am Pixel gemessen) |
+> | 6. Layout | B6 (Notiz im Split → CSS-Breite **und** Renderer-Puffer schrumpfen) |
+> | 7. Kein Leck | B9 (achtmal im Block getippt, keine verwaisten Canvas) |
+> | 8. Klick-Modus | **bewusst nicht doppelt** — Abschnitt „aktiver Block" deckt ihn mit 1–3 ab |
+> | 9. Fehlerfälle | B13 (fehlende Datei) · B14 (falsche Endung) · B15 (Tippfehler-Schlüssel: Hinweis, Modell bleibt) · Draco bleibt Handarbeit |
+> | 10. STL | B16 — läuft mit, sobald eine `.stl` im Vault liegt, sonst sagt der Lauf es an |
+> | Zusätzlich: Kontext-Budget | B11 (`Maximum live 3D views` = 2 → nur zwei live) |
+> | Zusätzlich: Poster-Qualität | B12 (das Standbild zeigt das Modell, keine leere Fläche) |
+> | Zusätzlich: Popout | nicht automatisiert — ein Popout ist ein eigenes CDP-Target |
+>
+> **Eine dritte Voraussetzung stellt der Treiber selbst her** (neben Fensterfokus und
+> Plugin-Reload): `autoRotate` **muss aus sein**. Mit Selbstdrehung wird „Drehen bewegt
+> die Kamera" grün, ohne dass die Maus etwas bewirkt hätte, und „Doppelklick setzt
+> zurück" rot, obwohl er es tut — genau das meldete der erste Lauf im outpost-Vault.
+>
+> **Gegenprobe (2026-08-14):** Doppelklick-Reset stillgelegt → nur B5 rot; Theme-Nachziehen
+> stillgelegt → nur B7 rot; Verdrängung im Kontext-Budget stillgelegt → B11 und B12 rot,
+> B10 zu Recht grün. Der Abschnitt misst also, was er behauptet.
+
 - [ ] **1. Grundfall** — Block mit gültiger GLB rendert; Orbit (linke Maustaste), Zoom
       (Rad) und Pan (rechte Maustaste) funktionieren.
 - [ ] **2. Kamera zurücksetzen** — Doppelklick setzt die Ansicht zurück.
