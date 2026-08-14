@@ -50,6 +50,9 @@ const SMOKE_NOTE_BASIS = "_tdcb-gui-smoke-basis.md";
 const SMOKE_NOTE_MANY = "_tdcb-gui-smoke-many.md";
 const SMOKE_NOTE_ERRORS = "_tdcb-gui-smoke-errors.md";
 const SMOKE_NOTE_STL = "_tdcb-gui-smoke-stl.md";
+const SMOKE_NOTE_FILES = "_tdcb-gui-smoke-files.md";
+const SMOKE_NOTE_GLTF = "_tdcb-gui-smoke-gltf.md";
+const SMOKE_NOTE_MIX = "_tdcb-gui-smoke-mix.md";
 /** Kopie des Prüfmodells (Endung kommt vom Original). Der Basis-Abschnitt ändert die
  *  Datei — an einem echten Vault-Artefakt darf er das nicht. */
 const SMOKE_MODEL_BASE = "_tdcb-smoke-model";
@@ -409,6 +412,31 @@ const SAMPLER = `
       avg: [Math.round(r / n), Math.round(g / n), Math.round(b / n)],
       hash: hash >>> 0,
     };
+  };
+`;
+
+/** Warten, bis die Kamera zur Ruhe gekommen ist — als Renderer-Schnipsel, der
+ *  `settleView(controller)` bereitstellt.
+ *
+ *  OrbitControls laeuft mit `enableDamping`: nach einem Drag zieht es die Kamera noch
+ *  ueber mehrere Frames nach, und ein Ruecksetzen mitten in dieser Nachbewegung ist
+ *  erst ein paar Frames spaeter am Ziel. Wer stattdessen eine feste Frist abwartet,
+ *  misst je nach Laune einen Zwischenstand: gemessen 2026-08-14 meldete der
+ *  Ruecksetz-Punkt der Datei-Ansicht 38°/32° statt 45°/30° — kein Defekt, nur zu frueh
+ *  hingesehen. Drei gleiche Messungen in Folge, dann steht sie. */
+const SETTLE_VIEW = `
+  const settleView = async (controller, timeoutMs = 6000) => {
+    let last = null;
+    let stable = 0;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      const now = JSON.stringify(controller.getView());
+      stable = now === last ? stable + 1 : 0;
+      last = now;
+      if (stable >= 2) break;
+    }
+    return controller.getView();
   };
 `;
 
@@ -1300,6 +1328,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   // also auf die eingepasste Ansicht — nicht auf einen festen Winkel: welche Ansicht
   // "eingepasst" heißt, hängt am Modell und ist nichts, was der Smoke behaupten darf.
   const reset = await cdp.evaluate<{ after: ViewValues | null; error: string | null }>(`
+    ${SETTLE_VIEW}
     const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
     const canvas = document.querySelector(".tdcb-block canvas");
     if (!controller || !canvas) return { after: null, error: "kein Controller/Canvas" };
@@ -1309,8 +1338,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
       clientX: Math.round(rect.left + rect.width / 2),
       clientY: Math.round(rect.top + rect.height / 2),
     }));
-    await new Promise((r) => setTimeout(r, 800));
-    return { after: controller.getView(), error: null };
+    return { after: await settleView(controller), error: null };
   `);
   record(
     "B5. Doppelklick setzt die Ansicht auf den Einpass-Zustand zurück",
@@ -1661,12 +1689,374 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   skipped("SMOKE.md Punkt 8 (Klick-Modus)", "vom Abschnitt 'aktiver Block' abgedeckt (Prüfpunkte 1-3)");
 }
 
+// --- Abschnitt: datei-nativer Ausbau (docs/SMOKE.md 2026-07-24) -------------
+
+async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
+  await setSetting(cdp, "viewMode", "immediate");
+  await setSetting(cdp, "autoRotate", false);
+  await setSetting(cdp, "maxContexts", 6);
+  await closeExtraLeaves(cdp);
+  const probe = await copyProbeModel(cdp, model);
+
+  // --- F1. Die Datei im ganzen Pane ---------------------------------------
+  // Der Weg an Markdown vorbei: `registerExtensions` verdrahtet die Endungen mit der
+  // FileView. Geprüft wird beides — dass die richtige View aufgeht UND dass sie zeichnet;
+  // die View allein sagt nichts darüber, ob der Viewer darin lebt.
+  await cdp.evaluate(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(probe)});
+    const leaf = app.workspace.getLeaf(true);
+    await leaf.openFile(file);
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    return true;
+  `);
+  const fileView = await pollUntil<{ type: string; colors: number }>(
+    cdp,
+    `
+      ${SAMPLER}
+      const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+      const canvas = leaf?.view?.containerEl?.querySelector("canvas");
+      const stats = canvas ? sample(canvas) : null;
+      if (!stats || stats.colors < 3) return null;
+      return { type: leaf.view.getViewType(), colors: stats.colors };
+    `,
+    30_000,
+  );
+  record(
+    "F1. Eine 3D-Datei öffnet sich als eigene View und zeigt das Modell",
+    fileView !== null && fileView.type === FILE_VIEW,
+    fileView ? `View ${fileView.type} · ${fileView.colors} Farbtöne` : await describeScene(cdp),
+  );
+
+  // --- F2. Auch dort ist die Kamera bedienbar -----------------------------
+  // Der Vergleich läuft über `near`, nicht über Gleichheit: der Rückweg über die Kamera
+  // rundet auf ganze Grad, ein Grad Rest ist erwartbar (dieselbe Toleranz wie bei V3).
+  // Der erste Entwurf verglich JSON-Strings und meldete deshalb einen Rücksetz-Fehler,
+  // den es nicht gibt.
+  const fileInteract = await cdp.evaluate<{
+    start: ViewValues | null;
+    turned: ViewValues | null;
+    end: ViewValues | null;
+    error: string | null;
+  }>(`
+    ${SETTLE_VIEW}
+    const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+    const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+    const canvasOf = () => leaf?.view?.containerEl?.querySelector("canvas");
+    const wake = ${dragCanvas("canvasOf()", 0, 0)};
+    const controller = plugin.active.get();
+    if (!controller) return { start: null, turned: null, end: null, error: wake ?? "kein Controller in der FileView" };
+    const start = await settleView(controller);
+    const error = ${dragCanvas("canvasOf()", 120, 36)};
+    const turned = await settleView(controller);
+    const canvas = canvasOf();
+    const rect = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new MouseEvent("dblclick", {
+      bubbles: true, cancelable: true,
+      clientX: Math.round(rect.left + rect.width / 2),
+      clientY: Math.round(rect.top + rect.height / 2),
+    }));
+    return { start, turned, end: await settleView(controller), error };
+  `);
+  const fileDragged =
+    fileInteract.start !== null &&
+    JSON.stringify(fileInteract.start) !== JSON.stringify(fileInteract.turned);
+  record(
+    "F2. In der Datei-Ansicht drehen und per Doppelklick zurücksetzen",
+    fileInteract.error === null && fileDragged && near(fileInteract.start, fileInteract.end),
+    fileInteract.error ??
+      `${JSON.stringify(fileInteract.start)} → gedreht ${JSON.stringify(fileInteract.turned)} → zurück ${JSON.stringify(fileInteract.end)}`,
+  );
+
+  // --- F3. Ein zweites Format --------------------------------------------
+  // `.gltf` ist Text, `.glb` ein Container — sie gehen durch verschiedene Loader.
+  // Ein Punkt, der nur eines von beiden anfasst, spricht nicht für "die Endungen".
+  const other = await cdp.evaluate<string | null>(`
+    const file = app.vault.getFiles().find((f) => /\\.(glb|stl)$/i.test(f.path) && !/\\.edit\\./.test(f.path));
+    return file ? file.path : null;
+  `);
+  if (!other) {
+    skipped("F3. Zweites Format", "keine .glb/.stl im Vault — der Punkt läuft mit, sobald eine da ist");
+  } else {
+    await cdp.evaluate(`
+      const file = app.vault.getAbstractFileByPath(${JSON.stringify(other)});
+      const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+      await leaf.openFile(file);
+      return true;
+    `);
+    const otherStats = await pollUntil<{ colors: number; message: string }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+        const root = leaf?.view?.containerEl;
+        const canvas = root?.querySelector("canvas");
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.colors < 3) return null;
+        const box = root.querySelector(".tdcb-message-error");
+        return { colors: stats.colors, message: box ? box.textContent.trim() : "" };
+      `,
+      40_000,
+    );
+    record(
+      `F3. Auch ${other.slice(other.lastIndexOf("."))} lädt in der Datei-Ansicht`,
+      otherStats !== null && otherStats.message === "",
+      otherStats ? `${otherStats.colors} Farbtöne · ${other}` : `nichts gezeichnet (${other})`,
+    );
+  }
+  await cdp.evaluate(`
+    for (const leaf of app.workspace.getLeavesOfType(${JSON.stringify(FILE_VIEW)})) leaf.detach();
+    await new Promise((r) => setTimeout(r, 400));
+    return true;
+  `);
+
+  // --- F4/F5. Embed mit und ohne Höhenangabe ------------------------------
+  // Die Höhe kommt als `height`-Attribut aus Obsidians Wikilink-Syntax; ohne den Punkt
+  // bliebe offen, ob `![[datei|300]]` beim Viewer überhaupt ankommt.
+  await closeExtraLeaves(cdp);
+  await openNote(
+    cdp,
+    SMOKE_NOTE_FILES,
+    [
+      "# GUI-Smoke datei-nativ (automatisch erzeugt)",
+      "",
+      `![[${probe}|300]]`,
+      "",
+    ].join("\n"),
+    "preview",
+  );
+  const embed = await pollUntil<{ colors: number; height: number; inEmbed: boolean }>(
+    cdp,
+    `
+      ${SAMPLER}
+      const preview = document.querySelector(".markdown-preview-view");
+      const block = preview?.querySelector(".tdcb-block");
+      const canvas = block?.querySelector("canvas");
+      const stats = canvas ? sample(canvas) : null;
+      if (!stats || stats.colors < 3) return null;
+      const viewport = block.querySelector(".tdcb-viewport");
+      return {
+        colors: stats.colors,
+        height: viewport ? Math.round(viewport.getBoundingClientRect().height) : 0,
+        inEmbed: !!block.closest(".internal-embed"),
+      };
+    `,
+    30_000,
+  );
+  record(
+    "F4. Ein `![[modell]]`-Embed rendert im Lesemodus",
+    embed !== null && embed.inEmbed,
+    embed ? `${embed.colors} Farbtöne · im Embed-Container: ${embed.inEmbed}` : "kein gerendertes Embed",
+  );
+  record(
+    "F5. Die Höhenangabe aus `![[modell|300]]` kommt an",
+    embed !== null && Math.abs(embed.height - 300) <= 4,
+    embed ? `${embed.height}px Viewport-Höhe (erwartet 300)` : "nicht messbar",
+  );
+
+  // --- F6/F7. `gltf`-Codeblock -------------------------------------------
+  // Der dritte Weg: der Quelltext steht IN der Notiz, es gibt keine Datei. Das kaputte
+  // Gegenstück gehört dazu — sonst bliebe offen, ob eine leere Bühne "lädt noch" heißt
+  // oder "hat aufgegeben".
+  const gltfSource = await cdp.evaluate<string | null>(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(probe)});
+    if (!file || !file.path.endsWith(".gltf")) return null;
+    const text = await app.vault.read(file);
+    return text.length < 200000 ? text : null;
+  `);
+  if (!gltfSource) {
+    skipped("F6/F7. gltf-Codeblock", "kein Text-glTF unter 200 KB im Vault, aus dem sich ein Block bauen ließe");
+  } else {
+    await closeExtraLeaves(cdp);
+    await openNote(
+      cdp,
+      SMOKE_NOTE_GLTF,
+      [
+        "# GUI-Smoke gltf-Block (automatisch erzeugt)",
+        "",
+        `${fence}gltf`,
+        gltfSource.replace(/\n/g, " "),
+        fence,
+        "",
+        `${fence}gltf`,
+        "{ das ist kein JSON",
+        fence,
+        "",
+      ].join("\n"),
+      "preview",
+    );
+    const gltfBlocks = await pollUntil<{ colors: number; message: string }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const preview = document.querySelector(".markdown-preview-view");
+        const blocks = [...(preview?.querySelectorAll(".tdcb-block") ?? [])];
+        if (blocks.length < 2) return null;
+        const stats = sample(blocks[0].querySelector("canvas"));
+        if (!stats || stats.colors < 3) return null;
+        const box = blocks[1].querySelector(".tdcb-message-error, .tdcb-message");
+        return { colors: stats.colors, message: box ? box.textContent.trim() : "" };
+      `,
+      40_000,
+    );
+    record(
+      "F6. Ein `gltf`-Codeblock rendert seinen eigenen Quelltext",
+      gltfBlocks !== null,
+      gltfBlocks ? `${gltfBlocks.colors} Farbtöne` : "kein gerenderter gltf-Block",
+    );
+    record(
+      "F7. Kaputtes glTF-JSON sagt genau das",
+      gltfBlocks !== null && gltfBlocks.message.includes("not valid JSON"),
+      gltfBlocks ? gltfBlocks.message.slice(0, 72) || "keine Meldung" : "nicht prüfbar",
+    );
+  }
+
+  // --- F8. Der Slider in den Einstellungen --------------------------------
+  // Am Tab-Container greifen, nicht am Dokument: sind mehrere Fenster desselben Vaults
+  // offen, hängt Obsidian das Einstellungs-Modal in `app.setting.win` — ein
+  // `document.querySelector(".modal")` bleibt dann leer, während der Tab korrekt steht.
+  const slider = await cdp.evaluate<{
+    found: boolean;
+    tag: string;
+    type: string;
+    min: string;
+    max: string;
+  }>(`
+    app.setting.open();
+    app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
+    await new Promise((r) => setTimeout(r, 600));
+    const container = app.setting.activeTab?.containerEl;
+    const rows = [...(container?.querySelectorAll(".setting-item") ?? [])];
+    const row = rows.find((r) =>
+      (r.querySelector(".setting-item-name")?.textContent ?? "").includes("Maximum live 3D views"),
+    );
+    const input = row?.querySelector("input");
+    const result = {
+      found: !!row,
+      tag: input ? input.tagName.toLowerCase() : "(kein Eingabefeld)",
+      type: input ? input.type : "",
+      min: input ? input.min : "",
+      max: input ? input.max : "",
+    };
+    app.setting.close();
+    await new Promise((r) => setTimeout(r, 300));
+    return result;
+  `);
+  record(
+    "F8. 'Maximum live 3D views' ist ein Slider von 0 bis 12",
+    slider.found && slider.type === "range" && slider.min === "0" && slider.max === "12",
+    slider.found ? `${slider.tag}[type=${slider.type}] ${slider.min}..${slider.max}` : "Zeile nicht gefunden",
+  );
+
+  // --- F9. Grenze aus: nichts wird zum Standbild --------------------------
+  // Das Gegenstück zu B11. Beide Enden gehören geprüft: eine Grenze, die immer greift,
+  // ist genauso falsch wie eine, die nie greift — und "0 = aus" ist die Stelle, an der
+  // sich ein Zahlenvergleich am ehesten vertut.
+  await setSetting(cdp, "maxContexts", 0);
+  await closeExtraLeaves(cdp);
+  await openNote(
+    cdp,
+    SMOKE_NOTE_MANY,
+    [
+      "# GUI-Smoke fünf Blöcke, Grenze aus (automatisch erzeugt)",
+      "",
+      ...[1, 2, 3, 4, 5].flatMap((n) => [`${fence}3d`, `file: ${probe}`, `title: Etage ${n}`, fence, ""]),
+    ].join("\n"),
+    "preview",
+  );
+  await pollUntil(
+    cdp,
+    `return document.querySelector(".markdown-preview-view .tdcb-block canvas") ? 1 : 0;`,
+    40_000,
+  );
+  const unlimited = await cdp.evaluate<{ drawn: string[]; titles: string[]; frozen: number }>(`
+    ${SAMPLER}
+    ${SCROLL_SWEEP}
+  `);
+  record(
+    "F9. 'Maximum live 3D views' = 0 friert nichts ein",
+    unlimited.titles.length === 5 && unlimited.drawn.length === 5 && unlimited.frozen === 0,
+    `${unlimited.drawn.length}/${unlimited.titles.length} gezeichnet · ${unlimited.frozen} eingefroren`,
+  );
+  await setSetting(cdp, "maxContexts", 6);
+
+  // --- F10/F11. Koexistenz und Theme über alle drei Wege ------------------
+  // Die drei Wege teilen sich Viewer und Theme-Anschluss, hängen aber an drei
+  // verschiedenen Obsidian-Schnittstellen (Postprozessor, embedRegistry, FileView).
+  // Dass einer davon dem Theme folgt, sagt über die anderen nichts.
+  await closeExtraLeaves(cdp);
+  await openNote(
+    cdp,
+    SMOKE_NOTE_MIX,
+    [
+      "# GUI-Smoke drei Wege nebeneinander (automatisch erzeugt)",
+      "",
+      `${fence}3d`,
+      `file: ${probe}`,
+      "title: Codeblock",
+      "height: 170",
+      fence,
+      "",
+      `![[${probe}|170]]`,
+      "",
+    ].join("\n"),
+    "preview",
+  );
+  const mix = await pollUntil<{ code: number; embed: number }>(
+    cdp,
+    `
+      ${SAMPLER}
+      const preview = document.querySelector(".markdown-preview-view");
+      const blocks = [...(preview?.querySelectorAll(".tdcb-block") ?? [])];
+      const code = blocks.find((b) => !b.closest(".internal-embed"));
+      const embed = blocks.find((b) => b.closest(".internal-embed"));
+      const codeStats = sample(code?.querySelector("canvas"));
+      const embedStats = sample(embed?.querySelector("canvas"));
+      if (!codeStats || !embedStats || codeStats.colors < 3 || embedStats.colors < 3) return null;
+      return { code: codeStats.colors, embed: embedStats.colors };
+    `,
+    40_000,
+  );
+  record(
+    "F10. Codeblock und Embed rendern in derselben Notiz nebeneinander",
+    mix !== null,
+    mix ? `Codeblock ${mix.code} Farbtöne · Embed ${mix.embed} Farbtöne` : "nicht beide gerendert",
+  );
+
+  const mixTheme = await cdp.evaluate<{ code: number; embed: number }>(`
+    ${SAMPLER}
+    const preview = document.querySelector(".markdown-preview-view");
+    const blocks = [...(preview?.querySelectorAll(".tdcb-block") ?? [])];
+    const code = blocks.find((b) => !b.closest(".internal-embed"))?.querySelector("canvas");
+    const embed = blocks.find((b) => b.closest(".internal-embed"))?.querySelector("canvas");
+    const body = document.body;
+    const wasDark = body.classList.contains("theme-dark");
+    const apply = async (dark) => {
+      body.classList.toggle("theme-dark", dark);
+      body.classList.toggle("theme-light", !dark);
+      app.workspace.trigger("css-change");
+      await new Promise((r) => setTimeout(r, 900));
+      return { code: sample(code), embed: sample(embed) };
+    };
+    const dark = await apply(true);
+    const light = await apply(false);
+    await apply(wasDark);
+    const gap = (a, b) => (a && b ? a.avg.reduce((sum, v, i) => sum + Math.abs(v - b.avg[i]), 0) : 0);
+    return { code: gap(dark.code, light.code), embed: gap(dark.embed, light.embed) };
+  `);
+  record(
+    "F11. Codeblock UND Embed folgen dem Theme",
+    mixTheme.code > 30 && mixTheme.embed > 30,
+    `Farbabstand hell/dunkel — Codeblock ${mixTheme.code} · Embed ${mixTheme.embed}`,
+  );
+}
+
 // --- Ablauf -----------------------------------------------------------------
 
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
   { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
+  { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
 ];
 
 async function main(): Promise<void> {

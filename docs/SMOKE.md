@@ -84,6 +84,27 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 
 ## Datei-nativer Ausbau (2026-07-24)
 
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui -- --section files`
+> Alle sechs Punkte fährt der CDP-Treiber (Abschnitt `files`): **11 Prüfpunkte.**
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | Datei öffnen | F1 (richtige View **und** gezeichnetes Modell) · F2 (drehen, Doppelklick-Reset) · F3 (zweites Format: `.glb`/`.stl`, sobald eines im Vault liegt) |
+> | Embed | F4 (rendert im Embed-Container) · F5 (`![[modell\|300]]` → 300px) |
+> | `gltf`-Codeblock | F6 (gültiges JSON rendert) · F7 (kaputtes meldet „not valid JSON") |
+> | Slider | F8 (`input[type=range]`, 0..12) · F9 (0 = aus: nichts wird eingefroren — das Gegenstück zu B11) |
+> | Koexistenz | F10 (Codeblock und Embed in derselben Notiz) |
+> | Theme in Embed/gltf-Block | F11 (beide Wege folgen hell↔dunkel, am Pixel gemessen) |
+>
+> **Was der Lauf dabei gelernt hat:** OrbitControls läuft mit `enableDamping` — nach
+> einem Drag zieht die Kamera noch nach, und ein Rücksetzen mitten in dieser Nachbewegung
+> ist erst ein paar Frames später am Ziel. Der Treiber wartet deshalb auf Ruhe (drei
+> gleiche Messungen), nicht auf eine feste Frist; die erste Fassung meldete 38°/32° statt
+> 45°/30° und sah aus wie ein Defekt.
+>
+> **Gegenprobe (2026-08-14):** Embed-Höhe ignoriert → nur F5 rot; „0 = aus" im
+> Kontext-Budget aufgehoben → nur F9 rot.
+
 - [ ] **Datei öffnen** — `.gltf` im Datei-Explorer anklicken → 3D-View im ganzen Pane,
       voll interaktiv, Doppelklick-Reset geht. Auch `.glb`/`.stl`.
 - [ ] **Embed** — `![[weltmodell/3d/eg.gltf]]` in einer Notiz → gerendert;
