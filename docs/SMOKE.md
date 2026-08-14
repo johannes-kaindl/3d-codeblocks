@@ -67,6 +67,28 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 
 ## Ansicht merken (2026-07-25)
 
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui`
+> Die Punkte 1–8 fährt der CDP-Treiber (`scripts/gui-smoke.ts`, Abschnitt `view`) gegen ein
+> laufendes Obsidian: **14 Prüfpunkte, 22/22 im Gesamtlauf**, zweimal in Folge. Von Hand
+> abzuhaken ist hier nichts mehr; die Beschreibungen bleiben als Begründung stehen, was
+> jeder Punkt eigentlich prüft.
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | 1. Speichern und wiederfinden | V1 (echter Maus-Drag bewegt die Kamera) · V2 (`view:`-Zeile entsteht) · V3 (Ansicht nach Neuöffnen wieder da) · V3b (kein Drift über zwei Speicherzyklen) |
+> | 2. Namens-Schreibweise | V4 (`view: iso` statt drei Zahlen) |
+> | 3. Undo im Editor | V6 (Live Preview, Write im Buffer, `undo()` nimmt ihn zurück) |
+> | 4. Lesemodus / Clear view | V5 (entfernt die Zeile — und prüft vorher, dass eine da war) |
+> | 5. Fünf Etagen, Aktiv-Rahmen | **bewusst nicht doppelt** — Abschnitt „aktiver Block" deckt das mit 5–7 ab; der Treiber sagt das im Lauf an, statt es stillschweigend auszulassen |
+> | 6. Sidebar auf/zu | V7 (Hover-Leiste kommt und geht) · V8 (ohne Neuaufbau der Notiz) |
+> | 7. Ohne Codeblock kein Merken | V9/V10 (Embed: Save/Clear aus, Fit an, mit Begründung im Tooltip) · V11 (dasselbe für die geöffnete Datei) |
+> | 8. `view: quatsch` | V12 (Hinweiszeile) · V13 (Modell bleibt sichtbar) |
+>
+> **Zwei Voraussetzungen prüft der Treiber selbst**, weil ihre Verletzung sonst wie ein
+> Plugin-Defekt aussieht: Fensterfokus (sonst drosselt Chromium den Renderer — der Lauf
+> bricht mit Ansage ab) und der geladene Plugin-Stand (er lädt das Plugin neu, weil
+> `npm run deploy` nur Dateien ersetzt und die laufende Instanz sonst den alten Code misst).
+
 - [ ] **1. Ansicht speichern und wiederfinden** — Modell drehen, **Save view** drücken
       (Sidebar oder Pin-Button in der Hover-Leiste) → `view:`-Zeile erscheint im Block,
       das Bild bleibt nach dem Neuaufbau gleich. Notiz schließen und neu öffnen → dieselbe
