@@ -30,7 +30,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 - **Uncompressed glTF.** Draco- and Meshopt-compressed files cannot be read (see
   [Supported formats](#supported-formats)).
 
-## Install
+## Installation
 
 Not in the community store yet. To try it: build with `npm install && npm run build`,
 then copy `main.js`, `manifest.json` and `styles.css` into
