@@ -3,6 +3,12 @@
 View 3D artifacts (GLB, glTF, STL) inside Obsidian — orbit, zoom and pan without
 leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed.
 
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/gitea/v/release/jkaindl/3d-codeblocks?gitea_url=https%3A%2F%2Fgit.jkaindl.de&label=release)](https://git.jkaindl.de/jkaindl/3d-codeblocks/releases)
+[![Obsidian](https://img.shields.io/badge/obsidian-1.5.0%2B-purple)](https://obsidian.md)
+
+*Auch auf Deutsch verfügbar: [`README.de.md`](README.de.md).*
+
 ## Features
 
 - Open `.glb`, `.gltf` and `.stl` files in their own pane, or embed them with `![[…]]`
