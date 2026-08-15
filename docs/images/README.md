@@ -27,12 +27,26 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 | `unknown-key.png` | Der Pruefling **versteckt das Modell**, wenn ein Schluessel unbekannt ist — GUI-Smoke-Punkt B15 ist genau deswegen rot („meldet sich, versteckt aber das Modell nicht"). Das Bild, das dieser Vertrag beschreibt (Meldung UND Modell), kann es derzeit nicht geben. Erst klaeren, ob das Verhalten oder die Beschreibung falsch ist. |
 | `settings.png` | Die Einstellungen sind in Obsidian 1.13 ein **eigenes Fenster** mit URL `about:blank`. Der Treiber bringt mit `attachTo("settings", port)` schon den Weg dorthin mit, das Rezept nutzt ihn noch nicht. |
 
-### Offen: der Workspace kippt nach zwei bis drei Bildern
+### Offen: ab dem dritten Bild bleibt die Leseflaeche leer
 
-`npm run shots` liefert die ersten ein bis drei Bilder zuverlässig und danach keines mehr.
-Die Diagnosezeile zeigt immer dasselbe: die Notiz gilt als aktiv, `bloeckeGesamt` ist 1,
-aber `leseflaeche` bleibt 0 — Obsidian rendert das geöffnete Blatt nicht. Ein Neustart
+`npm run shots` liefert die ersten ein bis zwei Bilder zuverlässig und danach keines mehr.
+Die Diagnosezeile zeigt jedes Mal denselben Zustand:
+
+```
+· kein sichtbarer Block — {"vault":"3d-codeblocks","datei":"Ground-floor.md",
+   "bloeckeGesamt":1,"roheCodebloecke":0,"leseflaeche":0,"pluginAn":true}
+```
+
+Obsidian meldet also die richtige Notiz im richtigen Vault als geöffnet, das Plugin ist
+geladen, ein Block-Element existiert im DOM — aber die **Lesefläche enthält null Zeichen**,
+weder gerenderten Text noch einen rohen Codeblock. Das Blatt ist da und leer. Ein Neustart
 setzt zurück; die Reihenfolge der Bilder ändert nichts.
+
+**Warum das Rendern ausbleibt, ist unbekannt.** Nicht ausgeschlossen, sondern schlicht
+ungemessen ist eine Sache: ob Obsidian in diesem Moment intern eine Exception wirft. Der
+Treiber liest die Konsole des Prüflings nicht aus. Der nächste Schritt ist deshalb keine
+weitere Reparatur, sondern eine Messung — `Runtime.consoleAPICalled` und `Log.entryAdded`
+über CDP mitschneiden und einen Lauf fahren.
 
 **Sichtbar wurde die Ursachenkette erst auf Screenshots des GANZEN Fensters** — an den
 Messwerten sah jede Stufe wie ein Renderer-Problem aus. Wer hier weitermacht, sollte nach
