@@ -7,5 +7,8 @@ export declare function groundFloorGltf(): Record<string, unknown>;
 /** ASCII-STL eines Oktaeders — das Format kennt keine Materialien. */
 export declare function octahedronStl(): string;
 
-/** Schreibt beide Modelle nach `<target>/models/` und liefert die Pfade. */
+/** glTF mit einem verschobenen Knoten — erzeugt das „Unapplied edits"-Abzeichen. */
+export declare function groundFloorEditGltf(): Record<string, unknown>;
+
+/** Schreibt die Modelle nach `<target>/models/` und liefert die Pfade. */
 export declare function writeModels(target: string): string[];

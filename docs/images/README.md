@@ -15,8 +15,17 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 
 ## Status
 
-**Stand 2026-08-15: noch kein Bild aufgenommen.** Der Vertrag steht, das Fixture steht, der
-Treiber steht; es fehlt der Lauf gegen ein Obsidian mit offenem Debug-Port.
+**Stand 2026-08-15: sieben von zehn Aufnahmen stehen** (`hero`, `code-and-render`,
+`sidebar-controls`, `saved-view`, `edit-mode`, `unapplied-edits`, `orbit.gif`), erzeugt mit
+`npm run shots` gegen ein laufendes Obsidian 1.13.7.
+
+**Drei sind offen** — `npm run shots:check` meldet sie, und genau dafuer gibt es ihn:
+
+| Fehlt | Warum |
+|---|---|
+| `hover-toolbar.png` | Der Zuschnitt auf die Werkzeugleiste steht, das Rezept liefert ihn aber noch nicht stabil. Ein synthetisches `mouseMoved` erzeugt keinen Hover-Zustand; beim aktiven Block steht die Leiste ohnehin, der Ausschnitt braucht noch Feinschliff. |
+| `unknown-key.png` | Der Pruefling **versteckt das Modell**, wenn ein Schluessel unbekannt ist — GUI-Smoke-Punkt B15 ist genau deswegen rot („meldet sich, versteckt aber das Modell nicht"). Das Bild, das dieser Vertrag beschreibt (Meldung UND Modell), kann es derzeit nicht geben. Erst klaeren, ob das Verhalten oder die Beschreibung falsch ist. |
+| `settings.png` | Die Einstellungen sind in Obsidian 1.13 ein **eigenes Fenster** mit URL `about:blank`. Der Treiber bringt mit `attachTo("settings", port)` schon den Weg dorthin mit, das Rezept nutzt ihn noch nicht. |
 
 ## Konventionen
 
@@ -53,7 +62,7 @@ Verbindlich ist der workspace-weite Bild-Standard in `_docs/readme/readme-spec.j
 | `saved-view.png` | feature | `README.md` (Saving a camera angle) | Notiz **Saved view**: die Zeile `view: 225,28,14` im Block **und** das entsprechend gedrehte Modell im selben Bild — die Aussage ist, dass der Blickwinkel in der Notiz steht. |
 | `orbit.gif` | feature | `README.md` (Features) | Eine Umkreisung des Modells samt Zoom, 6–8 s, ~800 px. Das eine Feature, das als Standbild nicht erzählbar ist. |
 | `edit-mode.png` | detail | `README.md` (Edit mode) | Edit-Modus aktiv: ein ausgewählter Knoten mit Gizmo, die Sidebar mit **Move**/**Scale**, den Zahlenfeldern für Translation und Skalierung, **Reset node** und **Save edits**/**Discard edits**. Der Knotenname (z. B. `Stairs`) muss lesbar sein. |
-| `unapplied-edits.png` | detail | `README.md` (Edit mode) | Das Abzeichen **Unapplied edits** oben links über dem Viewport, mit dem Modell dahinter — der Zustand „neben der Datei liegt eine `.edit.gltf`". |
+| `unapplied-edits.png` | detail | `README.md` (Edit mode) | Das Abzeichen **Unapplied edits** über dem Viewport, mit dem Modell dahinter — der Zustand „neben der Datei liegt eine `.edit.gltf`". Nutzt die Notiz **Edited** und ein **eigenes** Modell (`edited-floor.gltf`): läge die `.edit.gltf` neben dem gemeinsam genutzten Modell, trüge *jedes* Bild dieses Abzeichen. |
 | `unknown-key.png` | detail | `README.md` (Block keys) | Notiz **Unknown key**: die Meldung unter dem Viewport, die `heigth:` als unbekannten Schlüssel benennt, mit dem gerenderten Modell darüber. Zeigt, dass ein Tippfehler nicht wie ein Plugin-Fehler aussieht. |
 | `settings.png` | detail | `README.md` (Configuration) | Der Einstellungen-Tab: **Default height**, **Show ground grid**, **Maximum live 3D views**, **Controls placement**, **Locked node prefixes**, **Auto-rotate**. |
 
@@ -103,7 +112,7 @@ Nicht raten — diese Zeichenketten stehen so im Code und müssen im Bild so les
   Edit-Modus etwas zu greifen hat) und `octahedron.stl` (Format ohne Materialien → der
   Prüffall für das theme-abhängige Default-Material). Beide Modelle gehen durch den echten
   Loader des Plugins; `tests/fixture-models.test.ts` hält das fest.
-- `notes/` — die vier Demo-Notizen.
+- `notes/` — die fünf Demo-Notizen.
 - `obsidian/` — Vault-Konfiguration: **nur dieses Plugin** aktiv (sonst malen fremde
   Ribbon-Icons und Sidebars in jedes Bild), helles Theme, ruhiger Kern-Plugin-Satz.
 

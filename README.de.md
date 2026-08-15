@@ -11,6 +11,8 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 > **Hinweis:** Diese Übersetzung folgt der englischen [`README.md`](README.md).
 > Bei Abweichungen gilt die englische Fassung.
 
+<p align="center"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/hero.png" width="820" alt="Ein Grundriss-Modell in einer Obsidian-Notiz, Waende und Raeume von oben sichtbar"></p>
+
 ## Features
 
 - `.glb`-, `.gltf`- und `.stl`-Dateien in einem eigenen Tab öffnen oder mit `![[…]]`
@@ -24,6 +26,8 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
   verändert.
 - Theme-treues Standardmaterial für STL, das selbst keines mitbringt.
 - Keine dauerhafte Render-Schleife: gezeichnet wird nur, wenn sich etwas ändert.
+
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif" width="820" alt="Das Modell wird in der Notiz umkreist und gezoomt">
 
 ## Voraussetzungen
 
@@ -79,6 +83,8 @@ Datei nehmen.)
 ```
 ````
 
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/code-and-render.png" width="820" alt="Links ein 3d-Codeblock im Editor, rechts das gerenderte Modell">
+
 ### Unterstützte Formate
 
 | Endung | Anmerkung |
@@ -121,6 +127,10 @@ aber keinen Codeblock, in den gespeichert werden könnte.
 Die Einstellung **Platzierung der Steuerung** entscheidet, wo die Schaltflächen
 auftauchen: in der Seitenleiste, wenn sie offen ist, sonst in der Hover-Leiste
 (Standard) — oder immer nur in einem von beiden.
+
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/sidebar-controls.png" width="820" alt="Die 3D-Sidebar neben einem Modell: Ansichts-Vorgaben, Save view, Clear view, Fit und Edit model">
+
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/saved-view.png" width="820" alt="Links der view:-Schluessel im Codeblock, rechts das entsprechend gedrehte Modell">
 
 ### Bearbeitungsmodus
 
@@ -166,6 +176,11 @@ Auswahl und **Änderungen verwerfen** für die ganze Sitzung.
 **Gesperrte Knoten-Präfixe** (Einstellung, Standard `env__`) schützt Knoten über ihren
 Namen — ein Knoten, dessen Name mit einem der kommagetrennten Präfixe beginnt, lässt
 sich weder auswählen noch bearbeiten.
+
+<table><tr>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/edit-mode.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/edit-mode.png" width="380" alt="Edit-Modus mit ausgewaehltem Knoten, Gizmo und den Zahlenfeldern der Sidebar"></a><br><sub>Bearbeitungsmodus</sub></td>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unapplied-edits.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="Das Abzeichen Unapplied edits ueber einem Modell, neben dem eine Edit-Datei liegt"></a><br><sub>Nicht uebernommene Aenderungen</sub></td>
+</tr></table>
 
 #### Grenzen
 

@@ -162,14 +162,33 @@ export function octahedronStl() {
   return out.join("\n");
 }
 
-/** Schreibt beide Modelle nach <ziel>/models/ und meldet die Pfade. */
+/** Eine `.edit.gltf` neben dem Modell: dasselbe Dokument mit einem verschobenen Knoten.
+ *
+ *  Das Plugin zeigt daraufhin das Abzeichen „Unapplied edits" — der Zustand „neben der
+ *  Datei liegt eine Aenderungsanfrage". Fuer das Bild ist das der billige Weg: den
+ *  Edit-Modus dafuer durchzuspielen hiesse, Gizmo-Ziehen zu automatisieren. */
+export function groundFloorEditGltf() {
+  const doc = groundFloorGltf();
+  const stairs = doc.nodes.find((n) => n.name === "Stairs");
+  if (stairs) stairs.translation = [-2.6, 0.55, 0.4];
+  return doc;
+}
+
+/** Schreibt die Modelle nach <ziel>/models/ und meldet die Pfade. */
 export function writeModels(target) {
   const modelPath = join(target, "models", "ground-floor.gltf");
+  // EIGENE Kopie fuer die Edit-Demo. Laege die .edit.gltf neben dem gemeinsam genutzten
+  // Modell, traege JEDES Bild das Abzeichen „Unapplied edits" — gemessen am 2026-08-15,
+  // als es unverhofft in sidebar-controls.png stand und dort nichts zu suchen hatte.
+  const editBase = join(target, "models", "edited-floor.gltf");
+  const editPath = join(target, "models", "edited-floor.edit.gltf");
   const stlPath = join(target, "models", "octahedron.stl");
   mkdirSync(dirname(modelPath), { recursive: true });
   writeFileSync(modelPath, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
+  writeFileSync(editBase, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
+  writeFileSync(editPath, JSON.stringify(groundFloorEditGltf(), null, 1) + "\n");
   writeFileSync(stlPath, octahedronStl());
-  return [modelPath, stlPath];
+  return [modelPath, editBase, editPath, stlPath];
 }
 
 // Nur beim direkten Aufruf ausfuehren — der Fixture-Test importiert dieses Modul, und

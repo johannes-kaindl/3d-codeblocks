@@ -83,6 +83,17 @@ export function buildVault(spec: VaultSpec): string[] {
 
   const pluginDir = join(obsidianDir, "plugins", pluginId);
   mkdirSync(pluginDir, { recursive: true });
+
+  // Plugin-Einstellungen auf den Auslieferungszustand. data.json ueberlebt sonst jeden
+  // Lauf: am 2026-08-15 hatte ein frueherer Versuch dort `blockStart: "interactive"`
+  // hinterlassen, und damit gab es kein Standbild-Overlay mehr — der einzige Weg, ueber
+  // den sich der Controller registriert. Sidebar-Panel, Edit-Modus und Kamerasteuerung
+  // fielen aus, und die Ursache stand in einer Datei, die niemand mehr ansah.
+  const datenDatei = join(pluginDir, "data.json");
+  if (existsSync(datenDatei)) {
+    rmSync(datenDatei);
+    log.push("Plugin-Einstellungen zurueckgesetzt (data.json entfernt)");
+  }
   for (const quelle of built) {
     cpSync(quelle, join(pluginDir, quelle.split("/").pop() as string));
   }

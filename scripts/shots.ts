@@ -59,7 +59,7 @@ const REPO_NAME = "3d-codeblocks";
 const OUT_DIR = "docs/images";
 const CAPTURE_WIDTH = 1200;
 const THUMB_WIDTH = 380;
-const PADDING = 20;
+const PADDING = 12;
 const FENSTER_BREITE = 1440;
 const FENSTER_HOEHE = 900;
 
@@ -92,10 +92,11 @@ async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean>
   `, 15_000, 300);
   if (!da) return false;
 
-  // Standbild wecken, falls die Einstellung Bloecke passiv starten laesst
+  // Standbild wecken. Der Klick ist nicht optional: er ist der einzige Weg, ueber den
+  // sich der Controller registriert (siehe Kommentar in main()).
   await cdp.evaluate(`
-    const block = ${sichtbar}[${index}];
-    const play = block?.querySelector(".tdcb-play");
+    const play = [...document.querySelectorAll(".tdcb-play")]
+      .filter((e) => e.getBoundingClientRect().width > 1)[${index}];
     if (play) play.click();
     return true;
   `);
@@ -106,6 +107,15 @@ async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean>
     return !!(canvas && canvas.width > 0 && canvas.height > 0);
   `, 20_000, 300);
   return Boolean(gezeichnet);
+}
+
+/** Wartet, bis der Prueflings-Controller registriert ist — Voraussetzung fuer Kamera,
+ *  Sidebar-Panel und Edit-Modus. */
+async function controllerBereit(cdp: Cdp): Promise<boolean> {
+  return Boolean(await pollUntil<boolean>(cdp, `
+    const c = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    return !!(c && c.getView());
+  `, 10_000, 300));
 }
 
 /** Maus ueber ein Element bewegen — die Werkzeugleiste erscheint nur bei Hover, und ein
@@ -124,15 +134,25 @@ async function hover(cdp: Cdp, box: Rect): Promise<void> {
  *  Bilder, deren Aussage „so schreibt man es, so sieht es aus" lautet. */
 async function splitQuelleUndBild(cdp: Cdp, notiz: string): Promise<boolean> {
   await closeExtraLeaves(cdp);
+  // Live Preview aus: sonst rendert Obsidian den Codeblock AUCH im Quelltext-Blatt, und
+  // das Bild zeigt zweimal dasselbe Modell statt "so schreibt man es / so sieht es aus".
+  await setAppConfig(cdp, "livePreview", false);
   if (!(await openExisting(cdp, notiz, "source"))) return false;
   const ok = await cdp.evaluate<boolean>(`
     const file = app.vault.getAbstractFileByPath(${JSON.stringify(notiz)});
     const leaf = app.workspace.getLeaf("split", "vertical");
     await leaf.openFile(file, { state: { mode: "preview" } });
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 900));
     return true;
   `);
   if (!ok) return false;
+  // Standbild wecken — auch hier der einzige Weg zu einem gerenderten Modell.
+  await cdp.evaluate(`
+    const play = [...document.querySelectorAll(".tdcb-play")]
+      .filter((e) => e.getBoundingClientRect().width > 1)[0];
+    if (play) play.click();
+    return true;
+  `);
   return Boolean(await pollUntil<boolean>(cdp, `
     const canvas = [...document.querySelectorAll(".tdcb-block canvas")]
       .find((e) => e.getBoundingClientRect().width > 1);
@@ -148,23 +168,16 @@ async function splitQuelleUndBild(cdp: Cdp, notiz: string): Promise<boolean> {
  * Bild wertlos.
  */
 async function blickwinkel(cdp: Cdp, azimut: number, elevation: number): Promise<boolean> {
-  const aktiv = await cdp.evaluate<boolean>(`
-    const block = [...document.querySelectorAll(".tdcb-block")]
-      .find((e) => e.getBoundingClientRect().width > 1);
-    const ziel = block?.querySelector("canvas") ?? block;
-    ziel?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-    ziel?.click();
-    await new Promise((r) => setTimeout(r, 400));
-    return !!app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
-  `);
-  if (!aktiv) return false;
+  if (!(await controllerBereit(cdp))) return false;
   return Boolean(await cdp.evaluate<boolean>(`
     const c = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
     c.applyView(null);                       // erst einpassen — liefert die Distanz
     await new Promise((r) => setTimeout(r, 300));
     const auto = c.getView();
     if (!auto) return false;
-    c.applyView({ azimuth: ${azimut}, elevation: ${elevation}, distance: auto.distance });
+    // Naeher als die Auto-Einpassung: die laesst rundum Luft, damit nichts abgeschnitten
+    // wird. Fuer ein Bild ist das zu viel Rand — das Modell wirkt als Briefmarke.
+    c.applyView({ azimuth: ${azimut}, elevation: ${elevation}, distance: auto.distance * 0.82 });
     await new Promise((r) => setTimeout(r, 400));
     return true;
   `));
@@ -176,7 +189,7 @@ const SHOTS: Shot[] = [
     klasse: "hero",
     async run(cdp) {
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
-      await blickwinkel(cdp, 315, 34);
+      await blickwinkel(cdp, 320, 46);
       return boxOf(cdp, ".tdcb-block", PADDING);
     },
   },
@@ -185,6 +198,7 @@ const SHOTS: Shot[] = [
     klasse: "feature",
     async run(cdp) {
       if (!(await splitQuelleUndBild(cdp, "Ground-floor.md"))) return null;
+      await blickwinkel(cdp, 320, 46);
       return boxOf(cdp, ".workspace-split.mod-root", 0);
     },
   },
@@ -193,15 +207,22 @@ const SHOTS: Shot[] = [
     klasse: "feature",
     async run(cdp) {
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
+      if (!(await controllerBereit(cdp))) return null;
+      await blickwinkel(cdp, 320, 46);
+      // Kein Hover noetig: beim aktiven Block steht die Leiste ohnehin. Der Versuch
+      // ueber Input.dispatchMouseEvent traf sie nicht — und ein Bild vom Hover-Zustand
+      // waere ohnehin nicht reproduzierbar, weil der Zeiger im Screenshot fehlt.
+      const box = await boxOf(cdp, ".tdcb-toolbar", 8);
+      if (!box) return null;
       const block = await boxOf(cdp, ".tdcb-block");
-      if (!block) return null;
-      await hover(cdp, block);
-      const sichtbar = await cdp.evaluate<boolean>(`
-        const t = document.querySelector(".tdcb-toolbar");
-        return !!(t && !t.classList.contains("tdcb-hidden"));
-      `);
-      if (!sichtbar) return null;
-      return boxOf(cdp, ".tdcb-block", PADDING);
+      if (!block) return box;
+      // Leiste plus das obere Drittel des Modells — sonst schwebt sie kontextlos.
+      return {
+        x: Math.max(0, box.x - 260),
+        y: block.y,
+        width: box.width + 268,
+        height: Math.min(block.height, box.height + 220),
+      };
     },
   },
   {
@@ -209,8 +230,8 @@ const SHOTS: Shot[] = [
     klasse: "feature",
     async run(cdp) {
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
-      const block = await boxOf(cdp, ".tdcb-block");
-      if (block) await hover(cdp, block);
+      if (!(await controllerBereit(cdp))) return null;
+      await blickwinkel(cdp, 320, 46);
       await cdp.evaluate(
         `await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-controls`)}); return true;`,
       );
@@ -234,11 +255,22 @@ const SHOTS: Shot[] = [
     name: "unknown-key.png",
     klasse: "detail",
     async run(cdp) {
-      if (!(await blockBereit(cdp, "Unknown-key.md"))) return null;
-      const meldung = await cdp.evaluate<boolean>(`
-        const slot = document.querySelector(".tdcb-message-slot");
-        return !!(slot && slot.textContent.trim());
+      // NICHT ueber blockBereit: bei unbekanntem Schluessel rendert der Pruefling kein
+      // Modell (GUI-Smoke B15 ist genau deshalb rot). Auf ein Canvas zu warten hiesse,
+      // auf etwas zu warten, das per Design nicht kommt.
+      await closeExtraLeaves(cdp);
+      if (!(await openExisting(cdp, "Unknown-key.md", "preview"))) return null;
+      await cdp.evaluate(`
+        const play = [...document.querySelectorAll(".tdcb-play")]
+          .filter((e) => e.getBoundingClientRect().width > 1)[0];
+        if (play) play.click();
+        return true;
       `);
+      const meldung = await pollUntil<boolean>(cdp, `
+        const slot = [...document.querySelectorAll(".tdcb-message-slot")]
+          .find((e) => e.textContent.trim());
+        return !!slot;
+      `, 15_000, 400);
       if (!meldung) return null;
       return boxOf(cdp, ".tdcb-block", PADDING);
     },
@@ -254,14 +286,18 @@ const SHOTS: Shot[] = [
         `await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-controls`)}); return true;`,
       );
       const gestartet = await cdp.evaluate<boolean>(`
-        const knopf = [...document.querySelectorAll(".tdcb-toolbar-button, button")]
-          .find((b) => (b.getAttribute("aria-label") ?? b.title ?? b.textContent ?? "")
-            .includes("Edit model"));
-        if (!knopf) return false;
+        const beschriftung = (e) =>
+          (e.getAttribute("aria-label") || e.getAttribute("title") || e.textContent || "").trim();
+        const knopf = [...document.querySelectorAll("button, .tdcb-toolbar-button, .clickable-icon")]
+          .filter((e) => e.getBoundingClientRect().width > 1)
+          .find((e) => beschriftung(e).includes("Edit model"));
+        if (!knopf) {
+          return "kein Knopf: " + [...document.querySelectorAll(".tdcb-toolbar *")]
+            .map(beschriftung).filter(Boolean).join("|");
+        }
         knopf.click();
-        await new Promise((r) => setTimeout(r, 900));
-        return document.querySelector(".tdcb-editing") !== null
-          || document.querySelector(".tdcb-panel-edit") !== null;
+        await new Promise((r) => setTimeout(r, 1000));
+        return !!(document.querySelector(".tdcb-editing") || document.querySelector(".tdcb-panel-edit"));
       `);
       if (!gestartet) return null;
       return boxAround(cdp, [".tdcb-block", ".tdcb-panel"], PADDING);
@@ -271,9 +307,12 @@ const SHOTS: Shot[] = [
     name: "unapplied-edits.png",
     klasse: "detail",
     async run(cdp) {
+      if (!(await blockBereit(cdp, "Edited.md"))) return null;
+      await blickwinkel(cdp, 320, 46);
       const da = await pollUntil<boolean>(cdp, `
-        return document.querySelector(".tdcb-badge") !== null;
-      `, 5_000, 300);
+        return [...document.querySelectorAll(".tdcb-badge")]
+          .some((e) => e.getBoundingClientRect().width > 1);
+      `, 8_000, 300);
       if (!da) return null;
       return boxOf(cdp, ".tdcb-block", PADDING);
     },
@@ -376,9 +415,13 @@ async function main(): Promise<void> {
   const cdp = await Cdp.attach(port);
   console.log(`Verbunden auf Port ${port}.\n`);
 
-  // Bloecke sollen sofort interaktiv sein — ein Bild vom Standbild zeigt ein Poster,
-  // nicht das Plugin.
-  await setPluginSetting(cdp, PLUGIN_ID, "blockStart", "interactive");
+  // viewMode auf "on-click": der Block startet als Standbild, und ERST der Klick darauf
+  // meldet sich als Nutzerinteraktion (`onInteract` -> `active.set`). Mit "immediate"
+  // rendert der Block zwar sofort, registriert aber nie einen aktiven Controller — und
+  // ohne den bleiben Sidebar-Panel leer, Edit-Modus unerreichbar und die Kamera
+  // unsteuerbar. Das steht so in src/obsidian/viewer-host.ts:288 als Befund aus
+  // Smoke #4; ich bin am 2026-08-15 in dieselbe Falle gelaufen.
+  await setPluginSetting(cdp, PLUGIN_ID, "viewMode", "on-click");
   // Feste Fenstergroesse — sonst haengt jedes Bild am Display, auf dem es entstand.
   await setWindowSize(cdp, FENSTER_BREITE, FENSTER_HOEHE);
   // Zur Laufzeit, nicht ueber die Fixture-Datei: ein laufendes Obsidian liest sie nicht neu.
