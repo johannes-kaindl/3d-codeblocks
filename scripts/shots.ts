@@ -31,11 +31,12 @@
  *    opens"). Ein Bild vom Standbild zeigt nicht das Plugin, sondern ein Poster.
  */
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { argv, cwd, env, exit } from "node:process";
 
 import {
+  attachTo,
   Cdp,
   closeExtraLeaves,
   openExisting,
@@ -77,8 +78,12 @@ interface Shot {
  *  Die zwei Wartepunkte sind beide load-bearing: der erste auf das DOM, der zweite auf
  *  den ersten gezeichneten Frame. Ohne den zweiten fotografiert man ein leeres Canvas. */
 async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean> {
+  await cdp.send("Page.bringToFront");
   await closeExtraLeaves(cdp);
-  if (!(await openExisting(cdp, notiz, "preview"))) return false;
+  if (!(await openExisting(cdp, notiz, "preview"))) {
+    console.log(`      · ${notiz} liess sich nicht oeffnen (Datei im Vault?)`);
+    return false;
+  }
 
   // SICHTBARE Bloecke, nicht alle: Obsidian haelt die Inhalte geschlossener Blaetter im
   // DOM. `querySelectorAll(".tdcb-block")[0]` traf dort ein 0x0-Element, und jeder
@@ -90,22 +95,45 @@ async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean>
   const da = await pollUntil<boolean>(cdp, `
     return ${sichtbar}.length > ${index};
   `, 15_000, 300);
-  if (!da) return false;
+  if (!da) {
+    // Diagnose mitgeben statt nur "kam nicht zustande": diese eine Zeile haette am
+    // 2026-08-15 mehrere Stunden Rateschleife erspart.
+    const lage = await cdp.evaluate<string>(`
+      return JSON.stringify({
+        vault: app.vault.getName(),
+        datei: app.workspace.getActiveFile()?.path ?? null,
+        bloeckeGesamt: document.querySelectorAll(".tdcb-block").length,
+        roheCodebloecke: document.querySelectorAll("pre > code").length,
+        leseflaeche: (document.querySelector(".markdown-reading-view")?.textContent ?? "").length,
+        pluginAn: !!app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}],
+      });
+    `);
+    console.log(`      · kein sichtbarer Block — ${lage}`);
+    return false;
+  }
 
   // Standbild wecken. Der Klick ist nicht optional: er ist der einzige Weg, ueber den
   // sich der Controller registriert (siehe Kommentar in main()).
-  await cdp.evaluate(`
+  //
+  // Erst auf die Klickflaeche WARTEN. Obsidian rendert den Block asynchron; ein
+  // sofortiges querySelectorAll findet nichts, der Klick geht ins Leere, und der
+  // Fehlschlag sieht aus wie "Modell laedt nicht". Dasselbe Verfahren steht in
+  // scripts/gui-smoke.ts (activateBlock) — ich habe es beim Bauen uebersehen.
+  const geweckt = await pollUntil<boolean>(cdp, `
     const play = [...document.querySelectorAll(".tdcb-play")]
-      .filter((e) => e.getBoundingClientRect().width > 1)[${index}];
-    if (play) play.click();
+      .filter((e) => e.getBoundingClientRect().width > 1);
+    if (play.length <= ${index}) return false;
+    play[${index}].click();
     return true;
-  `);
+  `, 12_000, 300);
+  if (!geweckt) console.log("      · kein Standbild-Overlay zum Anklicken gefunden");
 
   const gezeichnet = await pollUntil<boolean>(cdp, `
     const block = ${sichtbar}[${index}];
     const canvas = block?.querySelector("canvas");
     return !!(canvas && canvas.width > 0 && canvas.height > 0);
   `, 20_000, 300);
+  if (!gezeichnet) console.log("      · Block da, aber kein gezeichnetes Canvas");
   return Boolean(gezeichnet);
 }
 
@@ -338,8 +366,30 @@ const SHOTS: Shot[] = [
  *  ist bewegt: der Standard erlaubt GIF dort, wo Bewegung die Aussage IST. */
 async function orbitGif(cdp: Cdp, outDir: string): Promise<string> {
   if (!(await blockBereit(cdp, "Ground-floor.md"))) return "orbit.gif — Block wurde nicht bereit";
-  const box = await boxOf(cdp, ".tdcb-viewport") ?? await boxOf(cdp, ".tdcb-block");
-  if (!box) return "orbit.gif — kein Viewport gefunden";
+  if (!(await controllerBereit(cdp))) return "orbit.gif — kein aktiver Controller";
+
+  // Distanz AUS der Auto-Einpassung ableiten, nicht raten. Eine feste Zahl (vorher 14)
+  // hat nichts mit der Groesse des Modells zu tun: im ersten GIF sass ein
+  // briefmarkengrosses Haus in einer weissen Flaeche.
+  const basis = await cdp.evaluate<number>(`
+    const c = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    c.applyView(null);
+    await new Promise((r) => setTimeout(r, 400));
+    return c.getView()?.distance ?? 0;
+  `);
+  if (!basis) return "orbit.gif — die Auto-Einpassung lieferte keine Distanz";
+
+  const viewport = await boxOf(cdp, ".tdcb-viewport") ?? await boxOf(cdp, ".tdcb-block");
+  if (!viewport) return "orbit.gif — kein Viewport gefunden";
+  // Enger Ausschnitt: das Modell sitzt mittig, der Block ist absichtlich hoch. Die volle
+  // Blockhoehe mitzunehmen hiesse, zwei Drittel weisse Flaeche zu animieren.
+  const hoehe = Math.round(viewport.height * 0.74);
+  const box: Rect = {
+    x: viewport.x,
+    y: viewport.y + Math.round((viewport.height - hoehe) / 2),
+    width: viewport.width,
+    height: hoehe,
+  };
 
   const frameDir = join(outDir, ".orbit-frames");
   rmSync(frameDir, { recursive: true, force: true });
@@ -348,18 +398,19 @@ async function orbitGif(cdp: Cdp, outDir: string): Promise<string> {
   const SCHRITTE = 72;
   for (let i = 0; i < SCHRITTE; i++) {
     const azimut = Math.round((i / SCHRITTE) * 360);
-    const distanz = 14 + Math.sin((i / SCHRITTE) * Math.PI * 2) * 3;
+    // Zoom als sanfte Atmung um den Nahwert. Die Grenzen sind auf den Ausschnitt oben
+    // abgestimmt: naeher heran und das Modell wird im engen Rahmen angeschnitten.
+    const faktor = 0.88 + Math.sin((i / SCHRITTE) * Math.PI * 2) * 0.07;
     const gesetzt = await cdp.evaluate<boolean>(`
       const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
-      const view = controller?.getView?.();
       if (!controller?.applyView) return false;
-      controller.applyView({ azimuth: ${azimut}, elevation: 24, distance: ${distanz.toFixed(1)} });
+      controller.applyView({ azimuth: ${azimut}, elevation: 38,
+                             distance: ${(basis).toFixed(3)} * ${faktor.toFixed(3)} });
       await new Promise((r) => setTimeout(r, 40));
       return true;
     `);
     if (!gesetzt) return "orbit.gif — der aktive Controller nimmt kein applyView entgegen";
     const png = await capture(cdp, box);
-    const { writeFileSync } = await import("node:fs");
     writeFileSync(join(frameDir, `frame-${String(i + 1).padStart(3, "0")}.png`), png);
   }
   const ergebnis = framesToGif(frameDir, join(outDir, "orbit.gif"), { fps: 14, width: 800 });
@@ -398,7 +449,11 @@ async function main(): Promise<void> {
       console.log(`  ${zeile}`);
     }
     console.log(
-      "\nJetzt Obsidian mit offenem Debug-Port starten und diesen Vault oeffnen:\n" +
+      "\n⚠️  Lief Obsidian waehrend dieses Setups, muss es JETZT neu starten. --setup hat\n" +
+      "   Notizen, Layout und Plugin-Einstellungen ersetzt; ein laufendes Obsidian haelt\n" +
+      "   den alten Stand im Speicher und schreibt ihn zurueck. Der naechste Aufnahme-Lauf\n" +
+      "   scheitert dann an jedem Bild mit \"Zustand kam nicht zustande\".\n" +
+      "\nObsidian mit offenem Debug-Port starten und diesen Vault oeffnen:\n" +
       "  osascript -e 'quit app \"Obsidian\"'\n" +
       "  open -a Obsidian --args --remote-debugging-port=9222\n" +
       "Beim ersten Mal fragt Obsidian, ob es dem Vault-Autor vertraut — bestaetigen,\n" +
@@ -412,8 +467,29 @@ async function main(): Promise<void> {
 
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-  const cdp = await Cdp.attach(port);
+  // attachTo statt Cdp.attach: es waehlt das Fenster mit dem Workspace, statt am Titel zu
+  // raten. Obsidian oeffnet je nach Lage weitere Fenster (Einstellungen mit about:blank,
+  // ein leeres „Obsidian"), und Cdp.attach bricht dann mit „Mehrere Fenster offen" ab —
+  // obwohl genau eines davon das gesuchte ist.
+  const cdp = await attachTo("workspace", port, REPO_NAME);
+  if (!cdp) {
+    throw new Error(
+      `Kein Obsidian-Fenster mit dem Vault "${REPO_NAME}" auf Port ${port}.\n` +
+      "Den Aufnahme-Vault oeffnen (er darf neben anderen Vaults offen sein):\n" +
+      `  open -a Obsidian "$STAGING_VAULTS_DIR/${REPO_NAME}"`,
+    );
+  }
   console.log(`Verbunden auf Port ${port}.\n`);
+  // Sofort nach vorn holen, nicht erst beim Auslösen. Chromium drosselt das Rendering
+  // nicht-fokussierter Fenster: steht ein anderes Obsidian-Fenster im Vordergrund,
+  // bleibt der Lesebereich hier LEER — kein Codeblock, kein Block, keine Fehlermeldung.
+  // Der Treiber meldet dann "Zustand kam nicht zustande" und zeigt damit auf alles
+  // ausser die Ursache. (Fallstrick 1 im Kopfkommentar — bisher nur in capture() behandelt.)
+  await cdp.send("Page.bringToFront");
+  // Grosszuegig warten: Obsidian baut Workspace und Plugins nach dem Fokuswechsel neu
+  // auf. Zu frueh gemessen liefert eine leere Leseflaeche — und der erste Shot scheitert,
+  // waehrend spaetere gelingen. Ein Fehlerbild, das wie Zufall aussieht.
+  await new Promise((r) => setTimeout(r, 4000));
 
   // viewMode auf "on-click": der Block startet als Standbild, und ERST der Klick darauf
   // meldet sich als Nutzerinteraktion (`onInteract` -> `active.set`). Mit "immediate"
@@ -426,6 +502,9 @@ async function main(): Promise<void> {
   await setWindowSize(cdp, FENSTER_BREITE, FENSTER_HOEHE);
   // Zur Laufzeit, nicht ueber die Fixture-Datei: ein laufendes Obsidian liest sie nicht neu.
   await setAppConfig(cdp, "readableLineLength", false);
+  // Inline-Titel aus: Obsidian zeigt sonst den Dateinamen als Ueberschrift UND die Notiz
+  // ihre eigene H1 direkt darunter — im Bild steht derselbe Titel zweimal.
+  await setAppConfig(cdp, "showInlineTitle", false);
   // Gestapelte Tabs abschalten: in diesem Modus zeigt Obsidian ALLE Tabs gleichzeitig
   // als schmale vertikale Streifen. Am 2026-08-15 stand der 3D-Block dadurch in einer
   // 110 px breiten Spalte — die Aufnahme gelang technisch und war als Bild wertlos.

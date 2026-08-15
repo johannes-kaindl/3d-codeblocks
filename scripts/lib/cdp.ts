@@ -201,6 +201,7 @@ export async function openNote(
 export async function attachTo(
   art: "workspace" | "settings",
   port: number,
+  vault?: string,
 ): Promise<Cdp | null> {
   const response = await fetch(`http://127.0.0.1:${port}/json/list`);
   const targets = (await response.json()) as CdpTarget[];
@@ -209,10 +210,18 @@ export async function attachTo(
   );
   for (const ziel of pages) {
     const kandidat = await Cdp.connect(ziel.webSocketDebuggerUrl as string);
-    const hatWorkspace = await kandidat.evaluate<boolean>(
-      "return !!(window.app && app.workspace && document.querySelector('.workspace'));",
+    const name = await kandidat.evaluate<string>(
+      "return (window.app && app.workspace && document.querySelector('.workspace'))"
+      + " ? (app.vault.getName() || '?') : '';",
     );
-    if ((art === "workspace") === Boolean(hatWorkspace)) return kandidat;
+    const hatWorkspace = Boolean(name);
+    const passt = (art === "workspace") === hatWorkspace
+      // Der Vault-Name entscheidet, nicht die Reihenfolge: mehrere Vaults gleichzeitig
+      // offen zu haben ist der Normalfall, und ein Lauf gegen den falschen Vault sieht
+      // aus wie ein kaputtes Plugin ("keine Bloecke gefunden"). Am 2026-08-15 lief der
+      // Treiber so gegen den Arbeits-Vault des Maintainers.
+      && (art === "settings" || !vault || name === vault);
+    if (passt) return kandidat;
     kandidat.close();
   }
   return null;
@@ -226,12 +235,33 @@ export async function openExisting(
   return Boolean(await cdp.evaluate<boolean>(`
     const file = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
     if (!file) return false;
-    const leaf =
-      app.workspace.getMostRecentLeaf(app.workspace.rootSplit) ?? app.workspace.getLeaf(true);
+    // Das zuletzt benutzte Blatt kann ABGETRENNT sein — closeExtraLeaves raeumt mit
+    // detachLeavesOfType alle Markdown-Blaetter ab, und getMostRecentLeaf liefert danach
+    // weiterhin eine Referenz auf eines davon. openFile() darauf laeuft ohne Fehler und
+    // rendert ins Nichts: die Datei gilt als aktiv, der Lesebereich bleibt leer, und der
+    // Aufrufer sucht den Fehler beim Plugin. Ein abgetrenntes Blatt hat kein parent.
+    // (Kein Backtick in diesem Kommentar — er steht in einem Template-Literal.)
+    // Lebendes Blatt wiederverwenden, sonst ein neues. Ein abgetrenntes Blatt nimmt
+    // openFile() klaglos entgegen und rendert ins Nichts; ein frisches bei JEDEM Bild
+    // zu erzwingen destabilisiert den Workspace. Der Test auf parent trennt beides.
+    let leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+    if (!leaf || !leaf.parent) leaf = app.workspace.getLeaf(true);
     await leaf.openFile(file, { state: { mode: ${JSON.stringify(mode)} } });
     app.workspace.setActiveLeaf(leaf, { focus: true });
-    await new Promise((r) => setTimeout(r, 300));
-    return true;
+
+    // Auf GERENDERTEN Inhalt warten, nicht auf "Datei ist aktiv". Zwischen beidem liegt
+    // Obsidians asynchrones Rendern, und in dieser Luecke meldet jede Messung ein leeres
+    // Dokument: kein Codeblock, kein Block, keine Fehlermeldung. Am 2026-08-15 war das
+    // die zaehste der Fallen — der Zustand schwankte zwischen Laeufen, weil er von der
+    // Laufzeit des vorherigen Bildes abhing.
+    const frist = 15000;
+    const start = performance.now();
+    while (performance.now() - start < frist) {
+      const flaeche = document.querySelector(".markdown-reading-view, .cm-content");
+      if (flaeche && (flaeche.textContent ?? "").trim().length > 0) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
   `));
 }
 
@@ -283,8 +313,17 @@ export async function closeExtraLeaves(cdp: Cdp): Promise<number> {
     // detachLeavesOfType raeumt ALLE Blaetter eines Typs ab, auch die in fremden
     // Tab-Gruppen und Splits. iterateRootLeaves sah davon nur eines und meldete
     // "aufgeraeumt", waehrend sieben Gruppen nebeneinander standen.
-    app.workspace.detachLeavesOfType("markdown");
-    await new Promise((r) => setTimeout(r, 300));
+    //
+    // ABER nur wenn noetig: den Workspace bei jedem Bild leerzureissen bringt Obsidian
+    // in einen Zustand, in dem das naechste geoeffnete Blatt nicht mehr rendert — die
+    // Datei gilt als aktiv, die Leseflaeche bleibt leer. Ein einzelnes Blatt ist bereits
+    // der Zielzustand und wird deshalb in Ruhe gelassen.
+    const vorher = [];
+    app.workspace.iterateRootLeaves((l) => vorher.push(l));
+    if (vorher.length > 1) {
+      app.workspace.detachLeavesOfType("markdown");
+      await new Promise((r) => setTimeout(r, 400));
+    }
     const uebrig = [];
     app.workspace.iterateRootLeaves((l) => uebrig.push(l));
     return uebrig.length;

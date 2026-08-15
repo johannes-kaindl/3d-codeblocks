@@ -27,6 +27,25 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 | `unknown-key.png` | Der Pruefling **versteckt das Modell**, wenn ein Schluessel unbekannt ist — GUI-Smoke-Punkt B15 ist genau deswegen rot („meldet sich, versteckt aber das Modell nicht"). Das Bild, das dieser Vertrag beschreibt (Meldung UND Modell), kann es derzeit nicht geben. Erst klaeren, ob das Verhalten oder die Beschreibung falsch ist. |
 | `settings.png` | Die Einstellungen sind in Obsidian 1.13 ein **eigenes Fenster** mit URL `about:blank`. Der Treiber bringt mit `attachTo("settings", port)` schon den Weg dorthin mit, das Rezept nutzt ihn noch nicht. |
 
+### Offen: der Sammellauf ist nicht stabil
+
+`npm run shots` liefert je Lauf unterschiedlich viele Bilder — mal sieben, mal drei. Die
+Diagnosezeile des Treibers zeigt das Muster: die Notiz gilt als aktiv, `bloeckeGesamt` ist
+1, aber `leseflaeche` bleibt 0 — Obsidian rendert das gerade geöffnete Blatt nicht. Je
+mehr Bilder ein Lauf vorher aufgenommen hat, desto häufiger tritt es auf.
+
+Was bereits ausgeschlossen ist: es liegt **nicht** an Chromiums Drosselung
+(`Page.bringToFront` steht früh und vor jedem Bild), **nicht** an abgetrennten Blättern
+(`openExisting` prüft `parent`), **nicht** am Fehlen einer Wartezeit (es wird auf
+gerenderten Inhalt gewartet, nicht auf „Datei aktiv") und **nicht** am Aufräumen allein
+(auch die sanfte Variante zeigt es).
+
+**Bis das geklärt ist: nach jedem `--setup` Obsidian neu starten und die fehlenden Bilder
+einzeln mit `--only <name>` nachziehen.** Und vor dem Committen die Maße prüfen — ein
+misslungener Lauf hinterlässt kleinere, schlechtere Bilder an derselben Stelle, ohne dass
+etwas fehlschlägt. Der Bild-Standard fängt das: beim letzten missratenen Lauf meldete
+`shots:check` ein Hochformat-Hero, ein 5,4-MB-GIF und die gerissene Ordner-Summe.
+
 ## Konventionen
 
 Verbindlich ist der workspace-weite Bild-Standard in `_docs/readme/readme-spec.json`
