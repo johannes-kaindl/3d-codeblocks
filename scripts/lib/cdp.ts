@@ -306,24 +306,37 @@ export async function pollUntil<T>(
  *  eindeutig, sonst oeffnet die naechste Notiz womoeglich in der Sidebar. */
 export async function closeExtraLeaves(cdp: Cdp): Promise<number> {
   return Number(await cdp.evaluate<number>(`
-    // Obsidians eigenes Kommando zuerst: die Handarbeit ueber iterateRootLeaves +
-    // detach() liess bei Obsidian 1.13 vertikale Splits stehen — nach fuenf Aufnahmen
-    // standen fuenf Spalten a 200 px nebeneinander, und jedes Bild darin war zu schmal,
-    // ohne dass irgendetwas fehlschlug.
-    // detachLeavesOfType raeumt ALLE Blaetter eines Typs ab, auch die in fremden
-    // Tab-Gruppen und Splits. iterateRootLeaves sah davon nur eines und meldete
-    // "aufgeraeumt", waehrend sieben Gruppen nebeneinander standen.
+    // Alles ausser dem AKTIVEN Blatt schliessen — und zwar nach dem Oeffnen, nicht davor.
     //
-    // ABER nur wenn noetig: den Workspace bei jedem Bild leerzureissen bringt Obsidian
-    // in einen Zustand, in dem das naechste geoeffnete Blatt nicht mehr rendert — die
-    // Datei gilt als aktiv, die Leseflaeche bleibt leer. Ein einzelnes Blatt ist bereits
-    // der Zielzustand und wird deshalb in Ruhe gelassen.
-    const vorher = [];
-    app.workspace.iterateRootLeaves((l) => vorher.push(l));
-    if (vorher.length > 1) {
-      app.workspace.detachLeavesOfType("markdown");
-      await new Promise((r) => setTimeout(r, 400));
+    // Vorgeschichte, weil sie teuer war: iterateRootLeaves + detach() liess Splits
+    // stehen; detachLeavesOfType("markdown") meldete Erfolg und aenderte nichts;
+    // workspace:close-others griff nicht. Als das Abraeumen auf Container-Ebene endlich
+    // wirkte, raeumte es das Blatt mit weg, in dem die Datei gerade geoeffnet worden war:
+    // ein Tab in voller Breite, mit leerem Inhalt. Deshalb wird jetzt gezielt das aktive
+    // Blatt verschont.
+    //
+    // Sichtbar wurde diese ganze Kette erst auf Screenshots des GANZEN Fensters. An den
+    // Messwerten sah jede Stufe wie ein Renderer-Problem aus.
+    const aktiv = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+    const alle = [];
+    app.workspace.iterateRootLeaves((l) => alle.push(l));
+    for (const blatt of alle) {
+      if (blatt !== aktiv) blatt.detach();
     }
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Leere Tab-Gruppen bleiben als schmale Spalten stehen und schnueren das aktive
+    // Blatt ein. rootSplit.children sind diese Gruppen.
+    const root = app.workspace.rootSplit;
+    for (let runde = 0; runde < 12 && root.children.length > 1; runde++) {
+      const leer = root.children.find(
+        (g) => !Array.isArray(g.children) || g.children.length === 0,
+      );
+      if (!leer || typeof leer.detach !== "function") break;
+      leer.detach();
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    await new Promise((r) => setTimeout(r, 250));
     const uebrig = [];
     app.workspace.iterateRootLeaves((l) => uebrig.push(l));
     return uebrig.length;

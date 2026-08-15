@@ -27,24 +27,36 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 | `unknown-key.png` | Der Pruefling **versteckt das Modell**, wenn ein Schluessel unbekannt ist — GUI-Smoke-Punkt B15 ist genau deswegen rot („meldet sich, versteckt aber das Modell nicht"). Das Bild, das dieser Vertrag beschreibt (Meldung UND Modell), kann es derzeit nicht geben. Erst klaeren, ob das Verhalten oder die Beschreibung falsch ist. |
 | `settings.png` | Die Einstellungen sind in Obsidian 1.13 ein **eigenes Fenster** mit URL `about:blank`. Der Treiber bringt mit `attachTo("settings", port)` schon den Weg dorthin mit, das Rezept nutzt ihn noch nicht. |
 
-### Offen: der Sammellauf ist nicht stabil
+### Offen: der Workspace kippt nach zwei bis drei Bildern
 
-`npm run shots` liefert je Lauf unterschiedlich viele Bilder — mal sieben, mal drei. Die
-Diagnosezeile des Treibers zeigt das Muster: die Notiz gilt als aktiv, `bloeckeGesamt` ist
-1, aber `leseflaeche` bleibt 0 — Obsidian rendert das gerade geöffnete Blatt nicht. Je
-mehr Bilder ein Lauf vorher aufgenommen hat, desto häufiger tritt es auf.
+`npm run shots` liefert die ersten ein bis drei Bilder zuverlässig und danach keines mehr.
+Die Diagnosezeile zeigt immer dasselbe: die Notiz gilt als aktiv, `bloeckeGesamt` ist 1,
+aber `leseflaeche` bleibt 0 — Obsidian rendert das geöffnete Blatt nicht. Ein Neustart
+setzt zurück; die Reihenfolge der Bilder ändert nichts.
 
-Was bereits ausgeschlossen ist: es liegt **nicht** an Chromiums Drosselung
-(`Page.bringToFront` steht früh und vor jedem Bild), **nicht** an abgetrennten Blättern
-(`openExisting` prüft `parent`), **nicht** am Fehlen einer Wartezeit (es wird auf
-gerenderten Inhalt gewartet, nicht auf „Datei aktiv") und **nicht** am Aufräumen allein
-(auch die sanfte Variante zeigt es).
+**Sichtbar wurde die Ursachenkette erst auf Screenshots des GANZEN Fensters** — an den
+Messwerten sah jede Stufe wie ein Renderer-Problem aus. Wer hier weitermacht, sollte nach
+jedem Lauf ein Vollbild ansehen, nicht nur die Zahlen lesen. Was dabei zutage kam:
 
-**Bis das geklärt ist: nach jedem `--setup` Obsidian neu starten und die fehlenden Bilder
-einzeln mit `--only <name>` nachziehen.** Und vor dem Committen die Maße prüfen — ein
-misslungener Lauf hinterlässt kleinere, schlechtere Bilder an derselben Stelle, ohne dass
-etwas fehlschlägt. Der Bild-Standard fängt das: beim letzten missratenen Lauf meldete
-`shots:check` ein Hochformat-Hero, ein 5,4-MB-GIF und die gerissene Ordner-Summe.
+1. Der Workspace wuchs bei jedem Bild um eine Tab-Gruppe, bis jede Spalte 380 px breit war
+   und jedes Modell darin winzig. Drei Aufräum-Verfahren meldeten Erfolg und taten nichts
+   (`iterateRootLeaves` + `detach`, `detachLeavesOfType`, `workspace:close-others`); erst
+   das Abräumen auf **Container-Ebene** (`rootSplit.children`) wirkt.
+2. `livePreview: false` — für die Split-Bilder nötig — blieb danach gesetzt. Jedes
+   Folgebild zeigte Quelltext statt Modell. Jeder Shot stellt seine Voraussetzungen
+   inzwischen selbst her.
+3. Das Abräumen erwischte das Blatt, in dem die Datei gerade geöffnet worden war: ein Tab
+   in voller Breite mit leerem Inhalt. Deshalb wird jetzt erst geöffnet, dann aufgeräumt,
+   und das aktive Blatt bleibt verschont.
+
+Nach diesen drei Korrekturen gelingen die ersten Bilder verlässlich — der Rest noch nicht.
+Der verbleibende Auslöser ist nicht gefunden.
+
+**Bis dahin gilt: `--only <name>` nach frischem Obsidian-Start.** Und vor dem Committen die
+Maße prüfen: ein misslungener Lauf hinterlässt kleinere, schlechtere Bilder an derselben
+Stelle, ohne dass etwas fehlschlägt. Der Bild-Standard fängt genau das — beim missratenen
+Lauf am 2026-08-15 meldete `shots:check` ein Hochformat-Hero, ein 5,4-MB-GIF und die
+gerissene Ordner-Summe.
 
 ## Konventionen
 

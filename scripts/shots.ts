@@ -79,11 +79,20 @@ interface Shot {
  *  den ersten gezeichneten Frame. Ohne den zweiten fotografiert man ein leeres Canvas. */
 async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean> {
   await cdp.send("Page.bringToFront");
-  await closeExtraLeaves(cdp);
+  // Live Preview WIEDER AN. splitQuelleUndBild schaltet sie ab, damit links echter
+  // Quelltext steht — und liess sie bisher aus. Jedes Bild danach zeigte dann Quelltext
+  // statt Modell: kein gerenderter Block, keine Fehlermeldung, nur "leseflaeche: 0".
+  // Sichtbar war das nur im Vollbild des Fensters; an den Messwerten sah es aus wie ein
+  // Renderer-Problem. Jeder Shot stellt seine Voraussetzungen deshalb selbst her.
+  await setAppConfig(cdp, "livePreview", true);
+  // ERST oeffnen, DANN aufraeumen: so ist das aktive Blatt garantiert das mit der Datei,
+  // und das Abraeumen kann sich daran orientieren, statt zu raten, welches bleiben darf.
   if (!(await openExisting(cdp, notiz, "preview"))) {
     console.log(`      · ${notiz} liess sich nicht oeffnen (Datei im Vault?)`);
     return false;
   }
+  const uebrig = await closeExtraLeaves(cdp);
+  if (uebrig > 1) console.log(`      · ${uebrig} Blaetter offen — Aufraeumen unvollstaendig`);
 
   // SICHTBARE Bloecke, nicht alle: Obsidian haelt die Inhalte geschlossener Blaetter im
   // DOM. `querySelectorAll(".tdcb-block")[0]` traf dort ein 0x0-Element, und jeder
@@ -188,6 +197,14 @@ async function splitQuelleUndBild(cdp: Cdp, notiz: string): Promise<boolean> {
   `, 20_000, 300));
 }
 
+/** Nach einem Split-Bild aufraeumen: Blatt zu, Live Preview zurueck.
+ *  Ohne das bleibt eine Tab-Gruppe stehen, und die naechste kommt daneben — nach drei
+ *  Bildern ist jede Spalte 380 px breit und jedes Modell darin winzig. */
+async function splitAufloesen(cdp: Cdp): Promise<void> {
+  await closeExtraLeaves(cdp);
+  await setAppConfig(cdp, "livePreview", true);
+}
+
 /** Den Block aktiv machen und die Kamera einpassen.
  *
  * Beides ist noetig, bevor ein Bild etwas taugt: ohne Aktivierung liefert
@@ -211,6 +228,10 @@ async function blickwinkel(cdp: Cdp, azimut: number, elevation: number): Promise
   `));
 }
 
+/** Reihenfolge ist load-bearing: die beiden Split-Bilder (Quelltext + Rendering
+ *  nebeneinander) hinterlassen einen Workspace, den das Aufraeumen bei Obsidian 1.13
+ *  nicht vollstaendig zuruecksetzt. Stehen sie in der Mitte, scheitert alles danach.
+ *  Ganz am Ende beschaedigen sie nur noch sich selbst. */
 const SHOTS: Shot[] = [
   {
     name: "hero.png",
@@ -219,15 +240,6 @@ const SHOTS: Shot[] = [
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
       await blickwinkel(cdp, 320, 46);
       return boxOf(cdp, ".tdcb-block", PADDING);
-    },
-  },
-  {
-    name: "code-and-render.png",
-    klasse: "feature",
-    async run(cdp) {
-      if (!(await splitQuelleUndBild(cdp, "Ground-floor.md"))) return null;
-      await blickwinkel(cdp, 320, 46);
-      return boxOf(cdp, ".workspace-split.mod-root", 0);
     },
   },
   {
@@ -269,14 +281,6 @@ const SHOTS: Shot[] = [
       `, 10_000, 300);
       if (!gefuellt) return null;
       return boxAround(cdp, [".tdcb-block", ".tdcb-panel"], PADDING);
-    },
-  },
-  {
-    name: "saved-view.png",
-    klasse: "feature",
-    async run(cdp) {
-      if (!(await splitQuelleUndBild(cdp, "Saved-view.md"))) return null;
-      return boxOf(cdp, ".workspace-split.mod-root", 0);
     },
   },
   {
@@ -356,6 +360,24 @@ const SHOTS: Shot[] = [
         return true;
       `);
       return boxOf(cdp, ".vertical-tab-content", 0);
+    },
+  },
+  {
+    name: "code-and-render.png",
+    klasse: "feature",
+    async run(cdp) {
+      if (!(await splitQuelleUndBild(cdp, "Ground-floor.md"))) return null;
+      await blickwinkel(cdp, 320, 46);
+      const box = await boxOf(cdp, ".workspace-split.mod-root", 0);
+      return box;
+    },
+  },
+  {
+    name: "saved-view.png",
+    klasse: "feature",
+    async run(cdp) {
+      if (!(await splitQuelleUndBild(cdp, "Saved-view.md"))) return null;
+      return boxOf(cdp, ".workspace-split.mod-root", 0);
     },
   },
 ];
@@ -523,6 +545,9 @@ async function main(): Promise<void> {
     try {
       const box = await shot.run(cdp);
       const png = box ? await capture(cdp, box) : null;
+      // Nach JEDEM Bild aufraeumen, nicht nur nach den Split-Bildern: welcher Zustand
+      // zurueckbleibt, darf das naechste Bild nicht bestimmen.
+      await splitAufloesen(cdp);
       if (!png) {
         console.log(`  ✗ ${shot.name} — Zustand kam nicht zustande`);
         fehlend++;
