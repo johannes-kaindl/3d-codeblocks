@@ -33,8 +33,16 @@ export interface Rect {
 
 /** Bounding-Box des ersten Treffers, in CSS-Pixeln, optional mit Rand. */
 export async function boxOf(cdp: Cdp, selector: string, padding = 0): Promise<Rect | null> {
+  // Erster SICHTBARER Treffer, nicht erster Treffer. Obsidian haelt die Inhalte
+  // inaktiver Tabs im DOM; `querySelector` liefert dort ein Element mit 0x0-Box, und der
+  // Screenshot davon ist ein 1-KB-Bild ohne erkennbaren Inhalt. Am 2026-08-15 sah das
+  // aus wie ein Renderer-Problem und war eine Selektor-Frage.
   const raw = await cdp.evaluate<string | null>(`
-    const el = document.querySelector(${JSON.stringify(selector)});
+    const treffer = [...document.querySelectorAll(${JSON.stringify(selector)})];
+    const el = treffer.find((e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 1 && r.height > 1;
+    });
     if (!el) return null;
     const r = el.getBoundingClientRect();
     return JSON.stringify({ x: r.x, y: r.y, width: r.width, height: r.height });
@@ -84,6 +92,26 @@ export async function capture(cdp: Cdp, clip?: Rect): Promise<Buffer> {
   const data = (res.result as { data?: string } | undefined)?.data;
   if (!data) throw new Error("Page.captureScreenshot lieferte kein Bild");
   return Buffer.from(data, "base64");
+}
+
+/** Fenstergroesse fest einstellen — ueber Electrons eigenes Fenster, nicht ueber
+ *  `Emulation.setDeviceMetricsOverride`.
+ *
+ *  Die Emulation ist fuer eine Desktop-App der falsche Hebel: sie gibt der Seite einen
+ *  virtuellen Viewport und rendert ihn ins echte, kleinere Fenster — der Screenshot wird
+ *  dadurch gestaucht statt groesser. Gemessen am 2026-08-15: ein hero.png von 1 KB, in
+ *  dem das Modell briefmarkengross war. `Browser.setWindowBounds` kennt Electron nicht;
+ *  `electron.remote.getCurrentWindow()` dagegen schon.
+ *
+ *  Feste Groesse statt „so gross wie moeglich": zwei Laeufe auf verschiedenen Displays
+ *  sollen dieselben Bilder ergeben. */
+export async function setWindowSize(cdp: Cdp, width: number, height: number): Promise<boolean> {
+  return Boolean(await cdp.evaluate<boolean>(`
+    const win = window.require("electron").remote.getCurrentWindow();
+    win.setSize(${width}, ${height});
+    await new Promise((r) => setTimeout(r, 600));
+    return true;
+  `));
 }
 
 /** Fenstermasse simulieren, `fn` ausfuehren, Simulation sicher wieder aufheben. */

@@ -46,3 +46,21 @@ describe("Fixture-Modelle fuer die README-Aufnahmen", () => {
     expect(hatGeometrie).toBe(true);
   });
 });
+
+describe("STL-Normalen", () => {
+  it("traegt echte Flaechennormalen — Nullnormalen lassen das Modell unbeleuchtet", async () => {
+    const scene = await load(octahedronStl(), "stl");
+    let normalen: Float32Array | null = null;
+    scene.traverse((child) => {
+      const geo = (child as { geometry?: { attributes?: { normal?: { array: Float32Array } } } }).geometry;
+      if (geo?.attributes?.normal) normalen = geo.attributes.normal.array;
+    });
+    expect(normalen).not.toBeNull();
+    const laengen = [];
+    for (let i = 0; i < (normalen as unknown as Float32Array).length; i += 3) {
+      const a = normalen as unknown as Float32Array;
+      laengen.push(Math.hypot(a[i], a[i + 1], a[i + 2]));
+    }
+    expect(Math.min(...laengen)).toBeGreaterThan(0.9);
+  });
+});

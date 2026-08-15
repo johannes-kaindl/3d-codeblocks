@@ -38,7 +38,8 @@ import { argv, cwd, env, exit } from "node:process";
 import {
   Cdp,
   closeExtraLeaves,
-  openNote,
+  openExisting,
+  setAppConfig,
   pollUntil,
   setPluginSetting,
 } from "./lib/cdp.js";
@@ -47,7 +48,7 @@ import {
   boxOf,
   capture,
   framesToGif,
-  withMetrics,
+  setWindowSize,
   writeShot,
   type Rect,
 } from "./lib/shot.js";
@@ -59,6 +60,8 @@ const OUT_DIR = "docs/images";
 const CAPTURE_WIDTH = 1200;
 const THUMB_WIDTH = 380;
 const PADDING = 20;
+const FENSTER_BREITE = 1440;
+const FENSTER_HOEHE = 900;
 
 // --- Rezept ------------------------------------------------------------------
 
@@ -75,20 +78,30 @@ interface Shot {
  *  den ersten gezeichneten Frame. Ohne den zweiten fotografiert man ein leeres Canvas. */
 async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean> {
   await closeExtraLeaves(cdp);
-  await openNote(cdp, notiz, "", "preview");
+  if (!(await openExisting(cdp, notiz, "preview"))) return false;
+
+  // SICHTBARE Bloecke, nicht alle: Obsidian haelt die Inhalte geschlossener Blaetter im
+  // DOM. `querySelectorAll(".tdcb-block")[0]` traf dort ein 0x0-Element, und jeder
+  // Wartelauf lief in seinen Timeout — die Meldung lautete dann "Zustand kam nicht
+  // zustande", obwohl der echte Block daneben fertig gerendert stand.
+  const sichtbar = `[...document.querySelectorAll(".tdcb-block")]
+      .filter((e) => e.getBoundingClientRect().width > 1)`;
+
   const da = await pollUntil<boolean>(cdp, `
-    return document.querySelectorAll(".tdcb-block").length > ${index};
+    return ${sichtbar}.length > ${index};
   `, 15_000, 300);
   if (!da) return false;
+
   // Standbild wecken, falls die Einstellung Bloecke passiv starten laesst
   await cdp.evaluate(`
-    const block = document.querySelectorAll(".tdcb-block")[${index}];
+    const block = ${sichtbar}[${index}];
     const play = block?.querySelector(".tdcb-play");
     if (play) play.click();
     return true;
   `);
+
   const gezeichnet = await pollUntil<boolean>(cdp, `
-    const block = document.querySelectorAll(".tdcb-block")[${index}];
+    const block = ${sichtbar}[${index}];
     const canvas = block?.querySelector("canvas");
     return !!(canvas && canvas.width > 0 && canvas.height > 0);
   `, 20_000, 300);
@@ -111,7 +124,7 @@ async function hover(cdp: Cdp, box: Rect): Promise<void> {
  *  Bilder, deren Aussage „so schreibt man es, so sieht es aus" lautet. */
 async function splitQuelleUndBild(cdp: Cdp, notiz: string): Promise<boolean> {
   await closeExtraLeaves(cdp);
-  await openNote(cdp, notiz, "", "source");
+  if (!(await openExisting(cdp, notiz, "source"))) return false;
   const ok = await cdp.evaluate<boolean>(`
     const file = app.vault.getAbstractFileByPath(${JSON.stringify(notiz)});
     const leaf = app.workspace.getLeaf("split", "vertical");
@@ -121,9 +134,40 @@ async function splitQuelleUndBild(cdp: Cdp, notiz: string): Promise<boolean> {
   `);
   if (!ok) return false;
   return Boolean(await pollUntil<boolean>(cdp, `
-    const canvas = document.querySelector(".tdcb-block canvas");
+    const canvas = [...document.querySelectorAll(".tdcb-block canvas")]
+      .find((e) => e.getBoundingClientRect().width > 1);
     return !!(canvas && canvas.width > 0);
   `, 20_000, 300));
+}
+
+/** Den Block aktiv machen und die Kamera einpassen.
+ *
+ * Beides ist noetig, bevor ein Bild etwas taugt: ohne Aktivierung liefert
+ * `active.get()` keinen Controller (dann greift kein `applyView`), und ohne Einpassen
+ * steht das Modell als Briefmarke in einem grossen Viewport — technisch korrekt und als
+ * Bild wertlos.
+ */
+async function blickwinkel(cdp: Cdp, azimut: number, elevation: number): Promise<boolean> {
+  const aktiv = await cdp.evaluate<boolean>(`
+    const block = [...document.querySelectorAll(".tdcb-block")]
+      .find((e) => e.getBoundingClientRect().width > 1);
+    const ziel = block?.querySelector("canvas") ?? block;
+    ziel?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    ziel?.click();
+    await new Promise((r) => setTimeout(r, 400));
+    return !!app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+  `);
+  if (!aktiv) return false;
+  return Boolean(await cdp.evaluate<boolean>(`
+    const c = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    c.applyView(null);                       // erst einpassen — liefert die Distanz
+    await new Promise((r) => setTimeout(r, 300));
+    const auto = c.getView();
+    if (!auto) return false;
+    c.applyView({ azimuth: ${azimut}, elevation: ${elevation}, distance: auto.distance });
+    await new Promise((r) => setTimeout(r, 400));
+    return true;
+  `));
 }
 
 const SHOTS: Shot[] = [
@@ -132,6 +176,7 @@ const SHOTS: Shot[] = [
     klasse: "hero",
     async run(cdp) {
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
+      await blickwinkel(cdp, 315, 34);
       return boxOf(cdp, ".tdcb-block", PADDING);
     },
   },
@@ -334,6 +379,20 @@ async function main(): Promise<void> {
   // Bloecke sollen sofort interaktiv sein — ein Bild vom Standbild zeigt ein Poster,
   // nicht das Plugin.
   await setPluginSetting(cdp, PLUGIN_ID, "blockStart", "interactive");
+  // Feste Fenstergroesse — sonst haengt jedes Bild am Display, auf dem es entstand.
+  await setWindowSize(cdp, FENSTER_BREITE, FENSTER_HOEHE);
+  // Zur Laufzeit, nicht ueber die Fixture-Datei: ein laufendes Obsidian liest sie nicht neu.
+  await setAppConfig(cdp, "readableLineLength", false);
+  // Gestapelte Tabs abschalten: in diesem Modus zeigt Obsidian ALLE Tabs gleichzeitig
+  // als schmale vertikale Streifen. Am 2026-08-15 stand der 3D-Block dadurch in einer
+  // 110 px breiten Spalte — die Aufnahme gelang technisch und war als Bild wertlos.
+  await cdp.evaluate(`
+    if (document.querySelector(".workspace-tabs.mod-stacked")) {
+      app.commands.executeCommandById("workspace:toggle-stacked-tabs");
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return true;
+  `);
 
   let ok = 0;
   let fehlend = 0;
@@ -341,13 +400,12 @@ async function main(): Promise<void> {
     if (nur && shot.name !== nur) continue;
     try {
       const box = await shot.run(cdp);
-      if (!box) {
+      const png = box ? await capture(cdp, box) : null;
+      if (!png) {
         console.log(`  ✗ ${shot.name} — Zustand kam nicht zustande`);
         fehlend++;
         continue;
       }
-      const png = await withMetrics(cdp, 1440, Math.max(900, Math.ceil(box.height) + 120),
-        () => capture(cdp, box));
       console.log(`  ✓ ${await writeShot(cdp, shot.name, png, {
         outDir,
         captureWidth: CAPTURE_WIDTH,

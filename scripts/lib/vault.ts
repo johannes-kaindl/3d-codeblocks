@@ -71,6 +71,16 @@ export function buildVault(spec: VaultSpec): string[] {
   }
   log.push(`Vault-Konfiguration gesetzt (nur ${pluginId} aktiv, helles Theme)`);
 
+  // Layout zuruecksetzen. Obsidian merkt sich Splits und Tab-Gruppen in workspace.json,
+  // und ein Aufnahme-Lauf hinterlaesst dort seine Spuren: am 2026-08-15 standen nach
+  // mehreren Laeufen sieben Tab-Gruppen nebeneinander, jedes Blatt 174 px breit. Die
+  // Bilder entstanden weiterhin fehlerfrei — nur zeigten sie nichts mehr.
+  const layout = join(obsidianDir, "workspace.json");
+  if (existsSync(layout)) {
+    rmSync(layout);
+    log.push("Layout zurueckgesetzt (workspace.json entfernt)");
+  }
+
   const pluginDir = join(obsidianDir, "plugins", pluginId);
   mkdirSync(pluginDir, { recursive: true });
   for (const quelle of built) {

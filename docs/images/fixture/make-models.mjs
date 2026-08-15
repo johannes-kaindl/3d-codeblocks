@@ -141,9 +141,20 @@ export function octahedronStl() {
     [0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 1],
     [5, 2, 1], [5, 3, 2], [5, 4, 3], [5, 1, 4],
   ];
+  /** Echte Flaechennormale aus dem Kreuzprodukt. `facet normal 0 0 0` waere syntaktisch
+   *  gueltig, laesst das Modell im Viewer aber unbeleuchtet — es laedt und ist trotzdem
+   *  nicht zu sehen. Genau das ist am 2026-08-15 im GUI-Smoke aufgefallen, nachdem ein
+   *  Unit-Test, der nur die Positionen prueft, es fuer in Ordnung erklaert hatte. */
+  const normale = (a, b, c) => {
+    const u = [v[b][0] - v[a][0], v[b][1] - v[a][1], v[b][2] - v[a][2]];
+    const w = [v[c][0] - v[a][0], v[c][1] - v[a][1], v[c][2] - v[a][2]];
+    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const len = Math.hypot(...n) || 1;
+    return n.map((x) => (x / len).toFixed(6));
+  };
   const out = ["solid demo"];
   for (const [a, b, c] of faces) {
-    out.push(" facet normal 0 0 0", "  outer loop");
+    out.push(` facet normal ${normale(a, b, c).join(" ")}`, "  outer loop");
     for (const i of [a, b, c]) out.push(`   vertex ${v[i].join(" ")}`);
     out.push("  endloop", " endfacet");
   }
