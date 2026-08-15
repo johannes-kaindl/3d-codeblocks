@@ -52,6 +52,7 @@ import {
   setWindowSize,
   writeShot,
   type Rect,
+  type ShotOptions,
 } from "./lib/shot.js";
 import { buildVault, stagingVaultDir } from "./lib/vault.js";
 
@@ -246,22 +247,56 @@ const SHOTS: Shot[] = [
     name: "hover-toolbar.png",
     klasse: "feature",
     async run(cdp) {
+      // "Controls placement" auf toolbar erzwingen. Der Default "auto" heisst laut
+      // README: Sidebar wenn offen, sonst Hover-Leiste. Ist die Sidebar offen — und das
+      // ist sie nach dem sidebar-controls-Bild —, existiert .tdcb-toolbar GAR NICHT im
+      // DOM. Der Treiber suchte also etwas, das es per Einstellung nicht geben konnte,
+      // und meldete "Zustand kam nicht zustande". Kein Fehler, dokumentiertes Verhalten.
+      await setPluginSetting(cdp, PLUGIN_ID, "panelPlacement", "toolbar");
+      // Neuaufbau ueber einen UMWEG, nicht ueber detachLeavesOfType.
+      //
+      // Das ist der Kern des tagelangen Problems: `detachLeavesOfType("markdown")` raeumt
+      // zwar alles ab, aber das danach geoeffnete Blatt RENDERT NICHT MEHR — die Datei
+      // gilt als aktiv, das Blatt existiert, die Leseflaeche enthaelt null Zeichen. Genau
+      // dieser Aufruf steckte in closeExtraLeaves und war die Ursache dafuer, dass jeder
+      // Lauf nach zwei bis drei Bildern nur noch leere Blaetter lieferte.
+      //
+      // Der Umweg ueber eine andere Notiz erzwingt denselben Neuaufbau, ohne den
+      // Workspace leerzureissen.
+      await openExisting(cdp, "Four-ways.md", "preview");
+      await new Promise((r) => setTimeout(r, 600));
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
       if (!(await controllerBereit(cdp))) return null;
       await blickwinkel(cdp, 320, 46);
-      // Kein Hover noetig: beim aktiven Block steht die Leiste ohnehin. Der Versuch
-      // ueber Input.dispatchMouseEvent traf sie nicht — und ein Bild vom Hover-Zustand
-      // waere ohnehin nicht reproduzierbar, weil der Zeiger im Screenshot fehlt.
+      // Hover-Zustand herstellen. Die Leiste steht im DOM, aber mit opacity 0; ein
+      // synthetisches Input.dispatchMouseEvent loest CSS-:hover in Electron nicht aus
+      // (gemessen: opacity bleibt 0). Sie direkt sichtbar zu schalten ist keine
+      // Faelschung — es ist genau der Zustand, den der Nutzer beim Ueberfahren sieht,
+      // und ein Standbild kann den Mauszeiger ohnehin nicht zeigen.
+      const sichtbar = await cdp.evaluate<boolean>(`
+        const t = [...document.querySelectorAll(".tdcb-toolbar")]
+          .find((e) => e.getBoundingClientRect().width > 1);
+        if (!t) return false;
+        t.style.opacity = "1";
+        await new Promise((r) => setTimeout(r, 200));
+        return true;
+      `);
+      if (!sichtbar) {
+        console.log("      · keine .tdcb-toolbar im DOM — panelPlacement pruefen");
+        return null;
+      }
       const box = await boxOf(cdp, ".tdcb-toolbar", 8);
       if (!box) return null;
       const block = await boxOf(cdp, ".tdcb-block");
       if (!block) return box;
-      // Leiste plus das obere Drittel des Modells — sonst schwebt sie kontextlos.
+      // Volle Blockbreite, obere Haelfte: die Leiste sitzt rechts oben, das Modell
+      // darunter. Ein enger Ausschnitt um die Leiste allein zeigt sie kontextlos, und
+      // der ganze Block waere dasselbe Bild wie hero.png.
       return {
-        x: Math.max(0, box.x - 260),
+        x: block.x,
         y: block.y,
-        width: box.width + 268,
-        height: Math.min(block.height, box.height + 220),
+        width: block.width,
+        height: Math.round(block.height * 0.58),
       };
     },
   },
@@ -290,7 +325,6 @@ const SHOTS: Shot[] = [
       // NICHT ueber blockBereit: bei unbekanntem Schluessel rendert der Pruefling kein
       // Modell (GUI-Smoke B15 ist genau deshalb rot). Auf ein Canvas zu warten hiesse,
       // auf etwas zu warten, das per Design nicht kommt.
-      await closeExtraLeaves(cdp);
       if (!(await openExisting(cdp, "Unknown-key.md", "preview"))) return null;
       await cdp.evaluate(`
         const play = [...document.querySelectorAll(".tdcb-play")]
@@ -298,12 +332,17 @@ const SHOTS: Shot[] = [
         if (play) play.click();
         return true;
       `);
+      // Auf den TEXT im Block warten, nicht auf .tdcb-message-slot: gemessen sind die
+      // Slot-Elemente leer, die Meldung steht an anderer Stelle im Block.
       const meldung = await pollUntil<boolean>(cdp, `
-        const slot = [...document.querySelectorAll(".tdcb-message-slot")]
-          .find((e) => e.textContent.trim());
-        return !!slot;
+        const b = [...document.querySelectorAll(".tdcb-block")]
+          .find((e) => e.getBoundingClientRect().width > 1);
+        return !!(b && b.textContent.includes("Unknown key"));
       `, 15_000, 400);
-      if (!meldung) return null;
+      if (!meldung) {
+        console.log("      · keine Unknown-key-Meldung im Block");
+        return null;
+      }
       return boxOf(cdp, ".tdcb-block", PADDING);
     },
   },
@@ -347,19 +386,6 @@ const SHOTS: Shot[] = [
       `, 8_000, 300);
       if (!da) return null;
       return boxOf(cdp, ".tdcb-block", PADDING);
-    },
-  },
-  {
-    name: "settings.png",
-    klasse: "detail",
-    async run(cdp) {
-      await cdp.evaluate(`
-        app.setting.open();
-        app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
-        await new Promise((r) => setTimeout(r, 700));
-        return true;
-      `);
-      return boxOf(cdp, ".vertical-tab-content", 0);
     },
   },
   {
@@ -442,6 +468,41 @@ async function orbitGif(cdp: Cdp, outDir: string): Promise<string> {
 
 // --- Lauf ---------------------------------------------------------------------
 
+/** Der Einstellungen-Tab lebt in einem EIGENEN Fenster.
+ *
+ *  Obsidian 1.13 oeffnet es mit der URL `about:blank`; ein Target-Filter auf
+ *  `app://obsidian.md` findet es nicht, und `Cdp.attach` bricht mit "Mehrere Fenster
+ *  offen" ab. `attachTo("settings", port)` waehlt es ueber die Sache: es ist das Fenster
+ *  OHNE Workspace. Das Fenster schliesst sich ausserdem, sobald ein anderes den Fokus
+ *  bekommt — deshalb passiert hier alles in einem Zug.
+ */
+async function settingsBild(cdp: Cdp, port: number, opts: ShotOptions): Promise<string> {
+  // Auslieferungszustand herstellen: das hover-toolbar-Rezept setzt panelPlacement auf
+  // "toolbar". Das Einstellungsbild zeigte sonst einen Wert, den der Treiber selbst
+  // gesetzt hat — eine Doku-Aufnahme, die den eigenen Eingriff dokumentiert.
+  await setPluginSetting(cdp, PLUGIN_ID, "panelPlacement", "auto");
+  await cdp.evaluate(`
+    app.setting.open();
+    app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
+    await new Promise((r) => setTimeout(r, 900));
+    return true;
+  `);
+  const fenster = await attachTo("settings", port);
+  if (!fenster) return "settings.png — kein Einstellungen-Fenster gefunden";
+  try {
+    await fenster.send("Page.bringToFront");
+    await new Promise((r) => setTimeout(r, 600));
+    const box = await boxOf(fenster, ".vertical-tab-content", 0)
+      ?? await boxOf(fenster, ".modal-content", 0);
+    if (!box) return "settings.png — kein Inhaltsbereich im Einstellungen-Fenster";
+    const png = await capture(fenster, box);
+    return await writeShot(fenster, "settings.png", png, { ...opts, thumb: true });
+  } finally {
+    await fenster.evaluate("window.close(); return true;").catch(() => undefined);
+    fenster.close();
+  }
+}
+
 function flag(name: string): string | undefined {
   const i = argv.indexOf(name);
   return i === -1 ? undefined : argv[i + 1];
@@ -507,6 +568,10 @@ async function main(): Promise<void> {
   // bleibt der Lesebereich hier LEER — kein Codeblock, kein Block, keine Fehlermeldung.
   // Der Treiber meldet dann "Zustand kam nicht zustande" und zeigt damit auf alles
   // ausser die Ursache. (Fallstrick 1 im Kopfkommentar — bisher nur in capture() behandelt.)
+  // Konsole des Prueflings mitschneiden. Meldungen werden eingerueckt ausgegeben, damit
+  // sichtbar ist, WANN sie kamen — zwischen welchen beiden Bildern.
+  await cdp.mitschnitt((zeile) => console.log(`      » ${zeile}`));
+
   await cdp.send("Page.bringToFront");
   // Grosszuegig warten: Obsidian baut Workspace und Plugins nach dem Fokuswechsel neu
   // auf. Zu frueh gemessen liefert eine leere Leseflaeche — und der erste Shot scheitert,
@@ -564,6 +629,12 @@ async function main(): Promise<void> {
       console.log(`  ✗ ${shot.name} — ${(err as Error).message}`);
       fehlend++;
     }
+  }
+
+  if (!nur || nur === "settings.png") {
+    console.log(`  · ${await settingsBild(cdp, port, {
+      outDir, captureWidth: CAPTURE_WIDTH, thumbWidth: THUMB_WIDTH,
+    })}`);
   }
 
   if (!nur || nur === "orbit.gif") {

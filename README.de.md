@@ -128,6 +128,8 @@ Die Einstellung **Platzierung der Steuerung** entscheidet, wo die Schaltflächen
 auftauchen: in der Seitenleiste, wenn sie offen ist, sonst in der Hover-Leiste
 (Standard) — oder immer nur in einem von beiden.
 
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/hover-toolbar.png" width="820" alt="Die Werkzeugleiste ueber einem Modell: anheften, loesen, einpassen, bearbeiten">
+
 <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/sidebar-controls.png" width="820" alt="Die 3D-Sidebar neben einem Modell: Ansichts-Vorgaben, Save view, Clear view, Fit und Edit model">
 
 <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/saved-view.png" width="820" alt="Links der view:-Schluessel im Codeblock, rechts das entsprechend gedrehte Modell">
@@ -177,10 +179,16 @@ Auswahl und **Änderungen verwerfen** für die ganze Sitzung.
 Namen — ein Knoten, dessen Name mit einem der kommagetrennten Präfixe beginnt, lässt
 sich weder auswählen noch bearbeiten.
 
-<table><tr>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/edit-mode.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/edit-mode.png" width="380" alt="Edit-Modus mit ausgewaehltem Knoten, Gizmo und den Zahlenfeldern der Sidebar"></a><br><sub>Bearbeitungsmodus</sub></td>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unapplied-edits.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="Das Abzeichen Unapplied edits ueber einem Modell, neben dem eine Edit-Datei liegt"></a><br><sub>Nicht uebernommene Aenderungen</sub></td>
-</tr></table>
+<table>
+<tr>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/edit-mode.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/edit-mode.png" width="380" alt="Bearbeitungsmodus"></a><br><sub>Bearbeitungsmodus</sub></td>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unapplied-edits.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="Nicht uebernommene Aenderungen"></a><br><sub>Nicht uebernommene Aenderungen</sub></td>
+</tr>
+<tr>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unknown-key.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unknown-key.png" width="380" alt="Ein 3d-Block meldet einen unbekannten Schluessel unter dem Viewport, statt ihn zu ignorieren"></a><br><sub>Unbekannter Schluessel</sub></td>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/settings.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/settings.png" width="380" alt="Die Plugin-Einstellungen: Standardhoehe, Bodenraster, maximale aktive Ansichten, Platzierung der Bedienelemente, gesperrte Knoten-Praefixe"></a><br><sub>Einstellungen</sub></td>
+</tr>
+</table>
 
 #### Grenzen
 

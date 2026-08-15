@@ -117,6 +117,8 @@ no code block to save into.
 The **Controls placement** setting decides where the buttons show up: the sidebar when
 it is open, the hover toolbar otherwise (default), or always just one of the two.
 
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/hover-toolbar.png" width="820" alt="The hover toolbar over a model: pin, unpin, fit and edit">
+
 <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/sidebar-controls.png" width="820" alt="The 3D view sidebar next to a model: view presets, Save view, Clear view, Fit and Edit model">
 
 <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/saved-view.png" width="820" alt="The view: key in the code block on the left, the model turned to that angle on the right">
@@ -159,10 +161,16 @@ current selection and **Discard edits** for the whole session.
 **Locked node prefixes** (setting, default `env__`) protects nodes by name — a node whose
 name starts with one of the comma-separated prefixes cannot be selected or edited at all.
 
-<table><tr>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/edit-mode.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/edit-mode.png" width="380" alt="Edit mode with a selected node, gizmo and the sidebar transform fields"></a><br><sub>Edit mode</sub></td>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unapplied-edits.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="The Unapplied edits badge above a model whose edit file sits next to it"></a><br><sub>Unapplied edits</sub></td>
-</tr></table>
+<table>
+<tr>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/edit-mode.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/edit-mode.png" width="380" alt="Edit mode"></a><br><sub>Edit mode</sub></td>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unapplied-edits.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="Unapplied edits"></a><br><sub>Unapplied edits</sub></td>
+</tr>
+<tr>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unknown-key.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unknown-key.png" width="380" alt="A 3d block reporting an unknown key below the viewport instead of failing silently"></a><br><sub>Unknown key reported</sub></td>
+<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/settings.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/settings.png" width="380" alt="The plugin settings: default height, ground grid, maximum live views, controls placement, locked node prefixes"></a><br><sub>Settings</sub></td>
+</tr>
+</table>
 
 #### Limits
 

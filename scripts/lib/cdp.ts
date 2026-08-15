@@ -40,15 +40,69 @@ export class Cdp {
   private nextId = 1;
   private readonly pending = new Map<number, { ok: (v: CdpResponse) => void; fail: (e: Error) => void }>();
 
+  /** Ereignis-Empfaenger je CDP-Methode (z.B. "Runtime.exceptionThrown"). */
+  private readonly lauscher = new Map<string, ((params: unknown) => void)[]>();
+
   private constructor(private readonly socket: WebSocket) {
     socket.addEventListener("message", (event: MessageEvent) => {
-      const message = JSON.parse(String(event.data)) as CdpResponse;
-      if (message.id === undefined) return; // Event, kein Antwort-Frame
+      const message = JSON.parse(String(event.data)) as CdpResponse & {
+        method?: string;
+        params?: unknown;
+      };
+      if (message.id === undefined) {
+        // Ereignis, kein Antwort-Frame. Bis 2026-08-15 wurden diese Frames verworfen —
+        // damit war der Kanal, ueber den der Pruefling seine eigenen Fehler meldet, die
+        // ganze Zeit offen und ungelesen.
+        if (message.method) {
+          for (const fn of this.lauscher.get(message.method) ?? []) fn(message.params);
+        }
+        return;
+      }
       const waiter = this.pending.get(message.id);
       if (!waiter) return;
       this.pending.delete(message.id);
       if (message.error) waiter.fail(new Error(message.error.message ?? "CDP-Fehler"));
       else waiter.ok(message);
+    });
+  }
+
+  /** Auf ein CDP-Ereignis hoeren. Die zugehoerige Domain muss aktiviert sein. */
+  on(method: string, handler: (params: unknown) => void): void {
+    const bisher = this.lauscher.get(method) ?? [];
+    bisher.push(handler);
+    this.lauscher.set(method, bisher);
+  }
+
+  /**
+   * Konsole und Exceptions des Prueflings mitschneiden.
+   *
+   * Warum das fehlte und warum es zaehlt: waehrend der gesamten Fehlersuche am
+   * 2026-08-15 stand dieser Kanal offen und wurde nicht gelesen. Wirft Obsidian beim
+   * Oeffnen einer Notiz intern eine Exception, meldet der Treiber ohne diesen Mitschnitt
+   * nur "Leseflaeche leer" — und die Ursache steht ungelesen daneben.
+   */
+  async mitschnitt(auf: (zeile: string) => void): Promise<void> {
+    await this.send("Runtime.enable");
+    await this.send("Log.enable");
+    this.on("Runtime.exceptionThrown", (p) => {
+      const d = (p as { exceptionDetails?: { text?: string; exception?: { description?: string } } })
+        .exceptionDetails;
+      auf(`EXCEPTION ${d?.exception?.description ?? d?.text ?? "(ohne Text)"}`);
+    });
+    this.on("Log.entryAdded", (p) => {
+      const e = (p as { entry?: { level?: string; text?: string; source?: string } }).entry;
+      if (e?.level === "error" || e?.level === "warning") {
+        auf(`${e.level?.toUpperCase()} [${e.source}] ${e.text}`);
+      }
+    });
+    this.on("Runtime.consoleAPICalled", (p) => {
+      const e = p as { type?: string; args?: { value?: unknown; description?: string }[] };
+      if (e.type !== "error" && e.type !== "warning") return;
+      const text = (e.args ?? [])
+        .map((a) => String(a.description ?? a.value ?? ""))
+        .join(" ")
+        .slice(0, 300);
+      auf(`CONSOLE.${e.type} ${text}`);
     });
   }
 
