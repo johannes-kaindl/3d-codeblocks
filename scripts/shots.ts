@@ -4,7 +4,9 @@
  *
  * Warum getrackt: ein Werkzeug, das nur einmal im Scratchpad existiert, ist keine Praxis.
  * Dieselbe Begruendung wie bei `scripts/gui-smoke.ts`, mit dem sich dieser Treiber die
- * CDP-Bruecke teilt (`scripts/lib/cdp.ts`) — deshalb liegt sie dort und nicht hier.
+ * CDP-Bruecke teilt. Bruecke, Aufnahme-Primitive und Fixture→Vault liegen zentral im Dach
+ * (`obsidian-plugins/tools/obsidian-cdp/`, seit 2026-08-16 — vorher `scripts/lib/`, hier
+ * entstanden und dann in sechs Repos kopiert); dieser Treiber importiert sie von dort.
  *
  * ## Ablauf
  *
@@ -43,7 +45,7 @@ import {
   setAppConfig,
   pollUntil,
   setPluginSetting,
-} from "./lib/cdp.js";
+} from "../../tools/obsidian-cdp/cdp.js";
 import {
   boxAround,
   boxOf,
@@ -53,8 +55,8 @@ import {
   writeShot,
   type Rect,
   type ShotOptions,
-} from "./lib/shot.js";
-import { buildVault, stagingVaultDir } from "./lib/vault.js";
+} from "../../tools/obsidian-cdp/shot.js";
+import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
 
 const PLUGIN_ID = "three-d-codeblocks";
 const REPO_NAME = "3d-codeblocks";
@@ -527,6 +529,7 @@ async function main(): Promise<void> {
       repoRoot,
       vaultDir,
       fixtureDir: join(repoRoot, "docs/images/fixture"),
+      generator: "make-models.mjs",
       pluginId: PLUGIN_ID,
     })) {
       console.log(`  ${zeile}`);

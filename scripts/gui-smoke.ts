@@ -41,7 +41,7 @@ import {
   pollUntil,
   reopenNote,
   setPluginSetting,
-} from "./lib/cdp.js";
+} from "../../tools/obsidian-cdp/cdp.js";
 
 
 const PLUGIN_ID = "three-d-codeblocks";
