@@ -27,7 +27,7 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 - Theme-treues Standardmaterial für STL, das selbst keines mitbringt.
 - Keine dauerhafte Render-Schleife: gezeichnet wird nur, wenn sich etwas ändert.
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif" width="820" alt="Das Modell wird in der Notiz umkreist und gezoomt">
+<a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif" width="380" alt="Das Modell wird in der Notiz umkreist und gezoomt"></a><br><sub>Klick auf die Vorschau zeigt die Schleife in voller Groesse</sub>
 
 ## Voraussetzungen
 

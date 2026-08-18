@@ -24,7 +24,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 - Theme-aware default material for STL, which carries none of its own.
 - No continuous render loop: a frame is drawn only when something changes.
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif" width="820" alt="The model being orbited and zoomed inside the note">
+<a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif" width="380" alt="The model being orbited and zoomed inside the note"></a><br><sub>Click the preview for the full-size loop</sub>
 
 ## Requirements
 

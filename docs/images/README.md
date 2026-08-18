@@ -15,58 +15,38 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 
 ## Status
 
-**Stand 2026-08-15: sieben von zehn Aufnahmen stehen** (`hero`, `code-and-render`,
-`sidebar-controls`, `saved-view`, `edit-mode`, `unapplied-edits`, `orbit.gif`), erzeugt mit
-`npm run shots` gegen ein laufendes Obsidian 1.13.7.
+**Stand 2026-08-15: alle zehn Aufnahmen stehen** — `npm run shots:check` meldet „keine
+Befunde": jedes im Vertrag zugesagte Bild existiert, hält seine Klasse, sein Budget und
+seine Einbettungsform. Ordner-Summe 2,3 MB.
 
-**Drei sind offen** — `npm run shots:check` meldet sie, und genau dafuer gibt es ihn:
+Die drei zuletzt fehlenden (`hover-toolbar`, `unknown-key`, `settings`) waren **keine
+Fehler am Prüfling**, sondern Verhalten, das das Rezept nicht kannte: die Hover-Leiste
+existiert bei „Controls placement: auto" und offener Sidebar gar nicht im DOM · die
+Unbekannter-Schlüssel-Meldung steht nicht in `.tdcb-message-slot`, sondern im Blocktext ·
+der Einstellungen-Tab ist ein eigenes Fenster mit URL `about:blank`. Einzelheiten in
+`2ad4b88`.
 
-| Fehlt | Warum |
-|---|---|
-| `hover-toolbar.png` | Der Zuschnitt auf die Werkzeugleiste steht, das Rezept liefert ihn aber noch nicht stabil. Ein synthetisches `mouseMoved` erzeugt keinen Hover-Zustand; beim aktiven Block steht die Leiste ohnehin, der Ausschnitt braucht noch Feinschliff. |
-| `unknown-key.png` | Der Pruefling **versteckt das Modell**, wenn ein Schluessel unbekannt ist — GUI-Smoke-Punkt B15 ist genau deswegen rot („meldet sich, versteckt aber das Modell nicht"). Das Bild, das dieser Vertrag beschreibt (Meldung UND Modell), kann es derzeit nicht geben. Erst klaeren, ob das Verhalten oder die Beschreibung falsch ist. |
-| `settings.png` | Die Einstellungen sind in Obsidian 1.13 ein **eigenes Fenster** mit URL `about:blank`. Der Treiber bringt mit `attachTo("settings", port)` schon den Weg dorthin mit, das Rezept nutzt ihn noch nicht. |
+### Gelöst: „ab dem dritten Bild bleibt die Lesefläche leer"
 
-### Offen: ab dem dritten Bild bleibt die Leseflaeche leer
+Der Sammellauf lieferte zwei bis drei Bilder und danach nur noch leere Blätter — Notiz
+aktiv, Plugin geladen, Block im DOM, **Lesefläche null Zeichen**, nichts in der Konsole.
+Die Ursache ist gefunden (`2ad4b88`): **`detachLeavesOfType("markdown")` hinterlässt einen
+Workspace, in dem das nächste geöffnete Blatt nicht mehr rendert.** Der Aufruf steckte in
+`closeExtraLeaves`; der Neuaufbau läuft jetzt über einen Notizwechsel.
 
-`npm run shots` liefert die ersten ein bis zwei Bilder zuverlässig und danach keines mehr.
-Die Diagnosezeile zeigt jedes Mal denselben Zustand:
+Zwei Korrekturen aus derselben Suche, die vorher als Ursache durchgingen und es nicht
+waren: der Workspace wuchs bei jedem Bild um eine Tab-Gruppe (Abräumen wirkt nur auf
+**Container-Ebene**, `rootSplit.children` — drei andere Verfahren meldeten Erfolg und taten
+nichts), und `livePreview: false` blieb nach den Split-Bildern gesetzt, sodass jedes
+Folgebild Quelltext statt Modell zeigte (jeder Shot stellt seine Voraussetzungen jetzt
+selbst her).
 
-```
-· kein sichtbarer Block — {"vault":"3d-codeblocks","datei":"Ground-floor.md",
-   "bloeckeGesamt":1,"roheCodebloecke":0,"leseflaeche":0,"pluginAn":true}
-```
+**Sichtbar wurde die Kette erst auf Screenshots des GANZEN Fensters** — an den Messwerten
+sah jede Stufe wie ein Renderer-Problem aus. Wer hier weitermacht: nach jedem Lauf ein
+Vollbild ansehen, nicht nur die Zahlen lesen.
 
-Obsidian meldet also die richtige Notiz im richtigen Vault als geöffnet, das Plugin ist
-geladen, ein Block-Element existiert im DOM — aber die **Lesefläche enthält null Zeichen**,
-weder gerenderten Text noch einen rohen Codeblock. Das Blatt ist da und leer. Ein Neustart
-setzt zurück; die Reihenfolge der Bilder ändert nichts.
-
-**Warum das Rendern ausbleibt, ist unbekannt.** Nicht ausgeschlossen, sondern schlicht
-ungemessen ist eine Sache: ob Obsidian in diesem Moment intern eine Exception wirft. Der
-Treiber liest die Konsole des Prüflings nicht aus. Der nächste Schritt ist deshalb keine
-weitere Reparatur, sondern eine Messung — `Runtime.consoleAPICalled` und `Log.entryAdded`
-über CDP mitschneiden und einen Lauf fahren.
-
-**Sichtbar wurde die Ursachenkette erst auf Screenshots des GANZEN Fensters** — an den
-Messwerten sah jede Stufe wie ein Renderer-Problem aus. Wer hier weitermacht, sollte nach
-jedem Lauf ein Vollbild ansehen, nicht nur die Zahlen lesen. Was dabei zutage kam:
-
-1. Der Workspace wuchs bei jedem Bild um eine Tab-Gruppe, bis jede Spalte 380 px breit war
-   und jedes Modell darin winzig. Drei Aufräum-Verfahren meldeten Erfolg und taten nichts
-   (`iterateRootLeaves` + `detach`, `detachLeavesOfType`, `workspace:close-others`); erst
-   das Abräumen auf **Container-Ebene** (`rootSplit.children`) wirkt.
-2. `livePreview: false` — für die Split-Bilder nötig — blieb danach gesetzt. Jedes
-   Folgebild zeigte Quelltext statt Modell. Jeder Shot stellt seine Voraussetzungen
-   inzwischen selbst her.
-3. Das Abräumen erwischte das Blatt, in dem die Datei gerade geöffnet worden war: ein Tab
-   in voller Breite mit leerem Inhalt. Deshalb wird jetzt erst geöffnet, dann aufgeräumt,
-   und das aktive Blatt bleibt verschont.
-
-Nach diesen drei Korrekturen gelingen die ersten Bilder verlässlich — der Rest noch nicht.
-Der verbleibende Auslöser ist nicht gefunden.
-
-**Bis dahin gilt: `--only <name>` nach frischem Obsidian-Start.** Und vor dem Committen die
+**Trotzdem gilt weiter: `--only <name>` nach frischem Obsidian-Start.** Jeder Lauf
+hinterlässt Zustand; der Sammellauf ist nicht als stabil belegt. Und vor dem Committen die
 Maße prüfen: ein misslungener Lauf hinterlässt kleinere, schlechtere Bilder an derselben
 Stelle, ohne dass etwas fehlschlägt. Der Bild-Standard fängt genau das — beim missratenen
 Lauf am 2026-08-15 meldete `shots:check` ein Hochformat-Hero, ein 5,4-MB-GIF und die
@@ -105,10 +85,10 @@ Verbindlich ist der workspace-weite Bild-Standard in `_docs/readme/readme-spec.j
 | `hover-toolbar.png` | feature | `README.md` (Saving a camera angle) | Die Werkzeugleiste, die beim Überfahren des Modells erscheint, mit **Fit**, **Save view**, **Clear view** und dem Stift **Edit model**. Eng auf das Modell und die Leiste beschnitten. |
 | `sidebar-controls.png` | feature | `README.md` (Saving a camera angle) | Die Sidebar (Kommando **Open 3D view controls**) neben einem aktiven Modell: Kamerawerte und dieselben Aktionen als Schaltflächen. Kein leerer Zustand — **„Click a 3D model to control it here."** darf *nicht* zu sehen sein. |
 | `saved-view.png` | feature | `README.md` (Saving a camera angle) | Notiz **Saved view**: die Zeile `view: 225,28,14` im Block **und** das entsprechend gedrehte Modell im selben Bild — die Aussage ist, dass der Blickwinkel in der Notiz steht. |
-| `orbit.gif` | feature | `README.md` (Features) | Eine Umkreisung des Modells samt Zoom, 6–8 s, ~800 px. Das eine Feature, das als Standbild nicht erzählbar ist. |
+| `orbit.gif` | detail (aufgenommen als feature) | `README.md` (Features) | Eine Umkreisung des Modells samt Zoom, 6–8 s, ~800 px. Das eine Feature, das als Standbild nicht erzählbar ist. ⚠️ **Eingebettet als klickbare 380-px-Vorschau, nicht in voller Breite** (2026-08-18): `framesToGif` skaliert die Frames auf eine feste Zielbreite (800) und rechnet die Retina-Dichte dabei heraus — `image-scale` unterstellt jeder Datei unter `capture_width` aber eine dpr-2-Aufnahme und lässt deshalb nur 400 Anzeigebreite zu. Wer das GIF wieder breit einbetten will, muss es in 1200 px erzeugen (GIF-Budget 2048 KB prüfen, aktuell 1131 KB bei 800 px), nicht die Einbettung hochsetzen. |
 | `edit-mode.png` | detail | `README.md` (Edit mode) | Edit-Modus aktiv: ein ausgewählter Knoten mit Gizmo, die Sidebar mit **Move**/**Scale**, den Zahlenfeldern für Translation und Skalierung, **Reset node** und **Save edits**/**Discard edits**. Der Knotenname (z. B. `Stairs`) muss lesbar sein. |
 | `unapplied-edits.png` | detail | `README.md` (Edit mode) | Das Abzeichen **Unapplied edits** über dem Viewport, mit dem Modell dahinter — der Zustand „neben der Datei liegt eine `.edit.gltf`". Nutzt die Notiz **Edited** und ein **eigenes** Modell (`edited-floor.gltf`): läge die `.edit.gltf` neben dem gemeinsam genutzten Modell, trüge *jedes* Bild dieses Abzeichen. |
-| `unknown-key.png` | detail | `README.md` (Block keys) | Notiz **Unknown key**: die Meldung unter dem Viewport, die `heigth:` als unbekannten Schlüssel benennt, mit dem gerenderten Modell darüber. Zeigt, dass ein Tippfehler nicht wie ein Plugin-Fehler aussieht. |
+| `unknown-key.png` | detail | `README.md` (Block keys) | Notiz **Unknown key**: die Meldung unter dem Viewport, die `heigth:` als unbekannten Schlüssel benennt, mit dem gerenderten Modell darüber. Zeigt, dass ein Tippfehler nicht wie ein Plugin-Fehler aussieht. ⚠️ **Das Bild widerlegt eine bis 2026-08-18 geführte Annahme:** der Prüfling versteckt das Modell bei unbekanntem Schlüssel *nicht* — Meldung und Modell stehen beide da. GUI-Smoke B15 prüft genau diese Kombination (`hint` enthält `heigth` und `canvas > 0`) und ist trotzdem rot; er misst allerdings in einer Notiz mit **drei** Fehlerblöcken. Der Verdacht liegt damit beim Messpunkt, nicht am Plugin — offen, braucht einen Smoke-Lauf. |
 | `settings.png` | detail | `README.md` (Configuration) | Der Einstellungen-Tab: **Default height**, **Show ground grid**, **Maximum live 3D views**, **Controls placement**, **Locked node prefixes**, **Auto-rotate**. |
 
 ## Reproduktion
