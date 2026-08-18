@@ -49,6 +49,26 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > stillgelegt → nur B7 rot; Verdrängung im Kontext-Budget stillgelegt → B11 und B12 rot,
 > B10 zu Recht grün. Der Abschnitt misst also, was er behauptet.
 
+> [!check] Durchlauf 2026-08-19 — **16/16 grün** (Obsidian 1.13.7, outpost-worldbuilding)
+> Zweimal in Folge, gegen `weltmodell/3d/ug2.gltf`. **Damit ist ein drei Tage alter Irrtum
+> erledigt:** B13/B14/B15 wurden seit dem 2026-08-15 als rot geführt, B15 sogar mit einer
+> Begründung am Prüfling („bei unbekanntem Schlüssel versteckt das Plugin das Modell").
+> Alle drei sind grün, und `docs/images/unknown-key.png` zeigt genau den Zustand, den B15
+> verlangt — Meldung *und* Modell. Am Plugin hat sich seit dem 15.08. nichts geändert; die
+> Rot-Meldung stammte also aus einem Lauf, dessen Umstände nicht festgehalten wurden.
+>
+> **Gegenprobe (2026-08-19):** die drei Fehlermeldungen stillgelegt (`missing-file` und
+> `unsupported-format` auf `SILENT`, das `warnings.push` für den unbekannten Schlüssel
+> entfernt) → **genau B13, B14, B15 rot**, die anderen dreizehn grün. Deploy-Exitcode 0
+> geprüft, bevor der Lauf startete.
+>
+> **Und ein Mangel im Treiber, den nur die Gegenprobe zeigte:** im selben Lauf fiel **B6**
+> mit um, obwohl die Mutation nichts mit Layout zu tun hat — `CSS 698→362px · Puffer
+> 1396→1396px`. Der Punkt wartete auf die **CSS-Breite**, behauptet aber etwas über den
+> **Renderer-Puffer**, den der `ResizeObserver` erst im Frame danach schreibt. Er wartet
+> jetzt auf beide Größen. Ein sporadisch roter Prüfpunkt ist teurer als ein fehlender:
+> man sucht den Defekt im Plugin.
+
 - [ ] **1. Grundfall** — Block mit gültiger GLB rendert; Orbit (linke Maustaste), Zoom
       (Rad) und Pan (rechte Maustaste) funktionieren.
 - [ ] **2. Kamera zurücksetzen** — Doppelklick setzt die Ansicht zurück.

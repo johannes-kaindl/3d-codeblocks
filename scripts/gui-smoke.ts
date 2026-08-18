@@ -1298,8 +1298,19 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_BASIS)});
     const split = app.workspace.getLeaf("split");
     await split.openFile(file, { state: { mode: "preview" } });
+    // Gewartet wird auf BEIDE Groessen, nicht nur auf die CSS-Breite: der
+    // ResizeObserver schreibt den Renderer-Puffer erst im Frame nach dem
+    // Layout-Wechsel. Wer nur auf clientWidth wartet und sofort danach canvas.width
+    // liest, erwischt den Puffer manchmal noch alt und macht den Punkt sporadisch
+    // rot, obwohl das Plugin richtig arbeitet. Gemessen am 2026-08-19 in der
+    // Gegenprobe zu B13-B15: CSS 698 auf 362px, Puffer 1396 auf 1396px — im selben
+    // Lauf, in dem der eingebaute Defekt gar nichts mit Layout zu tun hatte.
+    // Bleibt der Puffer wirklich stehen, laeuft das Warten in seine Frist und der
+    // Punkt wird rot — nur eben langsam statt falsch.
     await (async () => {
-      ${waitFor("return canvas.clientWidth < beforeCss ? 1 : 0;")}
+      ${waitFor(
+        "return (canvas.clientWidth < beforeCss && canvas.width < beforeBuffer) ? 1 : 0;",
+      )}
     })();
     const afterCss = canvas.clientWidth;
     const afterBuffer = canvas.width;
