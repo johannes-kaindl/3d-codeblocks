@@ -5,6 +5,10 @@ set -e
 KIT="${KIT_DIR:-../obsidian-kit}"
 [ -d "$KIT/src/pure" ] || { echo "Kit nicht gefunden unter $KIT (KIT_DIR setzen)" >&2; exit 1; }
 VER=$(node -p "require('$KIT/package.json').version")
+# Der Pin-SHA ist bewusst der Kit-HEAD, NICHT der Tag-SHA von $VER (0.27.0: fbb42d4 statt
+# 548041b). So erzeugen es alle Form-A-Skripte im Workspace, und tools/pin_find.py des Dachs
+# loest den Tag inhaltsbasiert auf, ist also nicht auf den SHA angewiesen. Wer hier auf den
+# Tag umstellt, weicht von acht Schwester-Repos ab — dann bitte dort mit.
 SHA=$(git -C "$KIT" rev-parse --short HEAD)
 
 stamp() { # stamp <vendored-file> <kit-relative-path>

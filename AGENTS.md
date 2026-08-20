@@ -32,6 +32,11 @@ npm run release    # Release via ../tools/release/ (braucht das Dach-Verzeichnis
 
 - Conventional Commits, deutsche Beschreibung erlaubt. Nur berührte Dateien stagen.
 - Pure-Core-Trennung: `src/core/` bleibt Obsidian-frei (`npm run check:pure` erzwingt das); Tests mit vitest.
+- **`src/vendor/` ist ein Verbatim-Snapshot aus `obsidian-kit`** — nie von Hand editieren, sondern
+  `sh tools/sync-kit.sh` fahren (kopiert aus `../obsidian-kit`, setzt die Stempelzeile, schreibt beide
+  `VENDOR.json`; idempotent). Der Zielordner ist Vertrag, nicht Geschmack: `kit/` ← Kit-`src/pure/`,
+  `kit-obsidian/` ← Kit-`src/obsidian/`. Bricht ein Kit-Modul hier, gehört der Fix ins Kit und danach
+  ein erneutes Vendoring — nicht eine Änderung an der Kopie.
 
 ## Memory
 
