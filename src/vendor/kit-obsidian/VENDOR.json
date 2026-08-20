@@ -1,6 +1,7 @@
 {
   "source": "obsidian-kit",
-  "version": "0.25.0",
-  "sha": "1ca38610b0fb457ea868739d2d835fb373174784",
-  "vendored": "2026-08-06"
+  "version": "0.27.0",
+  "sha": "fbb42d4",
+  "vendored": "folder-suggest.ts, settings_walker.ts",
+  "note": "Verbatim snapshot. Never hand-edit. Re-vendor via tools/sync-kit.sh. version/sha gelten AUSSCHLIESSLICH fuer die unter \"vendored\" gelisteten Dateien. kit/ siehe dortige VENDOR.json."
 }

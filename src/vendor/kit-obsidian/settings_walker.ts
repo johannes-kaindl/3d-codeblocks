@@ -1,4 +1,4 @@
-// vendored from obsidian-kit, src/obsidian/settings_walker.ts @0.25.0 — nicht von Hand editieren.
+// vendored from obsidian-kit@0.27.0, src/obsidian/settings_walker.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // obsidian-kit/src/obsidian/settings_walker.ts
 //
 // Der gemeinsame Fallback-Walker fuer zweigleisige deklarative Settings-Tabs
