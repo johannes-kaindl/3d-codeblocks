@@ -17,7 +17,7 @@ import {
   type App,
   type SettingDefinitionItem,
 } from "obsidian";
-import { MAX_CONTEXTS_LIMIT, mergeSettings, type PluginSettings } from "../core/settings-types";
+import { MAX_CONTEXTS_LIMIT, validateSettings, type PluginSettings } from "../core/settings-types";
 import type ThreeDCodeblocksPlugin from "../main";
 import { renderSettingDefinitions } from "../vendor/kit-obsidian/settings_walker";
 
@@ -67,7 +67,7 @@ export class SettingsTab extends PluginSettingTab {
         desc:
           "How many inline models stay interactive at once. Older ones become still images. " +
           "0 turns the limit off (the browser then caps it itself).",
-        // Obergrenze aus derselben Konstante, gegen die `mergeSettings` klemmt.
+        // Obergrenze aus derselben Konstante, gegen die `validateSettings` klemmt.
         control: { type: "slider", key: "maxContexts", min: 0, max: MAX_CONTEXTS_LIMIT, step: 1 },
       },
       {
@@ -96,9 +96,9 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   async setControlValue(key: string, value: unknown): Promise<void> {
-    // Immer durch mergeSettings: das ist die einzige Stelle, die Muellwerte
+    // Immer durch validateSettings: das ist die einzige Stelle, die Muellwerte
     // abfaengt. Der deklarative Host validiert nur den Typ, nicht unsere Grenzen.
-    this.plugin.settings = mergeSettings({ ...this.plugin.settings, [key]: value });
+    this.plugin.settings = validateSettings({ ...this.plugin.settings, [key]: value });
     await this.plugin.saveSettings();
 
     if (key === "panelPlacement") {

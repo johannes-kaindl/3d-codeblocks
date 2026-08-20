@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, mergeSettings, parseLockedPrefixes } from "../../src/core/settings-types";
+import { DEFAULT_SETTINGS, validateSettings, parseLockedPrefixes } from "../../src/core/settings-types";
 
-describe("mergeSettings", () => {
+describe("validateSettings", () => {
   it("returns the defaults for null or undefined", () => {
-    expect(mergeSettings(null)).toEqual(DEFAULT_SETTINGS);
-    expect(mergeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
+    expect(validateSettings(null)).toEqual(DEFAULT_SETTINGS);
+    expect(validateSettings(undefined)).toEqual(DEFAULT_SETTINGS);
   });
 
   it("has sensible defaults", () => {
@@ -20,54 +20,54 @@ describe("mergeSettings", () => {
   });
 
   it("keeps stored values", () => {
-    expect(mergeSettings({ defaultHeight: 250 }).defaultHeight).toBe(250);
+    expect(validateSettings({ defaultHeight: 250 }).defaultHeight).toBe(250);
   });
 
   it("drops an unknown view mode", () => {
-    expect(mergeSettings({ viewMode: "sideways" }).viewMode).toBe("immediate");
+    expect(validateSettings({ viewMode: "sideways" }).viewMode).toBe("immediate");
   });
 
   it("drops a non-positive height", () => {
-    expect(mergeSettings({ defaultHeight: 0 }).defaultHeight).toBe(400);
-    expect(mergeSettings({ defaultHeight: "tall" }).defaultHeight).toBe(400);
+    expect(validateSettings({ defaultHeight: 0 }).defaultHeight).toBe(400);
+    expect(validateSettings({ defaultHeight: "tall" }).defaultHeight).toBe(400);
   });
 
   it("allows 0 (off) and clamps the top to 12", () => {
-    expect(mergeSettings({ maxContexts: 0 }).maxContexts).toBe(0);
-    expect(mergeSettings({ maxContexts: 13 }).maxContexts).toBe(12);
-    expect(mergeSettings({ maxContexts: 999 }).maxContexts).toBe(12);
+    expect(validateSettings({ maxContexts: 0 }).maxContexts).toBe(0);
+    expect(validateSettings({ maxContexts: 13 }).maxContexts).toBe(12);
+    expect(validateSettings({ maxContexts: 999 }).maxContexts).toBe(12);
   });
 
   it("rejects a negative maxContexts back to the default", () => {
-    expect(mergeSettings({ maxContexts: -3 }).maxContexts).toBe(6);
+    expect(validateSettings({ maxContexts: -3 }).maxContexts).toBe(6);
   });
 
   it("ignores unknown keys", () => {
-    expect(mergeSettings({ nope: true })).toEqual(DEFAULT_SETTINGS);
+    expect(validateSettings({ nope: true })).toEqual(DEFAULT_SETTINGS);
   });
 });
 
 describe("panelPlacement", () => {
   it("defaults to auto", () => {
-    expect(mergeSettings({}).panelPlacement).toBe("auto");
+    expect(validateSettings({}).panelPlacement).toBe("auto");
   });
 
   it("keeps a valid value", () => {
-    expect(mergeSettings({ panelPlacement: "toolbar" }).panelPlacement).toBe("toolbar");
+    expect(validateSettings({ panelPlacement: "toolbar" }).panelPlacement).toBe("toolbar");
   });
 
   it("falls back to the default for garbage", () => {
-    expect(mergeSettings({ panelPlacement: "somewhere" }).panelPlacement).toBe("auto");
-    expect(mergeSettings({ panelPlacement: 7 }).panelPlacement).toBe("auto");
+    expect(validateSettings({ panelPlacement: "somewhere" }).panelPlacement).toBe("auto");
+    expect(validateSettings({ panelPlacement: 7 }).panelPlacement).toBe("auto");
   });
 });
 
 describe("lockedNodePrefixes", () => {
   it("Default env__, fremde Typen fallen auf den Default", () => {
-    expect(mergeSettings({}).lockedNodePrefixes).toBe("env__");
-    expect(mergeSettings({ lockedNodePrefixes: 42 }).lockedNodePrefixes).toBe("env__");
-    expect(mergeSettings({ lockedNodePrefixes: "sky__, env__" }).lockedNodePrefixes).toBe("sky__, env__");
-    expect(mergeSettings({ lockedNodePrefixes: "" }).lockedNodePrefixes).toBe("");
+    expect(validateSettings({}).lockedNodePrefixes).toBe("env__");
+    expect(validateSettings({ lockedNodePrefixes: 42 }).lockedNodePrefixes).toBe("env__");
+    expect(validateSettings({ lockedNodePrefixes: "sky__, env__" }).lockedNodePrefixes).toBe("sky__, env__");
+    expect(validateSettings({ lockedNodePrefixes: "" }).lockedNodePrefixes).toBe("");
   });
 });
 

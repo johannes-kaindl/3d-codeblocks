@@ -5,7 +5,7 @@ import {
   type MarkdownPostProcessorContext,
   type WorkspaceLeaf,
 } from "obsidian";
-import { DEFAULT_SETTINGS, mergeSettings, type PluginSettings } from "./core/settings-types";
+import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
 import { confirmDiscardEdits } from "./obsidian/confirm";
@@ -38,7 +38,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   readonly active = new ActiveViewport();
 
   async onload(): Promise<void> {
-    this.settings = mergeSettings(await this.loadData());
+    this.settings = validateSettings(await this.loadData());
     this.addSettingTab(new SettingsTab(this.app, this));
 
     // `active` gehoert seit Task 12 mit dazu — Embed und FileView brauchen es, um sich

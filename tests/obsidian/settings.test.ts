@@ -63,7 +63,7 @@ describe("SettingsTab.getSettingDefinitions", () => {
     }
   });
 
-  it("bindet den Slider an dieselbe Obergrenze, die mergeSettings klemmt", () => {
+  it("bindet den Slider an dieselbe Obergrenze, die validateSettings klemmt", () => {
     const { tab } = makeTab();
     const slider = controls(tab.getSettingDefinitions()).find(
       (d) => d.control.key === "maxContexts",
@@ -81,7 +81,7 @@ describe("SettingsTab.getControlValue / setControlValue", () => {
     expect(tab.getControlValue("maxContexts")).toBe(3);
   });
 
-  it("speichert eine Aenderung ueber mergeSettings", async () => {
+  it("speichert eine Aenderung ueber validateSettings", async () => {
     const { tab, plugin } = makeTab();
     await tab.setControlValue("autoRotate", true);
 
@@ -89,9 +89,9 @@ describe("SettingsTab.getControlValue / setControlValue", () => {
     expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
   });
 
-  // mergeSettings ist die einzige Stelle, die Muellwerte abfaengt — der deklarative
+  // validateSettings ist die einzige Stelle, die Muellwerte abfaengt — der deklarative
   // Pfad darf sie nicht umgehen, sonst landet NaN in data.json.
-  it("laesst mergeSettings ungueltige Eingaben abfangen", async () => {
+  it("laesst validateSettings ungueltige Eingaben abfangen", async () => {
     const { tab, plugin } = makeTab();
     await tab.setControlValue("defaultHeight", Number.NaN);
 
@@ -168,7 +168,7 @@ describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
   });
 
   // Der Zahlen-Fallback ist ein Textfeld: ohne Coercion landet der String "500"
-  // in den Settings, mergeSettings verwirft ihn stumm auf den Default.
+  // in den Settings, validateSettings verwirft ihn stumm auf den Default.
   it("wandelt die Texteingabe eines Zahlen-Controls in eine Zahl", async () => {
     const { tab, plugin } = makeTab();
     tab.display();
