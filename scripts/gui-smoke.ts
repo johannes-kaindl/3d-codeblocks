@@ -25,7 +25,14 @@
  * ```bash
  * npm run smoke:gui
  * npm run smoke:gui -- --port 9222 --model weltmodell/3d/eg.gltf --keep
+ * npm run smoke:gui -- --section basis --vault outpost-worldbuilding
  * ```
+ *
+ * ⚠️ Zwei Handgriffe, die beim Start regelmaessig Zeit kosten:
+ * - `quit` und `open` NICHT in einer Kette absetzen — das Beenden ist noch nicht durch, `open`
+ *   trifft die sterbende Instanz, und danach laeuft gar kein Obsidian. Zweiter `open`-Aufruf greift.
+ * - Bei mehreren offenen Fenstern verlangt der Treiber `--vault <name>` und bricht sonst ab
+ *   (mit Ansage — er raet das Fenster nicht).
  *
  * ⚠️ Chromium drosselt das Rendering nicht-fokussierter Fenster: ohne `Page.bringToFront`
  * bleibt die View leer und man debuggt ein Phantom (CORE-TEST-02).
