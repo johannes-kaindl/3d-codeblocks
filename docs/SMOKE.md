@@ -49,6 +49,29 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > stillgelegt → nur B7 rot; Verdrängung im Kontext-Budget stillgelegt → B11 und B12 rot,
 > B10 zu Recht grün. Der Abschnitt misst also, was er behauptet.
 
+> [!check] Durchlauf 2026-08-22 — **16/16 grün** nach dem Kit-0.27.0-Vendoring (Obsidian 1.13.7, outpost-worldbuilding)
+> Gegen `weltmodell/3d/turm.gltf`, auf dem gemergten Stand `dbdddb0` — dem ersten, in dem
+> `src/core/settings-types.ts` seine Feldprüfung nicht mehr selbst mitbringt, sondern
+> `validateSettings` aus `src/vendor/kit/settings_schema.ts` benutzt. Der Abschnitt ist damit
+> auch gegen die Naht zum Host bestätigt, nicht nur unter vitest.
+>
+> **Was hier belegt werden musste, weil es der teuerste Irrtum dieser Merge-Runde war:** dass
+> überhaupt der neue Code gemessen wurde. `npm run deploy` ist **kein** Reload — Obsidian lädt
+> die kopierte `main.js` erst beim Aktivieren des Plugins, und die Manifest-Version verrät den
+> Unterschied nicht (in `local-image-generator` meldete der erste Lauf am 2026-08-21 deshalb
+> 15/16 gegen den alten Code). Hier ist die Falle *strukturell* ausgeschlossen statt gehofft:
+> deployt um 19:47:19, Obsidian-Prozess **danach** gestartet (19:48:28) — die App war beim
+> Schreiben beendet, kann also nichts Älteres im Speicher haben —, und die Datei im Vault ist
+> byte-identisch mit dem Repo-Build. Dazu der Deploy-Exitcode 0 (Lesson 2026-08-14: ein
+> abgebrochener Deploy hinterlässt den alten `main.js` und der Lauf meldet trotzdem grün).
+>
+> **Zwei Voraussetzungen, die der Treiber selbst erzwingt und die diesmal beide griffen:** Der
+> Debug-Port existiert nur, wenn Obsidian damit *gestartet* wurde — ein `open -a Obsidian --args`
+> direkt nach `osascript -e 'quit app "Obsidian"'` läuft ins Leere, weil das Beenden noch nicht
+> durch ist und `open` die sterbende Instanz trifft; der zweite Anlauf greift. Und bei mehreren
+> offenen Fenstern bricht der Treiber mit Ansage ab und verlangt `--vault <name>`, statt still
+> das falsche Fenster zu messen.
+
 > [!check] Durchlauf 2026-08-19 — **16/16 grün** (Obsidian 1.13.7, outpost-worldbuilding)
 > Zweimal in Folge, gegen `weltmodell/3d/ug2.gltf`. **Damit ist ein drei Tage alter Irrtum
 > erledigt:** B13/B14/B15 wurden seit dem 2026-08-15 als rot geführt, B15 sogar mit einer
