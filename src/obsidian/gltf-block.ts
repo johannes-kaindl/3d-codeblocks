@@ -64,6 +64,10 @@ export class GltfBlock extends MarkdownRenderChild {
     this.host?.refreshColors();
   }
 
+  refreshLighting(): void {
+    this.host?.refreshLighting();
+  }
+
   /** Ein gltf-Block hat keinen Datei-Bezug — Regenerierung betrifft ihn nicht. */
   onFileModified(): void {}
 

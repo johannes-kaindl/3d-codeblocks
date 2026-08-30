@@ -38,6 +38,7 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > | 10. STL | B16 — eine echte `.stl` aus dem Vault hat Vorrang; gibt es keine, legt der Lauf seine eigene an (gemessen wird der **Deckungsgrad**, nicht die Farbzahl: ein einfacher Körper säße sonst genau auf der Schwelle) |
 > | Zusätzlich: Kontext-Budget | B11 (`Maximum live 3D views` = 2 → nur zwei live) |
 > | Zusätzlich: Poster-Qualität | B12 (das Standbild zeigt das Modell, keine leere Fläche) |
+> | Zusätzlich: Beleuchtung | B17 — die drei `lighting`-Zustände erzeugen drei verschiedene Bildhashes (Gegenprobe 2026-08-30: totgelegtes `applyLighting()` → drei identische) |
 > | Zusätzlich: Popout | nicht automatisiert — ein Popout ist ein eigenes CDP-Target |
 >
 > **Eine dritte Voraussetzung stellt der Treiber selbst her** (neben Fensterfokus und
@@ -91,6 +92,42 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > **Renderer-Puffer**, den der `ResizeObserver` erst im Frame danach schreibt. Er wartet
 > jetzt auf beide Größen. Ein sporadisch roter Prüfpunkt ist teurer als ein fehlender:
 > man sucht den Defekt im Plugin.
+
+> [!warning] Durchlauf 2026-08-30 — **12/17** (Obsidian 1.13.7, Staging-Vault `3d-codeblocks`)
+> Anlass war die Beleuchtungs-Arbeit (Roadmap S2). Drei Dinge sind dabei angefallen, und
+> nur eines davon ist ein Ergebnis am Plugin.
+>
+> **1. B17 ist neu und grün — aber nicht aus diesem Lauf.** Im Treiber-Durchlauf meldete er
+> „kein Bild"; belastbar wurde er erst **isoliert** gemessen: `off`/`faithful`/`contrast`
+> liefern drei verschiedene Bildhashes (`#3745294529` · `#2406501078` · `#78492787`).
+> **Gegenprobe:** `applyLighting()` mit einem `return;` totgelegt → **alle drei Hashes
+> identisch**, und zwar exakt der `off`-Wert. Der Punkt misst also seinen Gegenstand.
+>
+> **2. B13–B16 sind rot, und die Ursache ist offen.** Was belegt ist: sie kommen **nicht**
+> von der Beleuchtungs-Arbeit. Der Nachweis war eine **Baseline** — derselbe Treiber gegen
+> den `main`-Stand, also ohne die Änderung. Ergebnis Zeichen für Zeichen identisch: 12/17,
+> dieselben fünf rot. Ohne diese Baseline wäre die Suche im neuen Code gelandet.
+> ⚠️ Am 2026-08-19 waren dieselben Punkte im outpost-Vault **grün**, inklusive Gegenprobe.
+> Die Variable ist also die Umgebung, nicht der Code — wie schon beim Irrtum vom 15.08.
+>
+> **3. Ein Irrtum, der hierher gehört, weil er sich sonst wiederholt.** Zwischenzeitlich
+> stand hier die Erklärung, ein früherer Abschnitt setze `viewMode` auf `on-click` und
+> nehme ihn nicht zurück. **Falsch:** `sectionBasics` setzt ihn in Zeile ~1156 auf
+> `immediate`. Gesehen wurde der Zustand **nach** dem Lauf — der Treiber stellt im `finally`
+> den Vault-Zustand wieder her. Ein Diagnoseskript, das *nach* dem Prüfling läuft, misst
+> nicht, was der Prüfling gesehen hat. Der Fehler war nicht die Beobachtung, sondern die
+> dazuerfundene Ursache: genau das Muster, vor dem der Eintrag vom 2026-08-19 warnt.
+>
+> **Was aus dem Lauf blieb — zwei Härtungen am Treiber:**
+> - **Build-Guard** (`assertDeployedBuildMatches`): Der Treiber deployt nicht, er hängt sich
+>   an ein laufendes Obsidian. Gemessen an diesem Tag lag im Staging-Vault ein Build vom
+>   **15.08.** (666.980 Bytes) gegen 696.246 im Repo — **beide `0.3.1`**, also für jede
+>   Versionsprüfung unsichtbar. Zwei Wochen Änderungen fehlten in jedem Lauf, der sie zu
+>   prüfen glaubte. Der Guard bricht jetzt ab und nennt die Deploy-Zeile.
+> - **B17 stellt seine Vorbedingung selbst her** (`viewMode`), statt sie von fünfhundert
+>   Zeilen weiter oben zu erben. Belegt an einem eigenen Fall: das isolierte Messskript
+>   erbte `on-click` aus der `data.json` des Vaults und meldete dreimal „kein Bild" — jeder
+>   Block eine Klickfläche statt eines Canvas, **ohne Fehlermeldung**.
 
 - [ ] **1. Grundfall** — Block mit gültiger GLB rendert; Orbit (linke Maustaste), Zoom
       (Rad) und Pan (rechte Maustaste) funktionieren.

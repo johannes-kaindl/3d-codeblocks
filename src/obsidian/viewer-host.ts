@@ -20,6 +20,7 @@ import { renderMessage } from "./render-box";
 
 import { resourceProblemNotes } from "../core/gltf-uri";
 import type { ResourceResolver } from "./gltf-resources";
+import type { LightingMode, ModelLightsMode } from "../core/lighting";
 
 export interface ViewportLike {
   setModel(object: unknown): void;
@@ -30,6 +31,9 @@ export interface ViewportLike {
       der Wert wurde sonst nur einmal beim Mount gelesen). Optional wie
       `createEditRig` — Mocks ohne die Methode bleiben gueltig. */
   setAutoRotate?(on: boolean): void;
+  /** Beleuchtungs-Einstellungen auf den lebenden Viewport anwenden. Optional wie
+      `setAutoRotate` — Mocks ohne die Methode bleiben gueltig. */
+  setLighting?(lighting: LightingMode, modelLights: ModelLightsMode): void;
   resize(): void;
   resetCamera(): void;
   capturePoster(): string | null;
@@ -42,6 +46,8 @@ export interface ViewportCreateOptions {
   colors: SceneColors;
   autoRotate: boolean;
   showGrid: boolean;
+  lighting: LightingMode;
+  modelLights: ModelLightsMode;
   onContextLost: () => void;
   onInteract: () => void;
 }
@@ -186,6 +192,13 @@ export class ViewerHost {
     this.viewport.setAutoRotate?.(this.deps.settings().autoRotate);
   }
 
+  /** Dasselbe fuer die Beleuchtungs-Einstellungen. */
+  refreshLighting(): void {
+    if (this.disposed || !this.viewport) return;
+    const settings = this.deps.settings();
+    this.viewport.setLighting?.(settings.lighting, settings.modelLights);
+  }
+
   currentView(): ViewSpec | null {
     return this.viewport?.getView() ?? null;
   }
@@ -231,6 +244,8 @@ export class ViewerHost {
       colors,
       autoRotate: settings.autoRotate,
       showGrid: settings.showGrid,
+      lighting: settings.lighting,
+      modelLights: settings.modelLights,
       onContextLost: () => this.show({ kind: "context-lost" }),
       onInteract: () => this.deps.budget.touch(this.id),
     });

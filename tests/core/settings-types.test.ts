@@ -17,6 +17,8 @@ describe("validateSettings", () => {
       panelPlacement: "auto",
       lockedNodePrefixes: "env__",
       allowExternalResources: false,
+      lighting: "faithful",
+      modelLights: "prefer",
     });
   });
 
@@ -91,5 +93,26 @@ describe("allowExternalResources", () => {
   it("falls back to the default for a non-boolean, rather than treating it as truthy", () => {
     expect(validateSettings({ allowExternalResources: "yes" }).allowExternalResources).toBe(false);
     expect(validateSettings({ allowExternalResources: 1 }).allowExternalResources).toBe(false);
+  });
+});
+
+describe("Beleuchtungs-Felder", () => {
+  it("liefert die Defaults aus der Spec", () => {
+    expect(DEFAULT_SETTINGS.lighting).toBe("faithful");
+    expect(DEFAULT_SETTINGS.modelLights).toBe("prefer");
+  });
+
+  it("nimmt gueltige Werte an", () => {
+    const s = validateSettings({ lighting: "contrast", modelLights: "ignore" });
+    expect(s.lighting).toBe("contrast");
+    expect(s.modelLights).toBe("ignore");
+  });
+
+  // Der eigentliche Punkt von `oneOf`: eine handgeschriebene oder veraltete data.json
+  // darf keinen Muellwert in den Renderpfad durchreichen.
+  it("faellt bei unbekannten Werten auf den Default zurueck", () => {
+    const s = validateSettings({ lighting: "cinematic", modelLights: 42 });
+    expect(s.lighting).toBe("faithful");
+    expect(s.modelLights).toBe("prefer");
   });
 });

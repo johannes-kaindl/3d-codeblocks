@@ -63,6 +63,33 @@ export class SettingsTab extends PluginSettingTab {
         control: { type: "toggle", key: "showGrid" },
       },
       {
+        name: "Lighting",
+        desc:
+          "How models are lit. Metallic surfaces need an environment to reflect — " +
+          "without one they appear black.",
+        control: {
+          type: "dropdown",
+          key: "lighting",
+          options: {
+            off: "Off — metallic models appear black",
+            faithful: "Faithful colors",
+            contrast: "High contrast",
+          },
+        },
+      },
+      {
+        name: "Model's own lights",
+        desc: "Some 3D files bring their own lights.",
+        control: {
+          type: "dropdown",
+          key: "modelLights",
+          options: {
+            prefer: "Use them — the plugin stops adding its own",
+            ignore: "Ignore them — always use the plugin's lighting",
+          },
+        },
+      },
+      {
         name: "Allow external resources",
         desc:
           "A .gltf file can point at files it needs (geometry, textures). Normally only " +
