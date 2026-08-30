@@ -18,7 +18,7 @@ const NODE_NAMES = [
 
 async function load(text: string, kind: "gltf" | "stl"): Promise<Object3D> {
   const bytes = new TextEncoder().encode(text).buffer as ArrayBuffer;
-  return (await loadModel(bytes, kind, "#888888")) as Object3D;
+  return (await loadModel(bytes, kind, "#888888")).object as Object3D;
 }
 
 describe("Fixture-Modelle fuer die README-Aufnahmen", () => {
@@ -82,7 +82,7 @@ describe("split model (geometry in a separate .bin)", () => {
         : uri;
 
     const bytes = new TextEncoder().encode(JSON.stringify(gltf)).buffer as ArrayBuffer;
-    const scene = (await loadModel(bytes, "gltf", "#888888", resolve)) as Object3D;
+    const scene = (await loadModel(bytes, "gltf", "#888888", resolve)).object as Object3D;
 
     const names: string[] = [];
     scene.traverse((child) => {
