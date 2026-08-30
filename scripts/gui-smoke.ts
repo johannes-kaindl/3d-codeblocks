@@ -267,6 +267,16 @@ async function describeScene(cdp: Cdp): Promise<string> {
       root.querySelectorAll(".tdcb-play").length + " Standbild(er)",
       root.querySelectorAll("pre > code").length + " roher Codeblock",
       "Controller " + (plugin?.active?.get?.() ? "da" : "keiner"),
+      // Die Meldung des Prueflings MITLIEFERN, nicht nur ihr Fehlen beschreiben.
+      // Anlass 2026-08-30: der Dach-Lauf meldete "0 Standbild(er) · Controller keiner"
+      // und loeste damit eine ganze Session Ursachensuche aus — waehrend einen
+      // DOM-Knoten weiter "Invalid or corrupted file" stand und die Antwort schon
+      // dahatte. Ein Befund, der nur sagt DASS etwas nicht ging, blockiert die
+      // Fehlersuche aktiv (LESSONS 2026-08-29, calendar-notes).
+      "Meldung " + (() => {
+        const text = root.querySelector(".tdcb-message")?.textContent?.trim();
+        return text ? JSON.stringify(text) : "keine";
+      })(),
     ].join(" · ");
   `);
 }
@@ -2525,13 +2535,64 @@ async function main(): Promise<void> {
 
     // Ein Modell aus dem Vault nehmen: der Treiber bringt keine Testdaten mit, damit
     // im Repo keine Vault-Pfade landen (Pfad-Guard) und er in jedem Vault läuft.
-    const model = await cdp.evaluate<string | null>(`
+    //
+    // ⚠️ Die Auswahl nimmt das erste Modell, das der Pruefling auch LADEN kann — nicht
+    // einfach das erste. Anlass 2026-08-30: im Produktiv-Vault lag als erste .glb eine
+    // Datei, deren GLB-JSON-Chunk mit 0x00 statt 0x20 gepolstert war (glTF 2.0 verlangt
+    // fuer den JSON-Chunk Leerzeichen; Nullbytes sind das BIN-Padding). Der Pruefling
+    // lehnte sie korrekt ab, es entstand kein Canvas — und weil 17 der 19 Pruefpunkte am
+    // Rendering haengen, meldete der Lauf 2/19 und sah aus wie ein kaputtes Plugin.
+    // Kaputte Testdaten muessen als kaputte Testdaten auffallen, nicht als Regression.
+    const picked = await cdp.evaluate<{ path: string | null; skipped: string[] }>(`
       const wanted = ${JSON.stringify(modelArg ?? null)};
-      if (wanted) return wanted;
-      const file = app.vault.getFiles().find((f) => /\\.(glb|gltf)$/i.test(f.path) && !/\\.edit\\./.test(f.path));
-      return file ? file.path : null;
+      if (wanted) return { path: wanted, skipped: [] };
+
+      // Dieselbe Vorpruefung wie src/core/gltf-inspect.ts: Container lesbar, JSON-Chunk
+      // parsebar, keine Extension verlangt, die der Pruefling bewusst nicht kann.
+      const unsupported = ["KHR_draco_mesh_compression", "EXT_meshopt_compression"];
+      const ladbar = (json) => {
+        try {
+          const required = JSON.parse(json).extensionsRequired;
+          return !Array.isArray(required) || !required.some((e) => unsupported.includes(e));
+        } catch {
+          return false;
+        }
+      };
+
+      const skipped = [];
+      for (const file of app.vault.getFiles()) {
+        if (!/\\.(glb|gltf)$/i.test(file.path) || /\\.edit\\./.test(file.path)) continue;
+        const bytes = await app.vault.readBinary(file);
+        let ok = false;
+        if (/\\.gltf$/i.test(file.path)) {
+          ok = ladbar(new TextDecoder().decode(bytes));
+        } else {
+          const view = new DataView(bytes);
+          if (bytes.byteLength >= 20 && view.getUint32(0, true) === 0x46546c67 && view.getUint32(16, true) === 0x4e4f534a) {
+            const length = view.getUint32(12, true);
+            if (length > 0 && 20 + length <= bytes.byteLength) {
+              ok = ladbar(new TextDecoder().decode(new Uint8Array(bytes, 20, length)));
+            }
+          }
+        }
+        if (ok) return { path: file.path, skipped };
+        skipped.push(file.path);
+      }
+      return { path: null, skipped };
     `);
-    if (!model) throw new Error("Keine .glb/.gltf im Vault gefunden — mit --model <pfad> angeben.");
+    const model = picked.path;
+    if (!model) {
+      throw new Error(
+        picked.skipped.length > 0
+          ? `Keine ladbare .glb/.gltf im Vault — ${picked.skipped.length} Datei(en) uebersprungen, ` +
+            `weil der Pruefling sie nicht laden kann (defekter Container oder Draco/Meshopt): ` +
+            `${picked.skipped.join(", ")}. Mit --model <pfad> eine andere angeben.`
+          : "Keine .glb/.gltf im Vault gefunden — mit --model <pfad> angeben.",
+      );
+    }
+    for (const path of picked.skipped) {
+      console.log(`Uebersprungen (fuer den Pruefling nicht ladbar): ${path}`);
+    }
     console.log(`Modell: ${model}\n`);
 
     // Den Vorwert merken und im `finally` zurückschreiben: der Smoke stellt Einstellungen
