@@ -474,9 +474,13 @@ async function orbitGif(cdp: Cdp, outDir: string): Promise<string> {
  *
  *  Obsidian 1.13 oeffnet es mit der URL `about:blank`; ein Target-Filter auf
  *  `app://obsidian.md` findet es nicht, und `Cdp.attach` bricht mit "Mehrere Fenster
- *  offen" ab. `attachTo("settings", port)` waehlt es ueber die Sache: es ist das Fenster
- *  OHNE Workspace. Das Fenster schliesst sich ausserdem, sobald ein anderes den Fokus
- *  bekommt — deshalb passiert hier alles in einem Zug.
+ *  offen" ab. `attachTo("settings", port, REPO_NAME)` waehlt die ART ueber die Sache: es
+ *  ist das Fenster OHNE Workspace. Den VAULT waehlt es seit 2026-08-30 ueber den
+ *  Fenstertitel — nicht ueber dessen erstes Wort ("Settings"/"Einstellungen" ist
+ *  lokalisiert und wechselt mit der UI-Sprache), sondern ueber " - <vault> - Obsidian".
+ *  Ohne diesen dritten Parameter ist die Wahl bei zwei offenen Vaults ein Muenzwurf.
+ *  Das Fenster schliesst sich ausserdem, sobald ein anderes den Fokus bekommt —
+ *  deshalb passiert hier alles in einem Zug.
  */
 async function settingsBild(cdp: Cdp, port: number, opts: ShotOptions): Promise<string> {
   // Auslieferungszustand herstellen: das hover-toolbar-Rezept setzt panelPlacement auf
@@ -489,7 +493,7 @@ async function settingsBild(cdp: Cdp, port: number, opts: ShotOptions): Promise<
     await new Promise((r) => setTimeout(r, 900));
     return true;
   `);
-  const fenster = await attachTo("settings", port);
+  const fenster = await attachTo("settings", port, REPO_NAME);
   if (!fenster) return "settings.png — kein Einstellungen-Fenster gefunden";
   try {
     await fenster.send("Page.bringToFront");
