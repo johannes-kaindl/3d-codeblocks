@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Metallic models are no longer black.** A metallic surface needs an environment to
+  reflect; without one there is nothing to see. glTF gives `metallicFactor` a default of
+  `1.0`, so a material that only sets a base colour — the most common case in hand-written
+  and tool-written files alike — was rendered as polished metal with nothing around it.
+  The viewport now provides that environment.
+- **New setting "Lighting"** with three states: *Faithful colors* (the default; reflections
+  on, and your theme's colours stay intact), *High contrast* (punchier and more filmic,
+  shifts theme colours somewhat), and *Off* (the previous behaviour). The default changes
+  how existing notes look — that is deliberate, the old behaviour was the incorrect one.
+- **New setting "Model's own lights".** Some 3D files bring their own lighting; the plugin
+  now steps back and stops adding its own when they do. Set it to *Ignore them* for files
+  whose lights are exported at unusable brightness.
+
 - **Models that come in several files now work.** A `.gltf` usually keeps its geometry in
   a `.bin` beside it and its textures in a folder — the way every Blender export looks.
   Those files are now loaded from your vault, resolved relative to the model file. What
