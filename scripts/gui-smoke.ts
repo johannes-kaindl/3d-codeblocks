@@ -1678,6 +1678,18 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   // Der Mittelwert wird mitgeführt, obwohl der Hash allein entscheidet: wird der Punkt
   // rot, ist die nächste Frage immer "waren die Bilder gleich oder nur ähnlich?" — und
   // drei Hashes nebeneinander beantworten sie nicht.
+  // `viewMode` hier nochmal setzen, obwohl der Abschnitt es oben (Zeile ~1156) bereits
+  // tut. Grund ist nicht Misstrauen gegen diese Zeile, sondern gegen die Strecke dazwischen:
+  // zwischen dort und hier liegen sechzehn Prüfpunkte, von denen mehrere Einstellungen
+  // umstellen. Ein Punkt, der eine Vorbedingung *braucht*, stellt sie unmittelbar davor her
+  // — sonst hängt sein Ergebnis an der Frage, was fünfhundert Zeilen weiter oben passiert ist.
+  //
+  // Belegt an einem eigenen Fall (2026-08-30): ein isoliertes Messskript ohne diese Zeile
+  // erbte `on-click` aus der `data.json` des Vaults und meldete dreimal "kein Bild" —
+  // jeder Block war eine Klickfläche statt eines Canvas, **ohne Fehlermeldung**. Das DOM
+  // sieht dann aus wie "rendert nicht", der Zustand ist aber gültig, also meldet niemand
+  // etwas. Mit der Zeile: drei verschiedene Bilder.
+  await setSetting(cdp, "viewMode", "immediate");
   await closeExtraLeaves(cdp);
   const lightingShots: Record<string, { hash: number; avg: number[] } | null> = {};
   for (const mode of ["off", "faithful", "contrast"]) {
