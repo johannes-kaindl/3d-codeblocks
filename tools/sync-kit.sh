@@ -4,6 +4,13 @@ set -e
 
 KIT="${KIT_DIR:-../obsidian-kit}"
 [ -d "$KIT/src/pure" ] || { echo "Kit nicht gefunden unter $KIT (KIT_DIR setzen)" >&2; exit 1; }
+# ⚠️ Dieses Skript vendored IMMER den aktuellen Kit-HEAD, nicht den gepinnten Stand.
+# Am 2026-08-30 stand das Kit auf 0.28.0, src/vendor/kit/ aber auf 0.27.0 — ein Lauf haette
+# num.ts und settings_schema.ts stillschweigend mit angehoben. Wer nur EIN Modul nachziehen
+# will, prueft vorher, was sich sonst noch aendert:
+#   for f in ...; do diff <(tail -n +2 src/vendor/<f>.ts) $KIT/src/<f>.ts; done
+# Die dauerhafte Loesung ist eine feste Kit-Ref (offener Task „sync-kit.sh auf feste
+# Kit-Ref umstellen"); bis dahin ist dieser Lauf eine bewusste Entscheidung, kein Routineschritt.
 VER=$(node -p "require('$KIT/package.json').version")
 # Der Pin-SHA ist bewusst der Kit-HEAD, NICHT der Tag-SHA von $VER (0.27.0: fbb42d4 statt
 # 548041b). So erzeugen es alle Form-A-Skripte im Workspace, und tools/pin_find.py des Dachs
@@ -27,7 +34,7 @@ for m in num settings_schema; do
   echo "vendored obsidian-kit@$VER/pure/$m.ts"
 done
 
-for m in folder-suggest settings_walker; do
+for m in confirm folder-suggest settings_walker; do
   cp "$KIT/src/obsidian/$m.ts" "src/vendor/kit-obsidian/$m.ts"
   stamp "src/vendor/kit-obsidian/$m.ts" "src/obsidian/$m.ts"
   echo "vendored obsidian-kit@$VER/obsidian/$m.ts"
@@ -47,7 +54,7 @@ cat > src/vendor/kit-obsidian/VENDOR.json <<JSON
   "source": "obsidian-kit",
   "version": "$VER",
   "sha": "$SHA",
-  "vendored": "folder-suggest.ts, settings_walker.ts",
+  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts",
   "note": "Verbatim snapshot. Never hand-edit. Re-vendor via tools/sync-kit.sh. version/sha gelten AUSSCHLIESSLICH fuer die unter \"vendored\" gelisteten Dateien. kit/ siehe dortige VENDOR.json."
 }
 JSON

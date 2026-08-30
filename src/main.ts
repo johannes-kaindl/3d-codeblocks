@@ -8,7 +8,7 @@ import {
 import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
-import { confirmDiscardEdits } from "./obsidian/confirm";
+import { confirmAction } from "./vendor/kit-obsidian/confirm";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
 import { vaultEditIo } from "./obsidian/edit-mode";
@@ -48,7 +48,16 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // Codeblock: Embed und FileView bekommen (ueber die Sidebar) denselben
     // EditCoordinator wie der Codeblock — dieselben Instanzen, kein Doppelbau.
     const editIo = vaultEditIo(this.app);
-    const confirmDiscard = () => confirmDiscardEdits(this.app);
+    // Kit-Dialog statt eigener Fassung: die lokale hatte den destruktiven Knopf LINKS
+    // (UI-STANDARD §2 verlangt Abbrechen links, Bestaetigen rechts). `warning` ist Default
+    // true und markiert "Discard" versionsunabhaengig als destruktiv — setDestructive() gibt
+    // es erst ab Obsidian 1.13, unser minAppVersion ist 1.5.0.
+    const confirmDiscard = () =>
+      confirmAction(this.app, {
+        message: "Discard unsaved edits?",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+      });
     const hostDeps: HostBaseDeps & {
       active: ActiveViewport;
       editIo: ReturnType<typeof vaultEditIo>;

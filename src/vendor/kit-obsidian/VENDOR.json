@@ -1,7 +1,7 @@
 {
   "source": "obsidian-kit",
-  "version": "0.27.0",
-  "sha": "fbb42d4",
-  "vendored": "folder-suggest.ts, settings_walker.ts",
-  "note": "Verbatim snapshot. Never hand-edit. Re-vendor via tools/sync-kit.sh. version/sha gelten AUSSCHLIESSLICH fuer die unter \"vendored\" gelisteten Dateien. kit/ siehe dortige VENDOR.json."
+  "version": "0.28.0",
+  "sha": "2ab1bb5",
+  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts",
+  "note": "Verbatim snapshot. Never hand-edit. Re-vendor via tools/sync-kit.sh. version/sha gelten AUSSCHLIESSLICH fuer die unter \"vendored\" gelisteten Dateien. kit/ siehe dortige VENDOR.json — die steht bewusst noch auf 0.27.0. confirm.ts kam am 2026-08-30 aus 0.28.0 dazu; folder-suggest.ts und settings_walker.ts sind zwischen 0.27.0 und 0.28.0 byte-identisch (geprueft), deshalb ist dieser Ordner geschlossen auf 0.28.0 und nicht gemischt."
 }
