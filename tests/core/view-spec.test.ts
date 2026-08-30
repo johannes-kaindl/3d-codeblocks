@@ -6,6 +6,7 @@ import {
   isFileCameraRef,
   parseView,
   viewToCamera,
+  type ViewSpec,
 } from "../../src/core/view-spec";
 import { fitCamera } from "../../src/core/camera-fit";
 
@@ -14,6 +15,14 @@ const MIN = v(-1, -1, -1);
 const MAX = v(1, 1, 1);
 const len = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+/** parseView auf den Winkel-Fall verengen. Bewusst mit Wurf statt Cast: waere die
+    Rueckgabe eines Tages eine Kamera-Referenz, soll der Test das sagen, nicht schweigen. */
+const angles = (text: string): ViewSpec => {
+  const ref = parseView(text);
+  if (ref === null || isFileCameraRef(ref)) throw new Error(`kein Winkel-View: ${text}`);
+  return ref;
+};
 
 describe("parseView", () => {
   it("reads a named view", () => {
@@ -33,13 +42,13 @@ describe("parseView", () => {
   });
 
   it("wraps the azimuth into 0..359", () => {
-    expect(parseView("370,0,1")?.azimuth).toBe(10);
-    expect(parseView("-90,0,1")?.azimuth).toBe(270);
+    expect(angles("370,0,1").azimuth).toBe(10);
+    expect(angles("-90,0,1").azimuth).toBe(270);
   });
 
   it("clamps the elevation to the gimbal limit", () => {
-    expect(parseView("0,90,1")?.elevation).toBe(89);
-    expect(parseView("0,-120,1")?.elevation).toBe(-89);
+    expect(angles("0,90,1").elevation).toBe(89);
+    expect(angles("0,-120,1").elevation).toBe(-89);
   });
 
   it("rejects a non-positive distance", () => {

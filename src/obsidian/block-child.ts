@@ -35,6 +35,7 @@ import { buildToolbar, toolbarVisible } from "./viewport-toolbar";
 
 // Re-Export, damit bestehende Importe (main.ts, Tests) stabil bleiben.
 import { createResourceResolver } from "./gltf-resources";
+import type { FileCameraInfo } from "../core/gltf-cameras";
 
 export type { ViewportFactory, ContextBudget, ViewportLike, ViewportCreateOptions } from "./viewer-host";
 
@@ -48,7 +49,7 @@ export interface BlockDeps {
     format: ModelFormat,
     materialColor: string,
     resolveUrl?: (uri: string) => string,
-  ): Promise<unknown>;
+  ): Promise<{ object: unknown; cameras: readonly FileCameraInfo[] }>;
   readColors(el: HTMLElement): SceneColors;
   active: ActiveViewport;
   writePorts: WritePorts;

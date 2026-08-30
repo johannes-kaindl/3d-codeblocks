@@ -13,7 +13,9 @@ import { detectFormat, type ModelFormat } from "../core/format";
 import { inspectGlb, unsupportedRequired } from "../core/gltf-inspect";
 import type { PluginSettings } from "../core/settings-types";
 import { toViewModel, type ViewerState } from "../core/view-model";
+import { isFileCameraRef, type ViewRef } from "../core/view-spec";
 import type { ViewSpec } from "../core/view-spec";
+import { fileCameraNotes, findFileCamera, type FileCameraInfo } from "../core/gltf-cameras";
 import type { EditRigCallbacks } from "../viewer/edit-controls";
 import type { SceneColors } from "../viewer/scene";
 import { renderMessage } from "./render-box";
@@ -25,6 +27,9 @@ import type { LightingMode, ModelLightsMode } from "../core/lighting";
 export interface ViewportLike {
   setModel(object: unknown): void;
   setView(spec: ViewSpec | null): void;
+  /** Eine in der Datei definierte Kamera exakt anfahren. `unknown` wie `setModel`:
+      diese Schicht kennt three nicht. */
+  setFileCamera(camera: unknown): void;
   getView(): ViewSpec | null;
   setColors(colors: SceneColors): void;
   /** "Auto-rotate"-Setting auf den lebenden Viewport anwenden (Smoke-#5-Befund:
@@ -94,7 +99,7 @@ export interface HostBaseDeps {
     format: ModelFormat,
     materialColor: string,
     resolveUrl?: (uri: string) => string,
-  ): Promise<unknown>;
+  ): Promise<{ object: unknown; cameras: readonly FileCameraInfo[] }>;
   readColors(el: HTMLElement): SceneColors;
 }
 
@@ -114,7 +119,7 @@ export interface RenderSource {
   /** Loest Nebendateien (`.bin`, Texturen) auf. Fehlt bei Inline-glTF: dort gibt es
       keine Datei, neben der etwas liegen koennte. */
   resources?: ResourceResolver;
-  view?: ViewSpec;
+  view?: ViewRef;
 }
 
 let nextHostId = 0;
@@ -250,9 +255,10 @@ export class ViewerHost {
       onInteract: () => this.deps.budget.touch(this.id),
     });
     this.viewport = viewport;
+    let cameraNotes: string[] = [];
 
     try {
-      const object = await this.deps.loadModel(
+      const model = await this.deps.loadModel(
         bytes,
         source.format,
         colors.material,
@@ -262,15 +268,15 @@ export class ViewerHost {
         this.releaseViewport();
         return;
       }
-      viewport.setModel(object);
-      viewport.setView(source.view ?? null);
+      viewport.setModel(model.object);
+      cameraNotes = applyView(viewport, source, model.cameras);
     } catch (error) {
       this.releaseViewport();
       this.show({ kind: "load-failed", detail: describeError(error) });
       return;
     }
 
-    const notes = resourceProblemNotes(source.resources?.problems ?? []);
+    const notes = [...resourceProblemNotes(source.resources?.problems ?? []), ...cameraNotes];
 
     // FileView (unmanaged): ein Modell im Pane, immer voll interaktiv.
     if (!this.deps.managed) {
@@ -359,4 +365,41 @@ export function needsContainerInspection(path: string): boolean {
 // Exportiert, damit `block-child.ts` dieselbe Fehlertext-Hilfe nutzt statt sie zu spiegeln.
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Die gewuenschte Ansicht auf den Viewport anwenden und melden, was daran nicht ging.
+    Drei Faelle: keine oder eine gerechnete Ansicht (wie bisher), eine Datei-Kamera in
+    einer glTF-Datei (aufloesen), eine Datei-Kamera anderswo (Format nennen).
+
+    Ein Fehlschlag passt automatisch ein statt gar nichts zu tun — das Modell soll
+    sichtbar sein, auch wenn die gewuenschte Ansicht es nicht ist. Was fehlt, sagt die
+    Hinweiszeile; ein stiller Fallback wuerde einen Tippfehler wie einen Plugin-Bug
+    aussehen lassen. */
+function applyView(
+  viewport: ViewportLike,
+  source: RenderSource,
+  cameras: readonly FileCameraInfo[],
+): string[] {
+  const view = source.view;
+
+  if (view === undefined || !isFileCameraRef(view)) {
+    viewport.setView(view ?? null);
+    return [];
+  }
+
+  if (source.format !== "gltf") {
+    viewport.setView(null);
+    return ["`view: camera:…` needs a glTF file"];
+  }
+
+  const lookup = findFileCamera(cameras, view.camera);
+  const notes = fileCameraNotes(lookup, view.camera, cameras);
+
+  if (lookup.kind === "found") {
+    viewport.setFileCamera(cameras[lookup.index]);
+  } else {
+    viewport.setView(null);
+  }
+
+  return notes;
 }
