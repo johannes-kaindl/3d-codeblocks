@@ -40,7 +40,10 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 
 ## Installation
 
-Noch nicht im Community-Store. Zum Ausprobieren: mit `npm install && npm run build`
+**Aus Obsidian heraus.** Einstellungen → Community-Plugins → Durchsuchen → nach
+*3D Codeblocks* suchen → Installieren, dann Aktivieren.
+
+**Aus dem Quellcode**, für den aktuellen Entwicklungsstand: mit `npm install && npm run build`
 bauen, dann `main.js`, `manifest.json` und `styles.css` nach
 `<vault>/.obsidian/plugins/three-d-codeblocks/` kopieren.
 
