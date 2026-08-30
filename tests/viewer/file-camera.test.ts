@@ -61,3 +61,27 @@ describe("fileCameraFit", () => {
     expect(fit.far).toBeGreaterThan(fit.distance);
   });
 });
+
+describe("fileCameraFit and scaled nodes", () => {
+  /** Skalierte Kamera-Knoten sind in Exporten alltaeglich: eine Einheiten-Umrechnung am
+      Wurzelknoten reicht. Die Blickrichtung darf davon nicht abhaengen. */
+  const scaled = (sx: number, sy: number, sz: number): FileCamera => {
+    const object = new Object3D();
+    object.position.set(5, 0, 0);
+    object.rotation.y = Math.PI / 2; // Blick von +X nach -X, also auf den Ursprung
+    object.scale.set(sx, sy, sz);
+    return { nodeName: "Scaled", cameraName: null, orthographic: false, object, yfov: 0.66 };
+  };
+
+  it("blickt bei gleichmaessiger Skalierung weiterhin aufs Modell", () => {
+    const fit = fileCameraFit(scaled(2, 2, 2), MIN, MAX);
+    expect(fit.target.x).toBeCloseTo(0, 5);
+    expect(fit.target.z).toBeCloseTo(0, 5);
+  });
+
+  it("blickt bei ungleichmaessiger Skalierung weiterhin aufs Modell", () => {
+    const fit = fileCameraFit(scaled(3, 1, 1), MIN, MAX);
+    expect(fit.target.x).toBeCloseTo(0, 5);
+    expect(fit.target.z).toBeCloseTo(0, 5);
+  });
+});

@@ -22,8 +22,14 @@ export function fileCameraFit(camera: FileCamera, min: Vec3, max: Vec3): CameraF
   // Aufruf verlaesslich, wenn ein Elternknoten dazwischenliegt.
   camera.object.updateWorldMatrix(true, false);
 
-  const position = new Vector3().setFromMatrixPosition(camera.object.matrixWorld);
-  const rotation = new Quaternion().setFromRotationMatrix(camera.object.matrixWorld);
+  // `decompose` statt `setFromRotationMatrix`: letzteres setzt laut three eine REINE
+  // Rotationsmatrix voraus (`Quaternion.js:298`) und verzerrt den Winkel, sobald ein
+  // Knoten skaliert ist — schon bei gleichmaessiger Skalierung 2 landete der Blick um
+  // Grade daneben. Skalierte Kamera-Knoten sind alltaeglich: eine Einheiten-Umrechnung
+  // am Wurzelknoten reicht, und die vererbt sich auf alles darunter.
+  const position = new Vector3();
+  const rotation = new Quaternion();
+  camera.object.matrixWorld.decompose(position, rotation, new Vector3());
   const forward = FORWARD.clone().applyQuaternion(rotation).normalize();
 
   const center = new Vector3(
