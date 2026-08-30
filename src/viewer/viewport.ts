@@ -22,9 +22,11 @@ import {
 } from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { fitCamera } from "../core/camera-fit";
+import { fitCamera, type CameraFit } from "../core/camera-fit";
 import { cameraToView, viewToCamera, type ViewSpec } from "../core/view-spec";
 import { EditRig, type EditRigCallbacks } from "./edit-controls";
+import { fileCameraFit } from "./file-camera";
+import type { FileCamera } from "./loaders";
 import { decideLighting, type LightingMode, type ModelLightsMode } from "../core/lighting";
 import { GRID_NAME, type SceneColors, buildScene, hasOwnLights, makeGrid, setFillLights } from "./scene";
 
@@ -57,6 +59,9 @@ export class Viewport {
   private needsRender = true;
   private frame: number | null = null;
   private disposed = false;
+  /** Datei-Kamera, gesetzt bevor ein Modell da ist — angewendet sobald Bounds vorliegen.
+      Schliesst `pendingView` gegenseitig aus: es gilt immer nur die zuletzt gesetzte Ansicht. */
+  private pendingFileCamera: FileCamera | null = null;
   /** Gewuenschte Ansicht, gesetzt bevor ein Modell da ist — angewendet sobald `setModel` Bounds liefert. */
   private pendingView: ViewSpec | null = null;
   /** Vom Setting gewuenschter Autorotate-Wert — getrennt von `controls.autoRotate`,
@@ -184,7 +189,8 @@ export class Viewport {
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
     this.updateGrid();
-    this.setView(this.pendingView);
+    if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
+    else this.setView(this.pendingView);
   }
 
   setColors(colors: SceneColors): void {
@@ -234,6 +240,7 @@ export class Viewport {
   /** Kamera auf die Ansicht setzen; `null` = automatisch einpassen. */
   setView(spec: ViewSpec | null): void {
     this.pendingView = spec;
+    this.pendingFileCamera = null;
     if (this.disposed || !this.bounds) return;
 
     const fit =
@@ -241,6 +248,35 @@ export class Viewport {
         ? fitCamera(this.bounds.min, this.bounds.max, FOV_DEG, this.aspect())
         : viewToCamera(spec, this.bounds.min, this.bounds.max, FOV_DEG, this.aspect());
 
+    // Zurueck auf den Haus-Bildwinkel: eine vorher angefahrene Datei-Kamera darf ihren
+    // eigenen `yfov` nicht an die naechste gerechnete Ansicht vererben.
+    this.camera.fov = FOV_DEG;
+    this.applyFit(fit);
+  }
+
+  /** Eine in der Datei definierte Kamera exakt anfahren. Nimmt `unknown` wie `setModel`,
+      damit die Obsidian-Schicht three nicht kennen muss — der Typ ist `FileCamera`.
+      Danach orbitiert der Nutzer frei; das Ziel liegt auf der Blickachse des Autors.
+
+      Der Bildwinkel der Datei wird mit uebernommen: die Position allein ergibt noch nicht
+      dasselbe Bild. ⚠️ Bekannte Grenze: `getView()` misst seine Basisdistanz weiterhin bei
+      `FOV_DEG`, weil `setView()` bei genau diesem Wert wiederherstellt — wer aus einer
+      Datei-Kamera heraus "Save view" drueckt, bekommt deshalb einen leicht anderen
+      Ausschnitt zurueck. Der Alternativfehler waere groesser: ein von Anfang an falsch
+      gerahmtes Bild bei JEDEM Oeffnen statt einer Abweichung nach einem Speichervorgang. */
+  setFileCamera(camera: unknown): void {
+    const file = camera as FileCamera;
+    this.pendingFileCamera = file;
+    this.pendingView = null;
+    if (this.disposed || !this.bounds) return;
+
+    this.camera.fov = file.yfov > 0 ? (file.yfov * 180) / Math.PI : FOV_DEG;
+    this.applyFit(fileCameraFit(file, this.bounds.min, this.bounds.max));
+  }
+
+  /** Kamera, Clipping und Orbit-Ziel aus einem fertigen Fit setzen — der eine Ort, an dem
+      beide Wege (gerechnete Ansicht und Datei-Kamera) zusammenlaufen. */
+  private applyFit(fit: CameraFit): void {
     this.camera.position.set(fit.position.x, fit.position.y, fit.position.z);
     this.camera.near = fit.near;
     this.camera.far = fit.far;

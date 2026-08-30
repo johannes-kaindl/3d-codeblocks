@@ -36,7 +36,7 @@ describe("meshopt", () => {
   });
 
   it("loads and produces geometry", async () => {
-    const scene = (await loadModel(meshoptGlb(), "gltf", "#888888")) as Object3D;
+    const scene = (await loadModel(meshoptGlb(), "gltf", "#888888")).object as Object3D;
 
     let meshes = 0;
     scene.traverse((child) => {

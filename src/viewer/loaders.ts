@@ -13,6 +13,27 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { ModelFormat } from "../core/format";
+import type { FileCameraInfo } from "../core/gltf-cameras";
+
+/** Eine in der Datei definierte Kamera, verknuepft mit ihrem Objekt in der Szene. */
+export interface FileCamera extends FileCameraInfo {
+  /** Der Kamera-Knoten in der geladenen Szene — traegt Position und Blickrichtung. */
+  object: Object3D;
+  /** Bildwinkel in Radiant, wie ihn die Datei nennt; `0` bei orthographischen Kameras. */
+  yfov: number;
+}
+
+export interface LoadedModel {
+  object: Object3D;
+  /** Leer bei STL und bei glTF-Dateien ohne Kameras. */
+  cameras: FileCamera[];
+}
+
+/** Ausschnitt des glTF-JSON, den die Kamera-Extraktion braucht. */
+interface GltfJson {
+  nodes?: { name?: string; camera?: number }[];
+  cameras?: { name?: string; type?: string; perspective?: { yfov?: number } }[];
+}
 
 /**
  * @param resolveUrl Uebersetzt eine URI aus der Datei (`.bin`, Texturen) in etwas Ladbares.
@@ -24,13 +45,13 @@ export function loadModel(
   format: ModelFormat,
   materialColor: string,
   resolveUrl?: (uri: string) => string,
-): Promise<Object3D> {
+): Promise<LoadedModel> {
   return format === "gltf"
     ? loadGltf(buffer, resolveUrl)
-    : Promise.resolve(loadStl(buffer, materialColor));
+    : Promise.resolve({ object: loadStl(buffer, materialColor), cameras: [] });
 }
 
-function loadGltf(buffer: ArrayBuffer, resolveUrl?: (uri: string) => string): Promise<Object3D> {
+function loadGltf(buffer: ArrayBuffer, resolveUrl?: (uri: string) => string): Promise<LoadedModel> {
   const manager = new LoadingManager();
   if (resolveUrl) manager.setURLModifier(resolveUrl);
 
@@ -41,19 +62,22 @@ function loadGltf(buffer: ArrayBuffer, resolveUrl?: (uri: string) => string): Pr
       (gltf) => {
         // Zuordnung Szene ↔ JSON-Node fuer den Editor: three sanitisiert `name` beim Laden,
         // der JSON-Index aus `parser.associations` ist die verlaessliche Identitaet.
-        const associations = (
+        const parser = (
           gltf as unknown as {
-            parser?: { associations?: Map<object, { nodes?: number }> };
+            parser?: { associations?: Map<object, { nodes?: number }>; json?: GltfJson };
           }
-        ).parser?.associations;
+        ).parser;
+        const associations = parser?.associations;
+        const byNodeIndex = new Map<number, Object3D>();
         if (associations) {
           for (const [object, assoc] of associations) {
             if (assoc?.nodes !== undefined) {
               (object as Object3D).userData.tdcbNodeIndex = assoc.nodes;
+              byNodeIndex.set(assoc.nodes, object as Object3D);
             }
           }
         }
-        resolve(gltf.scene);
+        resolve({ object: gltf.scene, cameras: collectCameras(parser?.json, byNodeIndex) });
       },
       (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
     );
@@ -84,4 +108,35 @@ function loadStl(buffer: ArrayBuffer, materialColor: string): Object3D {
   // eigene Farben mitbringt, ebenfalls nicht.
   mesh.userData.tdcbThemedMaterial = !hasOwnColors;
   return mesh;
+}
+
+/** Kamera-Knoten aus dem ROHEN JSON einsammeln, in Node-Reihenfolge.
+    Bewusst nicht ueber `gltf.cameras` oder den Szenengraph: three sanitisiert die Namen
+    beim Laden und haengt bei Dubletten einen Zaehler an — siehe `core/gltf-cameras.ts`.
+    Hier faellt nur das Urteil ueber die Struktur; welcher Name gewinnt, entscheidet
+    dort die pure Auswahl. */
+function collectCameras(json: GltfJson | undefined, byNodeIndex: Map<number, Object3D>): FileCamera[] {
+  const cameras: FileCamera[] = [];
+  const nodes = json?.nodes ?? [];
+
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    if (node?.camera === undefined) continue;
+
+    const def = json?.cameras?.[node.camera];
+    const object = byNodeIndex.get(index);
+    // Ohne Objekt gibt es nichts anzufahren (Knoten haengt in keiner geladenen Szene),
+    // ohne Definition nichts zu beurteilen.
+    if (def === undefined || object === undefined) continue;
+
+    cameras.push({
+      nodeName: node.name ?? null,
+      cameraName: def.name ?? null,
+      orthographic: def.type === "orthographic",
+      object,
+      yfov: def.perspective?.yfov ?? 0,
+    });
+  }
+
+  return cameras;
 }

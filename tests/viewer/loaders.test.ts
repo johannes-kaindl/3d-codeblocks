@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import type { Mesh, MeshStandardMaterial, Object3D } from "three";
 import { loadModel } from "../../src/viewer/loaders";
 import { contractGltfText } from "../helpers/contract-gltf";
@@ -6,7 +7,7 @@ import { contractGltfText } from "../helpers/contract-gltf";
 describe("loadModel (gltf)", () => {
   it("annotiert jeden Node mit seinem JSON-Index (tdcbNodeIndex)", async () => {
     const bytes = new TextEncoder().encode(contractGltfText()).buffer as ArrayBuffer;
-    const scene = (await loadModel(bytes, "gltf", "#888888")) as Object3D;
+    const scene = (await loadModel(bytes, "gltf", "#888888")).object as Object3D;
 
     const indexOf = (name: string) => {
       let found: number | undefined;
@@ -48,14 +49,14 @@ function colouredStl(withColour: boolean): ArrayBuffer {
 
 describe("loadModel (stl)", () => {
   it("shows the colours a Magics-coloured STL carries", async () => {
-    const mesh = (await loadModel(colouredStl(true), "stl", "#888888")) as Mesh;
+    const mesh = (await loadModel(colouredStl(true), "stl", "#888888")).object as Mesh;
     const material = mesh.material as MeshStandardMaterial;
 
     expect(material.vertexColors).toBe(true);
   });
 
   it("keeps the theme colour for an STL without colours", async () => {
-    const mesh = (await loadModel(colouredStl(false), "stl", "#123456")) as Mesh;
+    const mesh = (await loadModel(colouredStl(false), "stl", "#123456")).object as Mesh;
     const material = mesh.material as MeshStandardMaterial;
 
     expect(material.vertexColors).toBe(false);
@@ -83,5 +84,53 @@ describe("loadModel (gltf, external resources)", () => {
     await loadModel(bytes, "gltf", "#888888", resolve).catch(() => undefined);
 
     expect(resolve).toHaveBeenCalledWith("scene.bin");
+  });
+});
+
+describe("loadModel (Kameras aus der Datei)", () => {
+  const camerasFixture = () => {
+    const text = readFileSync("tests/fixtures/cameras.gltf", "utf8");
+    return new TextEncoder().encode(text).buffer as ArrayBuffer;
+  };
+
+  it("liest die Namen aus dem JSON, nicht aus dem Szenengraph", async () => {
+    const { cameras } = await loadModel(camerasFixture(), "gltf", "#888888");
+
+    // Kameras in Node-Reihenfolge; "Schnitt A" traegt sein Leerzeichen, obwohl three
+    // das geladene Objekt "Schnitt_A" nennt, und beide "Doppel" heissen gleich,
+    // obwohl three den zweiten zu "Doppel_1" macht.
+    expect(cameras.map((c) => c.nodeName)).toEqual([
+      "Front",
+      null,
+      "Schnitt A",
+      "Doppel",
+      "Doppel",
+      "Plan",
+    ]);
+  });
+
+  it("nimmt den Kameranamen mit, auch wenn der Knoten namenlos ist", async () => {
+    const { cameras } = await loadModel(camerasFixture(), "gltf", "#888888");
+    expect(cameras[1]?.cameraName).toBe("Section");
+    expect(cameras[0]?.cameraName).toBeNull();
+  });
+
+  it("erkennt die orthographische Kamera und traegt den Bildwinkel der anderen", async () => {
+    const { cameras } = await loadModel(camerasFixture(), "gltf", "#888888");
+    expect(cameras.map((c) => c.orthographic)).toEqual([false, false, false, false, false, true]);
+    expect(cameras[0]?.yfov).toBeCloseTo(0.66, 4);
+  });
+
+  it("verknuepft jede Kamera mit ihrem Objekt in der Szene", async () => {
+    const { object, cameras } = await loadModel(camerasFixture(), "gltf", "#888888");
+    const inScene: unknown[] = [];
+    object.traverse((child) => inScene.push(child));
+    for (const camera of cameras) expect(inScene).toContain(camera.object);
+  });
+
+  it("liefert eine leere Liste, wo es keine Kameras gibt", async () => {
+    const bytes = new TextEncoder().encode(contractGltfText()).buffer as ArrayBuffer;
+    expect((await loadModel(bytes, "gltf", "#888888")).cameras).toEqual([]);
+    expect((await loadModel(colouredStl(false), "stl", "#888888")).cameras).toEqual([]);
   });
 });

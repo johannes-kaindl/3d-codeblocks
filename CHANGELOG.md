@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A model can now be shown from a camera its own author placed.** Many `.gltf` and `.glb`
+  files carry cameras — the section, the entrance, the angle whoever built the model
+  considered the right one — and until now the plugin ignored them. `view: camera:<name>`
+  in the block starts there: position, direction and field of view come straight out of the
+  file, and from that point you orbit, zoom and pan as usual, turning around the point that
+  camera looks at rather than the middle of the model, so a camera that frames a detail
+  keeps its detail. **The name is looked up in the file, not in the loaded scene** — worth
+  knowing, because the two are not the same: three.js rewrites names while loading and turns
+  `Schnitt A` into `Schnitt_A`, so a name with a space would otherwise be unreachable. The
+  raw glTF is searched instead, node names first and camera names second, without regard to
+  case. A name that is not there, a file with no cameras at all, an orthographic camera (the
+  viewport is perspective) or a `view: camera:…` on an STL is reported below the viewport,
+  and the model is fitted as usual so that it stays visible. **Save view** is unchanged and
+  still writes numbers, so pressing it replaces the reference with the angle you are looking
+  from at that moment.
 - **Metallic models are no longer black.** A metallic surface needs an environment to
   reflect; without one there is nothing to see. glTF gives `metallicFactor` a default of
   `1.0`, so a material that only sets a base colour — the most common case in hand-written

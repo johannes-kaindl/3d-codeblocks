@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { NAMED_VIEWS, cameraToView, formatView, parseView, viewToCamera } from "../../src/core/view-spec";
+import {
+  NAMED_VIEWS,
+  cameraToView,
+  formatView,
+  isFileCameraRef,
+  parseView,
+  viewToCamera,
+  type ViewSpec,
+} from "../../src/core/view-spec";
 import { fitCamera } from "../../src/core/camera-fit";
 
 const v = (x: number, y: number, z: number) => ({ x, y, z });
@@ -7,6 +15,14 @@ const MIN = v(-1, -1, -1);
 const MAX = v(1, 1, 1);
 const len = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+/** parseView auf den Winkel-Fall verengen. Bewusst mit Wurf statt Cast: waere die
+    Rueckgabe eines Tages eine Kamera-Referenz, soll der Test das sagen, nicht schweigen. */
+const angles = (text: string): ViewSpec => {
+  const ref = parseView(text);
+  if (ref === null || isFileCameraRef(ref)) throw new Error(`kein Winkel-View: ${text}`);
+  return ref;
+};
 
 describe("parseView", () => {
   it("reads a named view", () => {
@@ -26,13 +42,13 @@ describe("parseView", () => {
   });
 
   it("wraps the azimuth into 0..359", () => {
-    expect(parseView("370,0,1")?.azimuth).toBe(10);
-    expect(parseView("-90,0,1")?.azimuth).toBe(270);
+    expect(angles("370,0,1").azimuth).toBe(10);
+    expect(angles("-90,0,1").azimuth).toBe(270);
   });
 
   it("clamps the elevation to the gimbal limit", () => {
-    expect(parseView("0,90,1")?.elevation).toBe(89);
-    expect(parseView("0,-120,1")?.elevation).toBe(-89);
+    expect(angles("0,90,1").elevation).toBe(89);
+    expect(angles("0,-120,1").elevation).toBe(-89);
   });
 
   it("rejects a non-positive distance", () => {
@@ -156,5 +172,40 @@ describe("cameraToView", () => {
     expect(Number.isFinite(spec.azimuth)).toBe(true);
     expect(Number.isFinite(spec.elevation)).toBe(true);
     expect(spec.distance).toBeGreaterThan(0);
+  });
+});
+
+describe("parseView with a file camera", () => {
+  it("reads the camera: prefix", () => {
+    expect(parseView("camera:Schnitt")).toEqual({ camera: "Schnitt" });
+  });
+
+  it("keeps the name's capitalisation", () => {
+    expect(parseView("camera:FrontLeft")).toEqual({ camera: "FrontLeft" });
+  });
+
+  it("keeps inner spaces but trims the edges", () => {
+    expect(parseView("  camera:  Schnitt A  ")).toEqual({ camera: "Schnitt A" });
+  });
+
+  it("accepts the prefix in any case", () => {
+    expect(parseView("CAMERA:Front")).toEqual({ camera: "Front" });
+  });
+
+  it("rejects an empty name", () => {
+    expect(parseView("camera:")).toBeNull();
+    expect(parseView("camera:   ")).toBeNull();
+  });
+
+  it("leaves the two existing forms untouched", () => {
+    expect(parseView("iso")).toEqual(NAMED_VIEWS.iso);
+    expect(parseView("45,30,1.2")).toEqual({ azimuth: 45, elevation: 30, distance: 1.2 });
+  });
+});
+
+describe("isFileCameraRef", () => {
+  it("tells the two kinds apart", () => {
+    expect(isFileCameraRef({ camera: "Front" })).toBe(true);
+    expect(isFileCameraRef(NAMED_VIEWS.iso)).toBe(false);
   });
 });

@@ -60,7 +60,7 @@ describe("guide examples", () => {
         expect(() => JSON.parse(code) as unknown, "not valid JSON").not.toThrow();
 
         const bytes = new TextEncoder().encode(code).buffer as ArrayBuffer;
-        const scene = (await loadModel(bytes, "gltf", "#888888")) as Object3D;
+        const scene = (await loadModel(bytes, "gltf", "#888888")).object as Object3D;
 
         // Ein Beispiel, das nichts in die Szene stellt, lehrt nichts.
         expect(scene.children.length).toBeGreaterThan(0);

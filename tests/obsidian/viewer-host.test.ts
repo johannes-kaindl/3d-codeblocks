@@ -11,6 +11,7 @@ function makeVp() {
     disposed: 0,
     setModel: vi.fn(),
     setView: vi.fn(),
+    setFileCamera: vi.fn(),
     getView: vi.fn(() => null),
     setColors: vi.fn(),
     setAutoRotate: vi.fn(),
@@ -41,7 +42,7 @@ function makeHost(over: Record<string, unknown> = {}) {
       },
     },
     budget,
-    loadModel: vi.fn().mockResolvedValue({}),
+    loadModel: vi.fn().mockResolvedValue({ object: {}, cameras: [] }),
     readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
     managed: true,
     ...over,
@@ -302,5 +303,72 @@ describe("ViewerHost refreshLighting", () => {
   it("tut ohne Viewport nichts (Poster/Fehler)", () => {
     const { host } = makeHost();
     expect(() => host.refreshLighting()).not.toThrow();
+  });
+});
+
+/** Sammelt allen Text unter einem Fake-Element — die Hinweiszeile haengt verschachtelt. */
+function textOf(el: any): string {
+  const parts: string[] = [el.textContent ?? ""];
+  for (const child of el.children ?? []) parts.push(textOf(child));
+  return parts.join(" ");
+}
+
+const CAMERAS = [
+  { nodeName: "Front", cameraName: null, orthographic: false, object: {}, yfov: 0.66 },
+  { nodeName: "Plan", cameraName: null, orthographic: true, object: {}, yfov: 0 },
+];
+
+const withCameras = () => vi.fn().mockResolvedValue({ object: {}, cameras: CAMERAS });
+
+describe("ViewerHost and cameras from the file", () => {
+  it("faehrt eine getroffene Kamera an, statt eine Ansicht zu rechnen", async () => {
+    const { host, created } = makeHost({ loadModel: withCameras() });
+    await host.render({
+      provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x",
+      view: { camera: "Front" },
+    });
+    expect(created[0].setFileCamera).toHaveBeenCalledWith(CAMERAS[0]);
+  });
+
+  it("passt bei einer unbekannten Kamera automatisch ein und sagt es", async () => {
+    const { host, created, message } = makeHost({ loadModel: withCameras() });
+    await host.render({
+      provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x",
+      view: { camera: "Schnitt" },
+    });
+    expect(created[0].setFileCamera).not.toHaveBeenCalled();
+    expect(created[0].setView).toHaveBeenCalledWith(null);
+    expect(textOf(message)).toContain("unknown camera");
+  });
+
+  it("nennt das Format, wenn eine STL-Datei nach einer Kamera gefragt wird", async () => {
+    const { host, created, message } = makeHost({ loadModel: withCameras() });
+    await host.render({
+      provideBytes: bytes, format: "stl", inspectContainer: false, label: "x",
+      view: { camera: "Front" },
+    });
+    expect(created[0].setFileCamera).not.toHaveBeenCalled();
+    expect(textOf(message)).toContain("needs a glTF file");
+  });
+
+  it("meldet eine orthographische Kamera, statt sie anzufahren", async () => {
+    const { host, created, message } = makeHost({ loadModel: withCameras() });
+    await host.render({
+      provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x",
+      view: { camera: "Plan" },
+    });
+    expect(created[0].setFileCamera).not.toHaveBeenCalled();
+    expect(textOf(message)).toContain("orthographic");
+  });
+
+  it("laesst eine gewoehnliche Ansicht unberuehrt und meldet nichts", async () => {
+    const { host, created, message } = makeHost({ loadModel: withCameras() });
+    await host.render({
+      provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x",
+      view: NAMED_VIEWS.iso,
+    });
+    expect(created[0].setView).toHaveBeenCalledWith(NAMED_VIEWS.iso);
+    expect(created[0].setFileCamera).not.toHaveBeenCalled();
+    expect(textOf(message)).not.toContain("camera");
   });
 });

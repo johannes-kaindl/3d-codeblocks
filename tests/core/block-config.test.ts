@@ -98,3 +98,17 @@ describe("view key", () => {
     expect(parseBlockConfig("file: a.glb").config?.view).toBeUndefined();
   });
 });
+
+describe("view key: file camera", () => {
+  it("reads a file camera from view:", () => {
+    const result = parseBlockConfig("file: a.gltf\nview: camera:Schnitt");
+    expect(result.config?.view).toEqual({ camera: "Schnitt" });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("warns about an empty camera name like any unreadable view", () => {
+    const result = parseBlockConfig("file: a.gltf\nview: camera:");
+    expect(result.config?.view).toBeUndefined();
+    expect(result.warnings.some((w) => w.includes("unknown view"))).toBe(true);
+  });
+});

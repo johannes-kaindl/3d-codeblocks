@@ -15,6 +15,22 @@ export interface ViewSpec {
   distance: number;
 }
 
+/** Verweis auf eine im Modell mitgelieferte Kamera, geschrieben als `camera:<name>`.
+    Bewusst ein eigener Typ statt eines Zusatzfeldes an `ViewSpec`: eine Datei-Kamera
+    hat keine orbit-relativen Winkel, aus denen sich ein `ViewSpec` bilden liesse. */
+export interface FileCameraRef {
+  /** Name der Kamera in der Datei — Gross-/Kleinschreibung bleibt erhalten. */
+  camera: string;
+}
+
+/** Was hinter `view:` stehen kann: eigene Ansicht oder Kamera aus der Datei. */
+export type ViewRef = ViewSpec | FileCameraRef;
+
+/** Diskriminiert ueber `camera` — ein `ViewSpec` traegt dieses Feld nie. */
+export function isFileCameraRef(ref: ViewRef): ref is FileCameraRef {
+  return typeof (ref as FileCameraRef).camera === "string";
+}
+
 /** Bei exakt 90 Grad kippt der Aufwaertsvektor von OrbitControls um. */
 export const MAX_ELEVATION = 89;
 
@@ -48,8 +64,18 @@ function clampElevation(value: number): number {
 }
 
 /** `null` = unlesbar; der Aufrufer macht daraus eine Warnung, keinen Fehler. */
-export function parseView(text: string): ViewSpec | null {
-  const trimmed = text.trim().toLowerCase();
+export function parseView(text: string): ViewRef | null {
+  // VOR dem Kleinschreiben pruefen: der Kameraname ist ein Bezeichner aus der Datei
+  // und muss buchstabengetreu erhalten bleiben — auch dort, wo er in einer Warnung
+  // zitiert wird. Nur das Praefix selbst ist case-insensitiv.
+  const raw = text.trim();
+  const prefix = /^camera:(.*)$/i.exec(raw);
+  if (prefix) {
+    const name = prefix[1].trim();
+    return name === "" ? null : { camera: name };
+  }
+
+  const trimmed = raw.toLowerCase();
   if (trimmed === "") return null;
 
   const named = NAMED_VIEWS[trimmed];

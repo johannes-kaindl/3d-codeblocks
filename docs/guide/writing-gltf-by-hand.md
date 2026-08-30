@@ -256,6 +256,53 @@ sin(−45°) ≈ −0.7071 and cos(−45°) ≈ 0.7071.
 name, and its locked-prefix setting matches on them. An unnamed node is one you cannot
 talk about.
 
+## Cameras: a node with no shape
+
+A node does not have to point at a mesh. Point one at a *camera* instead and the file
+carries a viewpoint of its own — the angle you would want a reader to start from. It is the
+same split as everywhere else in glTF: `cameras[]` says what kind of lens it is, and the
+`nodes[]` entry that references it says where the lens stands.
+
+```json
+{
+  "cameras": [
+    { "type": "perspective", "perspective": { "yfov": 0.7854, "znear": 0.1 } }
+  ],
+  "nodes": [
+    {
+      "name": "Section",
+      "camera": 0,
+      "translation": [0, 5, 0],
+      "rotation": [-0.7071, 0, 0, 0.7071]
+    }
+  ]
+}
+```
+
+**`yfov` is the vertical field of view in radians**, not degrees — 0.7854 is 45°. `znear`
+is required and must be greater than zero; `zfar` is optional, and this plugin works out
+its own clipping distances from the size of the model anyway. Everything else is the node
+part you already know from Step 4, quaternions included: this camera stands 5 m up and is
+tipped a quarter turn around X, so it looks straight down.
+
+A camera pays off once the model lives in your vault as a **file** — the inline `gltf`
+block has no keys to put a `view:` in. From a `3d` block pointing at that file, the camera
+is reached by name:
+
+````markdown
+```3d
+file: house.gltf
+view: camera:Section
+```
+````
+
+The name is looked up **in the file**: node names first, camera names second, case
+insensitive. That matters because it is not the name the loaded scene ends up with —
+three.js turns spaces into underscores while loading, so a camera called `Section A` stays
+reachable as `view: camera:Section A`. Orthographic cameras (`"type": "orthographic"`) are
+found but not used; the viewer is perspective, and says so below the viewport rather than
+quietly ignoring you.
+
 ## Producing the numbers yourself
 
 The one part you cannot type by hand is the buffer. Here is the whole trick, as a shell
@@ -294,7 +341,8 @@ and keep two rules in mind:
 
 ## Where to go next
 
-- Save a camera angle into the block with `view:` — see the main [README](../../README.md).
+- Save a camera angle into the block with `view:`, or aim one the file carries itself with
+  `view: camera:<name>` — see the main [README](../../README.md).
 - Open a real exported model and read it with what you now know. Blender writes
   `scene.gltf` plus `scene.bin`; the JSON is the same shape as above, just longer.
 - The full specification is
