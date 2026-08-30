@@ -64,10 +64,10 @@ describe("unsupportedRequired", () => {
     ).toEqual(["KHR_draco_mesh_compression"]);
   });
 
-  it("flags meshopt", () => {
+  it("lets meshopt through — its decoder runs without a worker", () => {
     expect(
       unsupportedRequired({ valid: true, requiredExtensions: ["EXT_meshopt_compression"] }),
-    ).toEqual(["EXT_meshopt_compression"]);
+    ).toEqual([]);
   });
 
   it("passes extensions that are merely used, not required", () => {

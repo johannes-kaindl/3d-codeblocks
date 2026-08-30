@@ -31,8 +31,11 @@ export interface GlbInspection {
 }
 
 export const UNSUPPORTED_EXTENSIONS = [
+  // Nur Draco. `EXT_meshopt_compression` stand hier bis 2026-08-30 mit derselben
+  // Begruendung ("worker-basiert") — die aber nur fuer Draco stimmt: dessen `DRACOLoader`
+  // konstruiert `new Worker(...)` fest verdrahtet, waehrend `MeshoptDecoder` Worker nur
+  // auf Zuruf nutzt und sonst synchron im Main-Thread dekodiert (s. `viewer/loaders.ts`).
   "KHR_draco_mesh_compression",
-  "EXT_meshopt_compression",
 ] as const;
 
 const INVALID: GlbInspection = { valid: false, requiredExtensions: [] };

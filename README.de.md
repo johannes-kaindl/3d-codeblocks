@@ -35,7 +35,7 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 - WebGL-Unterstützung im Renderer — auf dem Desktop Standard. Auf Mobilgeräten
   funktioniert es, aber große Modelle sind langsam und das Browser-Limit für
   gleichzeitige 3D-Ansichten ist früher erreicht.
-- **Unkomprimiertes glTF.** Draco- und Meshopt-komprimierte Dateien können nicht
+- **Kein Draco.** Meshopt-komprimierte Dateien funktionieren; Draco-komprimierte können nicht
   gelesen werden (siehe [Unterstützte Formate](#unterstützte-formate)).
 
 ## Installation
@@ -108,10 +108,12 @@ liegt. Was die Datei anfordert und im Vault nicht existiert, wird übersprungen 
 dem Viewport benannt, statt einfach zu fehlen. Adressen im Netz werden nur geladen, wenn
 **Externe Ressourcen erlauben** eingeschaltet ist.
 
-**Komprimiertes glTF wird nicht unterstützt.** Draco- und Meshopt-Decoder laufen in
-Web-Workern, die Obsidians Renderer verbietet. Solche Dateien werden erkannt und in
-Klartext gemeldet, statt mit einem Parser-Fehler abzubrechen — bitte unkomprimiert
-exportieren.
+**Meshopt-Kompression funktioniert, Draco nicht.** Der Meshopt-Decoder kann im
+Haupt-Thread laufen, `EXT_meshopt_compression`-Dateien laden also wie jede andere — was
+sich lohnt, weil Meshopt ein Modell oft auf einen Bruchteil schrumpft. Dracos Decoder ist
+fest an einen Web-Worker gebunden, den Obsidians Renderer verbietet; solche Dateien werden
+erkannt und in Klartext gemeldet, statt mit einem Parser-Fehler abzubrechen.
+`gltfpack -cc` erzeugt Meshopt-Dateien.
 
 ### Block-Schlüssel
 

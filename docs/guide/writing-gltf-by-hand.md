@@ -288,8 +288,9 @@ and keep two rules in mind:
 - **No files beside it.** An inline block has no folder to look in, so every byte must be
   in the block itself, as a `data:` URI. A `.gltf` **file** in your vault does not have this
   limit — it may keep its geometry in a `.bin` next to it, the way exporters write it.
-- **No compression.** Draco- and Meshopt-compressed models are reported in plain language
-  rather than failing obscurely. Export uncompressed.
+- **No Draco compression.** Meshopt-compressed files (`gltfpack -cc`) load fine — but as
+  a *file*, not here: compressed data is binary, and a code block is text. Draco-compressed
+  models are reported in plain language rather than failing obscurely.
 
 ## Where to go next
 

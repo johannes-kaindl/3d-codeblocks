@@ -1,10 +1,16 @@
 // ArrayBuffer → Object3D. Kennt Obsidian nicht.
 //
-// KEINE DRACOLoader-/MeshoptDecoder-Registrierung: beide sind worker-basiert und
-// Obsidians Renderer verbietet Worker. Komprimierte Dateien werden vorher in
+// KEINE DRACOLoader-Registrierung: `DRACOLoader` konstruiert `new Worker(...)` fest
+// verdrahtet, und Obsidians Renderer verbietet Worker. Draco-Dateien werden vorher in
 // `block-child.ts` abgefangen (core/gltf-inspect), damit der Nutzer den Grund sieht.
+//
+// MESHOPT dagegen geht: `decodeGltfBufferAsync` prueft `workers.length > 0` und faellt
+// sonst auf synchrones WASM im Main-Thread zurueck — `useWorkers()` ist reines Opt-in,
+// three ruft es nie von selbst, und wir rufen es hier bewusst NICHT. Das WASM liegt
+// base64-inline im Modul, es gibt also auch keinen Netzwerkzugriff.
 import { LoadingManager, Mesh, MeshStandardMaterial, Object3D } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { ModelFormat } from "../core/format";
 
@@ -29,7 +35,7 @@ function loadGltf(buffer: ArrayBuffer, resolveUrl?: (uri: string) => string): Pr
   if (resolveUrl) manager.setURLModifier(resolveUrl);
 
   return new Promise((resolve, reject) => {
-    new GLTFLoader(manager).parse(
+    new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder).parse(
       buffer,
       "",
       (gltf) => {

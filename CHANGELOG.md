@@ -18,6 +18,11 @@ All notable changes to this project are documented here. The format follows
   Off by default because opening a note should not contact a server you did not choose.
 - **STL files that carry their own colours now show them.** The theme colour still applies
   to STL files without colours of their own.
+- **Meshopt-compressed models now load** (`EXT_meshopt_compression`, what `gltfpack -cc`
+  produces). The README said this was impossible because the decoder needs a web worker —
+  that is true of Draco, not of Meshopt: its decoder falls back to running in the main
+  thread, and the WebAssembly it needs is embedded in the plugin, so nothing is fetched.
+  Draco is still refused, and its message now names the way out instead of only the wall.
 - **A guide: [writing a 3D model by hand](docs/guide/writing-gltf-by-hand.md).** Builds a
   model as text inside a note, step by step, and teaches you to read any `.gltf` file along
   the way. Every example in it is loaded through the plugin's own loader on every commit,

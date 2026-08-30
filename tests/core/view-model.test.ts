@@ -44,7 +44,7 @@ describe("toViewModel", () => {
       extensions: ["KHR_draco_mesh_compression"],
     });
     expect(vm.message).toBe(
-      "Compressed glTF is not supported (Obsidian does not allow web workers). Please export uncompressed. Required: KHR_draco_mesh_compression",
+      "Draco-compressed glTF is not supported: its decoder needs a web worker, which Obsidian's renderer does not allow. Export uncompressed, or with Meshopt compression — that one works. Required: KHR_draco_mesh_compression",
     );
   });
 

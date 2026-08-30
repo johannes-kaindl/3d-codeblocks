@@ -56,9 +56,12 @@ export function toViewModel(state: ViewerState): ViewModel {
         `Unsupported format: ${state.path} (supported: ${SUPPORTED_EXTENSIONS.join(", ")})`,
       );
     case "compressed-gltf":
+      // Nennt bewusst den AUSWEG mit: Meshopt geht seit 2026-08-30, nur Draco nicht.
+      // Eine Fehlermeldung, die nur "geht nicht" sagt, laesst den Nutzer im Regen.
       return error(
-        "Compressed glTF is not supported (Obsidian does not allow web workers). " +
-          `Please export uncompressed. Required: ${state.extensions.join(", ")}`,
+        "Draco-compressed glTF is not supported: its decoder needs a web worker, which " +
+          "Obsidian's renderer does not allow. Export uncompressed, or with Meshopt " +
+          `compression \u2014 that one works. Required: ${state.extensions.join(", ")}`,
       );
     case "invalid-file":
       return error("The file is damaged or not a valid GLB.");

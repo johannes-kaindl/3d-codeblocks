@@ -31,8 +31,8 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 - Obsidian **1.5.0** or newer.
 - WebGL support in the renderer — standard on desktop. Mobile works, but large models
   are slow and the browser's limit on simultaneous 3D views is reached sooner.
-- **Uncompressed glTF.** Draco- and Meshopt-compressed files cannot be read (see
-  [Supported formats](#supported-formats)).
+- **No Draco compression.** Meshopt-compressed files work; Draco-compressed ones cannot be
+  read (see [Supported formats](#supported-formats)).
 
 ## Installation
 
@@ -101,9 +101,11 @@ asks for that is *not* in your vault is skipped and named below the viewport, ra
 silently missing. Addresses on the web are only fetched if you turn on **Allow external
 resources**.
 
-**Compressed glTF is not supported.** Draco and Meshopt decoders run in web workers,
-which Obsidian's renderer forbids. Such files are detected and reported in plain
-language instead of failing with a parser error — export uncompressed.
+**Meshopt compression works; Draco does not.** The Meshopt decoder can run in the main
+thread, so `EXT_meshopt_compression` files load like any other — useful, because meshopt
+often cuts a model to a fraction of its size. Draco's decoder is hard-wired to a web
+worker, which Obsidian's renderer forbids; those files are detected and reported in plain
+language instead of failing with a parser error. `gltfpack -cc` produces meshopt files.
 
 ### Block keys
 

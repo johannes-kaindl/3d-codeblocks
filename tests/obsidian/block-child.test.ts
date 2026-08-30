@@ -212,7 +212,7 @@ describe("ModelBlock", () => {
     await block.loadNow();
 
     expect(created).toHaveLength(0);
-    expect(JSON.stringify(el.children)).toContain("Compressed glTF is not supported");
+    expect(JSON.stringify(el.children)).toContain("Draco-compressed glTF is not supported");
   });
 
   it("collapses the empty stage on a terminal error", async () => {
