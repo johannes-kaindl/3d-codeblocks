@@ -20,7 +20,8 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 - Zwei Codeblöcke: `3d` für einen Dateiverweis mit optionalem Titel und optionaler
   Höhe, `gltf` für glTF-JSON direkt in der Notiz.
 - Drehen, zoomen, schieben; **einen Kamerawinkel im Block speichern**, sodass die
-  Ansicht mit der Notiz reist und im Git-Diff auftaucht.
+  Ansicht mit der Notiz reist und im Git-Diff auftaucht — oder mit einer Kamera
+  starten, die die Modelldatei selbst mitbringt.
 - **Bearbeitungsmodus:** die obersten Knoten eines glTF-/GLB-Modells verschieben und
   skalieren. Änderungen landen in einer eigenen `.edit.gltf` — das Original wird nie
   verändert.
@@ -122,10 +123,35 @@ erkannt und in Klartext gemeldet, statt mit einem Parser-Fehler abzubrechen.
 | `file:` | ja | Pfad zum Modell. Wird wie ein Wikilink aufgelöst (relativ, vault-absolut oder Kurzform) |
 | `height:` | nein | Höhe des Ansichtsfensters in Pixeln; sonst greift die Einstellung |
 | `title:` | nein | Beschriftung über dem Ansichtsfenster |
-| `view:` | nein | Gespeicherter Kamerawinkel — ein Name (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`) oder drei Zahlen `azimut,elevation,distanz` |
+| `view:` | nein | Gespeicherter Kamerawinkel — ein Name (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`), drei Zahlen `azimut,elevation,distanz` oder `camera:<name>` für eine Kamera aus der Datei selbst |
 
 Unbekannte Schlüssel werden unter dem Ansichtsfenster gemeldet statt stillschweigend
 ignoriert — ein Tippfehler wie `heigth:` soll nicht wie ein Plugin-Fehler aussehen.
+
+### Eine Kamera aus der Datei anfahren
+
+Eine `.gltf` oder `.glb` kann eigene Kameras mitbringen — den Blickwinkel, den der Autor
+des Modells für den richtigen hielt. `view: camera:<name>` startet dort:
+
+```3d
+file: haus.gltf
+view: camera:Schnitt
+```
+
+Position, Blickrichtung und Bildwinkel kommen unverändert aus der Datei. Von da an lässt
+sich wie gewohnt orbitieren, zoomen und schwenken — gedreht wird um den Punkt, auf den die
+Kamera blickt, nicht um die Modellmitte. Eine Kamera, die einen Ausschnitt rahmt, behält
+damit ihren Ausschnitt.
+
+**Gesucht wird der Name, der in der Datei steht**, ohne Rücksicht auf Groß- und
+Kleinschreibung: erst unter den Namen der Kamera-*Knoten* (in Blender der Objektname aus
+dem Outliner), dann unter den Namen der Kamera-*Definitionen*. Namen mit Leerzeichen
+funktionieren — `view: camera:Schnitt A` —, obwohl three.js sie beim Laden zu `Schnitt_A`
+umschreibt; das Plugin liest die Datei, nicht die geladene Szene. Orthographische Kameras
+werden gefunden, aber nicht benutzt: das Ansichtsfenster ist perspektivisch.
+
+Ein Name, den es nicht gibt, wird unter dem Ansichtsfenster gemeldet — zusammen mit den
+Namen, die die Datei anbietet — und das Modell stattdessen eingepasst, bleibt also sichtbar.
 
 ### Einen Kamerawinkel speichern
 
@@ -135,6 +161,8 @@ der Seitenleiste (Befehl **3D-Ansichtssteuerung öffnen**) oder über die Nadel,
 also mit deiner Notiz und taucht in Git-Diffs auf. Die Modelldatei selbst wird nie
 verändert.
 
+**Ansicht speichern** schreibt immer Zahlen: auf einem Block mit `camera:` gedrückt,
+ersetzt es den Verweis durch den Winkel, aus dem du gerade schaust.
 **Ansicht löschen** entfernt den `view:`-Schlüssel wieder; **Einpassen** setzt die
 Kamera zurück, ohne ihn anzurühren. Dieselben drei Aktionen gibt es auch als Befehle
 (**Aktuelle Ansicht in Block speichern**, **Gespeicherte Ansicht löschen**, **Kamera

@@ -18,7 +18,8 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 - Two code blocks: `3d` for a file reference with an optional title and height, `gltf`
   for glTF JSON written straight into the note.
 - Orbit, zoom and pan; **save a camera angle into the block**, so the view travels with
-  the note and shows up in git diffs.
+  the note and shows up in git diffs — or start from a camera the model file carries
+  itself.
 - **Edit mode:** move and scale the top-level nodes of a glTF/GLB model. Edits go to a
   separate `.edit.gltf` file — the original is never modified.
 - Theme-aware default material for STL, which carries none of its own.
@@ -114,10 +115,33 @@ language instead of failing with a parser error. `gltfpack -cc` produces meshopt
 | `file:` | yes | Path to the model. Resolved like a wikilink (relative, vault-absolute or short form) |
 | `height:` | no | Viewport height in pixels; falls back to the setting |
 | `title:` | no | Caption above the viewport |
-| `view:` | no | Saved camera angle — a name (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`) or three numbers `azimuth,elevation,distance` |
+| `view:` | no | Saved camera angle — a name (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`), three numbers `azimuth,elevation,distance`, or `camera:<name>` for a camera the file itself carries |
 
 Unknown keys are reported below the viewport rather than silently ignored — a typo like
 `heigth:` should not look like a plugin bug.
+
+### Aiming a camera from the file
+
+A `.gltf` or `.glb` may bring its own cameras — the angle whoever built the model
+considered the right one. `view: camera:<name>` starts there:
+
+```3d
+file: house.gltf
+view: camera:Section
+```
+
+Position, direction and field of view come straight from the file. From there you orbit,
+zoom and pan as usual, turning around the point that camera looks at rather than the middle
+of the model — so a camera that frames a detail keeps its detail.
+
+**The name is the one in the file**, matched without regard to case: first the names of the
+camera *nodes* (in Blender, the object name in the outliner), then the names of the camera
+*definitions*. Names with spaces work — `view: camera:Section A` — even though three.js
+rewrites them to `Section_A` while loading; the plugin reads the file, not the loaded scene.
+Orthographic cameras are found but not used, since the viewport is perspective.
+
+A name that isn't there is reported below the viewport — together with the names the file
+does offer — and the model is fitted instead, so it stays visible.
 
 ### Saving a camera angle
 
@@ -126,7 +150,9 @@ with the **Open 3D view controls** command) or the pin button that appears when 
 the model. The angle is stored in the code block as `view:`, so it travels with your note
 and shows up in git diffs. The model file itself is never modified.
 
-**Clear view** removes the `view:` key again; **Fit** resets the camera without touching
+**Save view** always writes numbers: press it on a block that used `camera:` and the
+reference is replaced by the angle you are looking from right now. **Clear view** removes
+the `view:` key again; **Fit** resets the camera without touching
 it. The same three actions are also available as commands (**Save current view to
 block**, **Clear saved view**, **Fit camera to model**) for whichever model you last
 interacted with. Embeds and opened files can be aimed and fitted the same way, but have
