@@ -41,6 +41,12 @@ All notable changes to this project are documented here. The format follows
   the way. Every example in it is loaded through the plugin's own loader on every commit,
   so it cannot quietly stop working.
 
+### Fixed
+
+- **The "discard unsaved edits" dialog had its buttons the wrong way round** — the
+  destructive choice sat on the left. Cancel is now on the left and the destructive
+  action on the right, as everywhere else in Obsidian.
+
 ## [0.3.1] — 2026-08-04
 
 ### Changed
