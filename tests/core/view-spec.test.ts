@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { NAMED_VIEWS, cameraToView, formatView, parseView, viewToCamera } from "../../src/core/view-spec";
+import {
+  NAMED_VIEWS,
+  cameraToView,
+  formatView,
+  isFileCameraRef,
+  parseView,
+  viewToCamera,
+} from "../../src/core/view-spec";
 import { fitCamera } from "../../src/core/camera-fit";
 
 const v = (x: number, y: number, z: number) => ({ x, y, z });
@@ -156,5 +163,40 @@ describe("cameraToView", () => {
     expect(Number.isFinite(spec.azimuth)).toBe(true);
     expect(Number.isFinite(spec.elevation)).toBe(true);
     expect(spec.distance).toBeGreaterThan(0);
+  });
+});
+
+describe("parseView with a file camera", () => {
+  it("reads the camera: prefix", () => {
+    expect(parseView("camera:Schnitt")).toEqual({ camera: "Schnitt" });
+  });
+
+  it("keeps the name's capitalisation", () => {
+    expect(parseView("camera:FrontLeft")).toEqual({ camera: "FrontLeft" });
+  });
+
+  it("keeps inner spaces but trims the edges", () => {
+    expect(parseView("  camera:  Schnitt A  ")).toEqual({ camera: "Schnitt A" });
+  });
+
+  it("accepts the prefix in any case", () => {
+    expect(parseView("CAMERA:Front")).toEqual({ camera: "Front" });
+  });
+
+  it("rejects an empty name", () => {
+    expect(parseView("camera:")).toBeNull();
+    expect(parseView("camera:   ")).toBeNull();
+  });
+
+  it("leaves the two existing forms untouched", () => {
+    expect(parseView("iso")).toEqual(NAMED_VIEWS.iso);
+    expect(parseView("45,30,1.2")).toEqual({ azimuth: 45, elevation: 30, distance: 1.2 });
+  });
+});
+
+describe("isFileCameraRef", () => {
+  it("tells the two kinds apart", () => {
+    expect(isFileCameraRef({ camera: "Front" })).toBe(true);
+    expect(isFileCameraRef(NAMED_VIEWS.iso)).toBe(false);
   });
 });

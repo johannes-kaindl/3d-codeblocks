@@ -4,13 +4,13 @@
 //   `key: value`  — nur wenn die Zeile `^[A-Za-z][A-Za-z0-9_-]*\s*:` erfuellt
 //   alles andere  — Pfad-Kurzform (deshalb ueberlebt `some folder/odd:name.glb`)
 
-import { VIEW_NAMES, parseView, type ViewSpec } from "./view-spec";
+import { VIEW_NAMES, parseView, type ViewRef } from "./view-spec";
 
 export interface BlockConfig {
   file: string;
   height?: number;
   title?: string;
-  view?: ViewSpec;
+  view?: ViewRef;
 }
 
 export interface ParseResult {
@@ -38,7 +38,7 @@ export function parseBlockConfig(source: string): ParseResult {
   let file: string | undefined;
   let height: number | undefined;
   let title: string | undefined;
-  let view: ViewSpec | undefined;
+  let view: ViewRef | undefined;
   let fileSeen = 0;
 
   for (const rawLine of source.split("\n")) {
@@ -70,7 +70,7 @@ export function parseBlockConfig(source: string): ParseResult {
       const parsed = parseView(value);
       if (parsed === null) {
         warnings.push(
-          `\`view\`: unknown view \`${value}\` — use ${VIEW_NAMES} or three numbers (azimuth,elevation,distance)`,
+          `\`view\`: unknown view \`${value}\` — use ${VIEW_NAMES}, three numbers (azimuth,elevation,distance) or \`camera:<name>\` for a camera from the file`,
         );
       } else {
         view = parsed;
