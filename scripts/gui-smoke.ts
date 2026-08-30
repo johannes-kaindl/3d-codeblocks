@@ -55,6 +55,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   Cdp,
@@ -1668,6 +1670,47 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     );
   }
 
+  // --- B17. Die drei Beleuchtungs-Zustände sehen verschieden aus ----------
+  // Gemessen wird das BILD, nicht die Einstellung: dass ein Dropdown seinen Wert
+  // speichert, sagt nichts darüber, ob der Renderpfad ihn je erreicht. Genau diese
+  // Lücke war der Smoke-#5-Befund bei "Auto-rotate".
+  //
+  // Der Mittelwert wird mitgeführt, obwohl der Hash allein entscheidet: wird der Punkt
+  // rot, ist die nächste Frage immer "waren die Bilder gleich oder nur ähnlich?" — und
+  // drei Hashes nebeneinander beantworten sie nicht.
+  await closeExtraLeaves(cdp);
+  const lightingShots: Record<string, { hash: number; avg: number[] } | null> = {};
+  for (const mode of ["off", "faithful", "contrast"]) {
+    await setSetting(cdp, "lighting", mode);
+    await openNote(
+      cdp,
+      SMOKE_NOTE_MANY,
+      [`# GUI-Smoke Beleuchtung ${mode} (automatisch erzeugt)`, "", `${fence}3d`, `file: ${probe}`, `title: Licht ${mode}`, fence, ""].join("\n"),
+      "preview",
+    );
+    lightingShots[mode] = await pollUntil<{ hash: number; avg: number[] }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas");
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.coverage < 5) return null;
+        return { hash: stats.hash, avg: stats.avg };
+      `,
+      40_000,
+    );
+  }
+  await setSetting(cdp, "lighting", "faithful");
+
+  const shotHashes = Object.values(lightingShots).map((s) => s?.hash ?? null);
+  record(
+    "B17. Die drei Beleuchtungs-Zustände erzeugen drei verschiedene Bilder",
+    shotHashes.every((h) => h !== null) && new Set(shotHashes).size === 3,
+    Object.entries(lightingShots)
+      .map(([mode, s]) => (s ? `${mode} #${s.hash} rgb(${s.avg.join(",")})` : `${mode} kein Bild`))
+      .join(" · "),
+  );
+
   skipped(
     "SMOKE.md Punkt 9 (Draco-GLB)",
     "braucht eine Draco-komprimierte Datei im Vault — der Treiber bringt keine Testdaten mit",
@@ -2451,6 +2494,60 @@ const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => 
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
 ];
 
+/** Misst der Lauf ueberhaupt den Code dieses Checkouts?
+ *
+ *  Der Treiber deployt NICHT — er haengt sich an ein laufendes Obsidian und prueft, was
+ *  dort zufaellig installiert ist. Ohne diesen Guard misst ein gruener Lauf moeglicherweise
+ *  einen fremden Build, und **nichts** faellt dabei auf: `manifest.version` ist dafuer
+ *  blind, weil Repo- und Vault-Build dieselbe Nummer tragen, solange kein Release
+ *  dazwischenlag.
+ *
+ *  Gemessen am 2026-08-30: im Staging-Vault lag ein Build vom 15.08. (666.980 Bytes)
+ *  gegen 696.246 Bytes im Repo — beide `0.3.1`. Zwei Wochen Aenderungen waren in keinem
+ *  Lauf enthalten, der sie zu pruefen glaubte. Dach-`AGENTS.md` fuehrt dieselbe Gattung
+ *  fuer Store-Builds (4 von 8 gruenen Laeufen).
+ *
+ *  Bewusst nur eine Warnung statt eines Abbruchs, wenn der Vault gar nicht gefunden wird:
+ *  ein Lauf gegen einen Vault ausserhalb von `STAGING_VAULTS_DIR` (etwa den Arbeits-Vault)
+ *  ist zulaessig, nur eben nicht selbst-verifizierend. Weicht der Build dagegen NACHWEISLICH
+ *  ab, ist Abbruch die richtige Antwort — weiterzulaufen hiesse, Messwerte zu erzeugen,
+ *  die niemand einem Codestand zuordnen kann.
+ */
+function assertDeployedBuildMatches(vault: string | undefined): void {
+  const repoBuild = "main.js";
+  if (!existsSync(repoBuild)) {
+    throw new Error("main.js fehlt — erst `npm run build`, dann den Smoke.");
+  }
+
+  const base = process.env.STAGING_VAULTS_DIR;
+  if (base === undefined || base === "") {
+    console.log("  ⚠ STAGING_VAULTS_DIR nicht gesetzt — Build-Abgleich uebersprungen.");
+    return;
+  }
+
+  const vaultName = vault ?? "3d-codeblocks";
+  const deployed = join(base, vaultName, ".obsidian", "plugins", "three-d-codeblocks", "main.js");
+  if (!existsSync(deployed)) {
+    console.log(`  ⚠ Kein Plugin-Build unter ${vaultName} gefunden — Build-Abgleich uebersprungen.`);
+    return;
+  }
+
+  const a = readFileSync(repoBuild);
+  const b = readFileSync(deployed);
+  if (a.equals(b)) {
+    console.log(`  ✔ Der Vault ${vaultName} traegt den Build dieses Checkouts (${a.length} Bytes).`);
+    return;
+  }
+
+  throw new Error(
+    `Der Vault ${vaultName} traegt einen ANDEREN Build als dieses Repo — der Lauf wuerde fremden Code messen.\n` +
+      `  Repo:  ${a.length} Bytes\n` +
+      `  Vault: ${b.length} Bytes\n` +
+      `  Beheben: OBSIDIAN_PLUGIN_DIR="${join(base, vaultName, ".obsidian", "plugins", "three-d-codeblocks")}" npm run deploy\n` +
+      `  (danach das Fenster neu laden — deploy allein ist KEIN Reload)`,
+  );
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const flag = (name: string): string | undefined => {
@@ -2471,6 +2568,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`GUI-Smoke — Obsidian auf Port ${port}`);
+  assertDeployedBuildMatches(vault);
   const cdp = await Cdp.attach(port, vault);
   // Ausserhalb des try, damit das `finally` ihn auch nach einem Abbruch mitten im Lauf
   // zurueckschreiben kann — sonst bliebe der Vault im Smoke-Zustand stehen.
