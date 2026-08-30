@@ -12,6 +12,7 @@
 // `validateSettings`; `mergeSettings` ist dort die offene Welt.
 
 import type { PanelPlacement } from "./panel-target";
+import type { LightingMode, ModelLightsMode } from "./lighting";
 import {
   check,
   oneOf,
@@ -32,6 +33,10 @@ export interface PluginSettings {
   lockedNodePrefixes: string;
   /** `.gltf`-Nebendateien duerfen von http(s) kommen. Aus: nur der eigene Vault. */
   allowExternalResources: boolean;
+  /** Wie stark das Plugin die Szene aufbereitet (Umgebung + Tone Mapping). */
+  lighting: LightingMode;
+  /** Was mit den Lichtern aus der Datei geschieht. */
+  modelLights: ModelLightsMode;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -43,6 +48,11 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   panelPlacement: "auto",
   lockedNodePrefixes: "env__",
   allowExternalResources: false,
+  // "faithful" statt "off": `metallicFactor` hat in glTF den Default 1.0, der haeufigste
+  // Materialfall ist also poliertes Metall — und das ist ohne Umgebung schwarz. Der alte
+  // Auslieferungszustand war damit der fehlerhafte.
+  lighting: "faithful",
+  modelLights: "prefer",
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;
@@ -75,6 +85,8 @@ const clampContexts: FieldCheck<number> = (raw, fallback) => {
 const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   viewMode: oneOf(["immediate", "on-click"] as const),
   panelPlacement: oneOf(["auto", "sidebar", "toolbar"] as const),
+  lighting: oneOf(["off", "faithful", "contrast"] as const),
+  modelLights: oneOf(["prefer", "ignore"] as const),
   // Die generische Zahl-Pruefung nimmt jede endliche Zahl, also auch 0 und -1 —
   // eine Hoehe von 0 ist aber kein Wunsch, sondern ein kaputter Wert.
   defaultHeight: check((v) => typeof v === "number" && Number.isFinite(v) && v > 0),
