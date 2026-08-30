@@ -1,27 +1,42 @@
 #!/bin/sh
 # Re-vendor kit modules from ../obsidian-kit. Run after kit updates.
+#
+# CORE-META-22 (verbindlich seit 2026-08-30): gelesen wird aus einer FESTEN GIT-REF, nicht
+# aus dem Arbeitsstand des Nachbar-Repos. Ein `cp $KIT/src/...` liefert, was dort gerade
+# ausgecheckt ist — bei einem Repo mitten in einer Migration also etwas, das in keinem Commit
+# steht. Probe fuer die Korrektheit: ein zweiter Lauf darf keinen Diff erzeugen.
+#
+# Warum 0.27.0 und nicht der neueste Tag: seit Kit 0.28.0 sind die `pure/`-Module nach
+# `code-kit` gezogen — `0.28.0:src/pure/num.ts` und `settings_schema.ts` existieren dort
+# NICHT MEHR. 0.27.0 traegt alle fuenf hier benoetigten Dateien, und `confirm.ts` ist
+# zwischen 0.27.0 und 0.28.0 byte-identisch (geprueft 2026-08-30). Ein Umzug der beiden
+# pure-Module auf code-kit als Quelle ist ein eigener Vorgang, kein Nebeneffekt hiervon.
 set -e
 
 KIT="${KIT_DIR:-../obsidian-kit}"
-[ -d "$KIT/src/pure" ] || { echo "Kit nicht gefunden unter $KIT (KIT_DIR setzen)" >&2; exit 1; }
-# ⚠️ Dieses Skript vendored IMMER den aktuellen Kit-HEAD, nicht den gepinnten Stand.
-# Am 2026-08-30 stand das Kit auf 0.28.0, src/vendor/kit/ aber auf 0.27.0 — ein Lauf haette
-# num.ts und settings_schema.ts stillschweigend mit angehoben. Wer nur EIN Modul nachziehen
-# will, prueft vorher, was sich sonst noch aendert:
-#   for f in ...; do diff <(tail -n +2 src/vendor/<f>.ts) $KIT/src/<f>.ts; done
-# Die dauerhafte Loesung ist eine feste Kit-Ref (offener Task „sync-kit.sh auf feste
-# Kit-Ref umstellen"); bis dahin ist dieser Lauf eine bewusste Entscheidung, kein Routineschritt.
-VER=$(node -p "require('$KIT/package.json').version")
-# Der Pin-SHA ist bewusst der Kit-HEAD, NICHT der Tag-SHA von $VER (0.27.0: fbb42d4 statt
-# 548041b). So erzeugen es alle Form-A-Skripte im Workspace, und tools/pin_find.py des Dachs
-# loest den Tag inhaltsbasiert auf, ist also nicht auf den SHA angewiesen. Wer hier auf den
-# Tag umstellt, weicht von acht Schwester-Repos ab — dann bitte dort mit.
-SHA=$(git -C "$KIT" rev-parse --short HEAD)
+KIT_REF="${KIT_REF:-0.27.0}"
 
-stamp() { # stamp <vendored-file> <kit-relative-path>
-  header="// vendored from obsidian-kit@$VER, $2 — do not hand-edit; re-vendor via tools/sync-kit.sh"
-  printf '%s\n' "$header" | cat - "$1" > "$1.tmp"
-  mv "$1.tmp" "$1"
+[ -d "$KIT/.git" ] || { echo "Kit-Repo nicht gefunden unter $KIT (KIT_DIR setzen)" >&2; exit 1; }
+git -C "$KIT" rev-parse --verify --quiet "${KIT_REF}^{commit}" >/dev/null \
+  || { echo "Ref '$KIT_REF' existiert nicht in $KIT (KIT_REF setzen)" >&2; exit 1; }
+
+VER="$KIT_REF"
+SHA=$(git -C "$KIT" rev-parse --short "${KIT_REF}^{commit}")
+
+# fetch <kit-relativer-pfad> <zieldatei>
+# Schreibt NUR bei Erfolg. Der Fehlschlag ist sonst nicht still, sondern schlimmer: er
+# hinterlaesst eine Datei, die nur aus dem Herkunftsstempel besteht und wie ein gueltiges
+# Vendoring aussieht (Befund finance-ledger, 2026-08-27).
+fetch() {
+  src="$1"; dst="$2"
+  git -C "$KIT" cat-file -e "$KIT_REF:src/$src" 2>/dev/null \
+    || { echo "FEHLT in $KIT_REF: src/$src — nichts geschrieben" >&2; exit 1; }
+  tmp="$dst.tmp"
+  printf '// vendored from obsidian-kit@%s, src/%s — do not hand-edit; re-vendor via tools/sync-kit.sh\n' "$VER" "$src" > "$tmp"
+  git -C "$KIT" show "$KIT_REF:src/$src" >> "$tmp"
+  [ -s "$tmp" ] || { echo "leeres Ergebnis fuer src/$src — nichts geschrieben" >&2; rm -f "$tmp"; exit 1; }
+  mv "$tmp" "$dst"
+  echo "vendored obsidian-kit@$VER/$src"
 }
 
 mkdir -p src/vendor/kit src/vendor/kit-obsidian
@@ -29,15 +44,11 @@ mkdir -p src/vendor/kit src/vendor/kit-obsidian
 # num.ts ist keine eigenstaendige Uebernahme, sondern Pflicht-Abhaengigkeit:
 # settings_schema.ts importiert clampInt daraus (src/pure/settings_schema.ts:52).
 for m in num settings_schema; do
-  cp "$KIT/src/pure/$m.ts" "src/vendor/kit/$m.ts"
-  stamp "src/vendor/kit/$m.ts" "src/pure/$m.ts"
-  echo "vendored obsidian-kit@$VER/pure/$m.ts"
+  fetch "pure/$m.ts" "src/vendor/kit/$m.ts"
 done
 
 for m in confirm folder-suggest settings_walker; do
-  cp "$KIT/src/obsidian/$m.ts" "src/vendor/kit-obsidian/$m.ts"
-  stamp "src/vendor/kit-obsidian/$m.ts" "src/obsidian/$m.ts"
-  echo "vendored obsidian-kit@$VER/obsidian/$m.ts"
+  fetch "obsidian/$m.ts" "src/vendor/kit-obsidian/$m.ts"
 done
 
 cat > src/vendor/kit/VENDOR.json <<JSON
@@ -46,7 +57,7 @@ cat > src/vendor/kit/VENDOR.json <<JSON
   "version": "$VER",
   "sha": "$SHA",
   "vendored": "num.ts, settings_schema.ts",
-  "note": "Verbatim snapshot. Never hand-edit. Re-vendor via tools/sync-kit.sh. version/sha gelten AUSSCHLIESSLICH fuer die unter \"vendored\" gelisteten Dateien. num.ts kommt nur als Abhaengigkeit mit: settings_schema.ts importiert clampInt daraus. kit-obsidian/ siehe dortige VENDOR.json."
+  "note": "Verbatim snapshot aus der Git-Ref $VER (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. num.ts kommt nur als Abhaengigkeit mit: settings_schema.ts importiert clampInt daraus. ACHTUNG: ab Kit 0.28.0 liegen diese beiden Module nicht mehr im Kit, sondern in code-kit — ein Anheben der Ref erfordert vorher einen Quellenwechsel. kit-obsidian/ siehe dortige VENDOR.json."
 }
 JSON
 cat > src/vendor/kit-obsidian/VENDOR.json <<JSON
@@ -55,7 +66,7 @@ cat > src/vendor/kit-obsidian/VENDOR.json <<JSON
   "version": "$VER",
   "sha": "$SHA",
   "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts",
-  "note": "Verbatim snapshot. Never hand-edit. Re-vendor via tools/sync-kit.sh. version/sha gelten AUSSCHLIESSLICH fuer die unter \"vendored\" gelisteten Dateien. kit/ siehe dortige VENDOR.json."
+  "note": "Verbatim snapshot aus der Git-Ref $VER (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. confirm.ts ist zwischen 0.27.0 und 0.28.0 byte-identisch. kit/ siehe dortige VENDOR.json."
 }
 JSON
 echo "VENDOR.json → $VER ($SHA)"
