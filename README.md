@@ -81,6 +81,12 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 
 <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/code-and-render.png" width="820" alt="A 3d code block in the editor on the left, the rendered model on the right">
 
+### Guides
+
+- [Writing a 3D model by hand](docs/guide/writing-gltf-by-hand.md) — build a model as text
+  inside a note, and learn to read any `.gltf` file along the way. Every example is
+  verified on every commit.
+
 ### Supported formats
 
 | Extension | Notes |

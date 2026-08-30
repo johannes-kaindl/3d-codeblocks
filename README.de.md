@@ -88,6 +88,12 @@ Datei nehmen.)
 
 <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/code-and-render.png" width="820" alt="Links ein 3d-Codeblock im Editor, rechts das gerenderte Modell">
 
+### Anleitungen
+
+- [Ein 3D-Modell von Hand schreiben](docs/guide/writing-gltf-by-hand.md) *(englisch)* —
+  ein Modell als Text in einer Notiz bauen und dabei lernen, jede `.gltf`-Datei zu lesen.
+  Jedes Beispiel wird bei jedem Commit geprüft.
+
 ### Unterstützte Formate
 
 | Endung | Anmerkung |

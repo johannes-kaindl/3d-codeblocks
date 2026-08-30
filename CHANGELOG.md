@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format follows
   Off by default because opening a note should not contact a server you did not choose.
 - **STL files that carry their own colours now show them.** The theme colour still applies
   to STL files without colours of their own.
+- **A guide: [writing a 3D model by hand](docs/guide/writing-gltf-by-hand.md).** Builds a
+  model as text inside a note, step by step, and teaches you to read any `.gltf` file along
+  the way. Every example in it is loaded through the plugin's own loader on every commit,
+  so it cannot quietly stop working.
 
 ## [0.3.1] — 2026-08-04
 
