@@ -34,6 +34,8 @@ import {
 import { buildToolbar, toolbarVisible } from "./viewport-toolbar";
 
 // Re-Export, damit bestehende Importe (main.ts, Tests) stabil bleiben.
+import { createResourceResolver } from "./gltf-resources";
+
 export type { ViewportFactory, ContextBudget, ViewportLike, ViewportCreateOptions } from "./viewer-host";
 
 export interface BlockDeps {
@@ -41,7 +43,12 @@ export interface BlockDeps {
   settings: () => PluginSettings;
   factory: ViewportFactory;
   budget: ContextBudget;
-  loadModel(buffer: ArrayBuffer, format: ModelFormat, materialColor: string): Promise<unknown>;
+  loadModel(
+    buffer: ArrayBuffer,
+    format: ModelFormat,
+    materialColor: string,
+    resolveUrl?: (uri: string) => string,
+  ): Promise<unknown>;
   readColors(el: HTMLElement): SceneColors;
   active: ActiveViewport;
   writePorts: WritePorts;
@@ -229,6 +236,11 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
       },
       format,
       inspectContainer: needsContainerInspection(file.path),
+      resources: createResourceResolver(
+        this.deps.app,
+        file.path,
+        this.deps.settings().allowExternalResources,
+      ),
       label: this.config.title ?? file.path,
       view: this.config.view,
     });

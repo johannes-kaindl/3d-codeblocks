@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { Object3D } from "three";
 import { loadModel } from "../src/viewer/loaders";
-import { groundFloorGltf, octahedronStl } from "../docs/images/fixture/make-models.mjs";
+import { groundFloorGltf, octahedronStl, splitGroundFloor } from "../docs/images/fixture/make-models.mjs";
 
 /** Ohne Leerzeichen — three.js' GLTFLoader wuerde sie sonst zu Unterstrichen machen,
  *  und der Screenshot zeigte einen anderen Namen als die Fixture-Datei traegt. */
@@ -62,5 +62,39 @@ describe("STL-Normalen", () => {
       laengen.push(Math.hypot(a[i], a[i + 1], a[i + 2]));
     }
     expect(Math.min(...laengen)).toBeGreaterThan(0.9);
+  });
+});
+
+describe("split model (geometry in a separate .bin)", () => {
+  it("keeps the geometry out of the json", () => {
+    const { gltf, bin } = splitGroundFloor();
+
+    expect(gltf.buffers[0].uri).toBe("ground-floor.bin");
+    expect(gltf.buffers[0].byteLength).toBe(bin.length);
+    expect(JSON.stringify(gltf)).not.toContain("base64");
+  });
+
+  it("renders once the resolver hands over the .bin", async () => {
+    const { gltf, bin } = splitGroundFloor();
+    const resolve = (uri: string) =>
+      uri === "ground-floor.bin"
+        ? "data:application/octet-stream;base64," + Buffer.from(bin).toString("base64")
+        : uri;
+
+    const bytes = new TextEncoder().encode(JSON.stringify(gltf)).buffer as ArrayBuffer;
+    const scene = (await loadModel(bytes, "gltf", "#888888", resolve)) as Object3D;
+
+    const names: string[] = [];
+    scene.traverse((child) => {
+      if (child.name !== "") names.push(child.name);
+    });
+    expect(names).toEqual(expect.arrayContaining(NODE_NAMES));
+  });
+
+  it("fails without a resolver — which is exactly the bug this fixture guards", async () => {
+    const { gltf } = splitGroundFloor();
+    const bytes = new TextEncoder().encode(JSON.stringify(gltf)).buffer as ArrayBuffer;
+
+    await expect(loadModel(bytes, "gltf", "#888888")).rejects.toBeDefined();
   });
 });

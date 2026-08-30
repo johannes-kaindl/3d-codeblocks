@@ -86,7 +86,14 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 | Extension | Notes |
 |---|---|
 | `.glb`, `.gltf` | Materials and colours come from the file |
-| `.stl` | No materials in the format; the plugin applies a theme-aware default |
+| `.stl` | No materials in the format; the plugin applies a theme-aware default, unless the file carries per-facet colours |
+
+A `.gltf` often does not stand alone: the geometry lives in a `.bin` next to it, textures
+in a folder beside them. Those files are loaded from your vault, resolved relative to the
+model — so a Blender export works when you drop the whole folder in. Anything the file
+asks for that is *not* in your vault is skipped and named below the viewport, rather than
+silently missing. Addresses on the web are only fetched if you turn on **Allow external
+resources**.
 
 **Compressed glTF is not supported.** Draco and Meshopt decoders run in web workers,
 which Obsidian's renderer forbids. Such files are detected and reported in plain
@@ -203,6 +210,7 @@ already produce models this way.
 | Maximum live 3D views | 6 (slider 0–12) | Older inline views become still images beyond this; 0 turns the limit off |
 | Controls placement | Sidebar when open, toolbar otherwise | Where the Save/Clear/Fit buttons appear |
 | Locked node prefixes | `env__` | Comma-separated name prefixes protected from editing |
+| Allow external resources | off | Let a model load files from http(s) addresses, not just from your vault |
 
 The last setting exists because browsers cap simultaneous WebGL contexts (around 8–16)
 and silently kill the oldest ones. Rather than let that happen at random, the plugin

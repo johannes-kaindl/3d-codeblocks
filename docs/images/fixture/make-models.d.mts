@@ -12,3 +12,10 @@ export declare function groundFloorEditGltf(): Record<string, unknown>;
 
 /** Schreibt die Modelle nach `<target>/models/` und liefert die Pfade. */
 export declare function writeModels(target: string): string[];
+
+/** Dasselbe Erdgeschoss mit ausgelagerter Geometrie: `.gltf` + `.bin` daneben — die Form
+ *  jedes Blender-Exports. Ohne aufloesenden Resolver muss das Laden scheitern. */
+export declare function splitGroundFloor(): {
+  gltf: { buffers: { uri: string; byteLength: number }[] } & Record<string, unknown>;
+  bin: Uint8Array;
+};

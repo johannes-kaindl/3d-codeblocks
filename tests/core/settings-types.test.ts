@@ -16,6 +16,7 @@ describe("validateSettings", () => {
       maxContexts: 6,
       panelPlacement: "auto",
       lockedNodePrefixes: "env__",
+      allowExternalResources: false,
     });
   });
 
@@ -75,5 +76,20 @@ describe("parseLockedPrefixes", () => {
   it("splittet an Kommas, trimmt, verwirft Leeres", () => {
     expect(parseLockedPrefixes("env__, sky__ ,,")).toEqual(["env__", "sky__"]);
     expect(parseLockedPrefixes("")).toEqual([]);
+  });
+});
+
+describe("allowExternalResources", () => {
+  it("defaults to off — the vault is the only source until the user says otherwise", () => {
+    expect(DEFAULT_SETTINGS.allowExternalResources).toBe(false);
+  });
+
+  it("keeps an explicit true", () => {
+    expect(validateSettings({ allowExternalResources: true }).allowExternalResources).toBe(true);
+  });
+
+  it("falls back to the default for a non-boolean, rather than treating it as truthy", () => {
+    expect(validateSettings({ allowExternalResources: "yes" }).allowExternalResources).toBe(false);
+    expect(validateSettings({ allowExternalResources: 1 }).allowExternalResources).toBe(false);
   });
 });

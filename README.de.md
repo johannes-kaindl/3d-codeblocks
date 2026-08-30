@@ -93,7 +93,14 @@ Datei nehmen.)
 | Endung | Anmerkung |
 |---|---|
 | `.glb`, `.gltf` | Materialien und Farben kommen aus der Datei |
-| `.stl` | Das Format kennt keine Materialien; das Plugin setzt ein theme-treues Standardmaterial |
+| `.stl` | Das Format kennt keine Materialien; das Plugin setzt ein theme-treues Standardmaterial — außer die Datei bringt Flächenfarben mit |
+
+Eine `.gltf` steht selten allein: die Geometrie liegt in einer `.bin` daneben, Texturen in
+einem Ordner dabei. Diese Dateien werden aus dem Vault geladen, aufgelöst **relativ zur
+Modelldatei** — ein Blender-Export funktioniert also, wenn der ganze Ordner im Vault
+liegt. Was die Datei anfordert und im Vault nicht existiert, wird übersprungen und unter
+dem Viewport benannt, statt einfach zu fehlen. Adressen im Netz werden nur geladen, wenn
+**Externe Ressourcen erlauben** eingeschaltet ist.
 
 **Komprimiertes glTF wird nicht unterstützt.** Draco- und Meshopt-Decoder laufen in
 Web-Workern, die Obsidians Renderer verbietet. Solche Dateien werden erkannt und in
@@ -222,6 +229,7 @@ nicht bearbeiten. Ein Mesh pro Knoten vermeidet das; die meisten Erzeuger
 | Maximale Zahl aktiver 3D-Ansichten | 6 (Regler 0–12) | Ältere eingebettete Ansichten werden darüber hinaus zu Standbildern; 0 hebt die Grenze auf |
 | Platzierung der Steuerung | Seitenleiste, wenn offen, sonst Leiste | Wo die Schaltflächen Speichern/Löschen/Einpassen erscheinen |
 | Gesperrte Knoten-Präfixe | `env__` | Kommagetrennte Namenspräfixe, die vor Bearbeitung geschützt sind |
+| Externe Ressourcen erlauben | aus | Ein Modell darf Dateien von http(s)-Adressen laden, nicht nur aus dem Vault |
 
 Die letzte Einstellung gibt es, weil Browser die Zahl gleichzeitiger WebGL-Kontexte
 begrenzen (etwa 8–16) und die ältesten stillschweigend abräumen. Statt das dem Zufall zu

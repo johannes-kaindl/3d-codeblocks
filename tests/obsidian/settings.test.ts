@@ -39,6 +39,7 @@ describe("SettingsTab.getSettingDefinitions", () => {
       "defaultHeight",
       "autoRotate",
       "showGrid",
+      "allowExternalResources",
       "maxContexts",
       "panelPlacement",
       "lockedNodePrefixes",

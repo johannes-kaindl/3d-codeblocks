@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Models that come in several files now work.** A `.gltf` usually keeps its geometry in
+  a `.bin` beside it and its textures in a folder — the way every Blender export looks.
+  Those files are now loaded from your vault, resolved relative to the model file. What
+  the model asks for and your vault does not have is named below the viewport instead of
+  quietly missing.
+- **New setting "Allow external resources"** (off by default). A model may point at
+  http(s) addresses; with the setting off, those are not fetched and are reported instead.
+  Off by default because opening a note should not contact a server you did not choose.
+- **STL files that carry their own colours now show them.** The theme colour still applies
+  to STL files without colours of their own.
+
 ## [0.3.1] — 2026-08-04
 
 ### Changed

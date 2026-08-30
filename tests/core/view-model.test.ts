@@ -78,3 +78,22 @@ describe("toViewModel", () => {
     expect(vm.tone).toBe("error");
   });
 });
+
+describe("toViewModel: ready with notes", () => {
+  it("stays silent when there is nothing to report", () => {
+    expect(toViewModel({ kind: "ready" }).message).toBeNull();
+  });
+
+  it("shows notes as an info message, not an error", () => {
+    const vm = toViewModel({ kind: "ready", notes: ["Not found in the vault: a.png"] });
+
+    expect(vm.message).toBe("Not found in the vault: a.png");
+    expect(vm.tone).toBe("info");
+    expect(vm.showReloadButton).toBe(false);
+    expect(vm.showSpinner).toBe(false);
+  });
+
+  it("joins several notes into one message", () => {
+    expect(toViewModel({ kind: "ready", notes: ["one.", "two."] }).message).toBe("one. two.");
+  });
+});

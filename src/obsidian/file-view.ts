@@ -22,6 +22,8 @@ import {
   type HostBaseDeps,
 } from "./viewer-host";
 
+import { createResourceResolver } from "./gltf-resources";
+
 export const VIEW_TYPE_3D = "tdcb-3d-model";
 
 export interface FileViewDeps extends HostBaseDeps {
@@ -174,6 +176,11 @@ export class ModelFileView extends FileView implements TrackedView {
       },
       format,
       inspectContainer: needsContainerInspection(file.path),
+      resources: createResourceResolver(
+        this.app,
+        file.path,
+        this.deps.settings().allowExternalResources,
+      ),
       label: file.basename,
     });
 

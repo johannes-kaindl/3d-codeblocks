@@ -3,22 +3,33 @@
 // KEINE DRACOLoader-/MeshoptDecoder-Registrierung: beide sind worker-basiert und
 // Obsidians Renderer verbietet Worker. Komprimierte Dateien werden vorher in
 // `block-child.ts` abgefangen (core/gltf-inspect), damit der Nutzer den Grund sieht.
-import { Mesh, MeshStandardMaterial, Object3D } from "three";
+import { LoadingManager, Mesh, MeshStandardMaterial, Object3D } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { ModelFormat } from "../core/format";
 
+/**
+ * @param resolveUrl Uebersetzt eine URI aus der Datei (`.bin`, Texturen) in etwas Ladbares.
+ *   Kommt von aussen herein, damit diese Datei den Vault nicht kennen muss; fehlt sie,
+ *   bleibt jede URI unveraendert (dann laden nur `data:`-URIs, wie bisher).
+ */
 export function loadModel(
   buffer: ArrayBuffer,
   format: ModelFormat,
   materialColor: string,
+  resolveUrl?: (uri: string) => string,
 ): Promise<Object3D> {
-  return format === "gltf" ? loadGltf(buffer) : Promise.resolve(loadStl(buffer, materialColor));
+  return format === "gltf"
+    ? loadGltf(buffer, resolveUrl)
+    : Promise.resolve(loadStl(buffer, materialColor));
 }
 
-function loadGltf(buffer: ArrayBuffer): Promise<Object3D> {
+function loadGltf(buffer: ArrayBuffer, resolveUrl?: (uri: string) => string): Promise<Object3D> {
+  const manager = new LoadingManager();
+  if (resolveUrl) manager.setURLModifier(resolveUrl);
+
   return new Promise((resolve, reject) => {
-    new GLTFLoader().parse(
+    new GLTFLoader(manager).parse(
       buffer,
       "",
       (gltf) => {
@@ -48,12 +59,23 @@ function loadStl(buffer: ArrayBuffer, materialColor: string): Object3D {
   // STL kennt keine Materialien — Farbe kommt aus einer Theme-Variablen (Spec §5).
   if (!geometry.getAttribute("normal")) geometry.computeVertexNormals();
 
+  // Das "Magics"-Farbformat legt Farben pro Dreieck ab; `STLLoader` haengt sie als
+  // `color`-Attribut an. Dann gehoert die Farbe der DATEI, nicht dem Theme — und das
+  // Material muss weiss bleiben, sonst multipliziert es die Theme-Farbe hinein.
+  const hasOwnColors = geometry.getAttribute("color") !== undefined;
+
   const mesh = new Mesh(
     geometry,
-    new MeshStandardMaterial({ color: materialColor, roughness: 0.85, metalness: 0 }),
+    new MeshStandardMaterial({
+      color: hasOwnColors ? 0xffffff : materialColor,
+      vertexColors: hasOwnColors,
+      roughness: 0.85,
+      metalness: 0,
+    }),
   );
   // Markierung fuer `Viewport.setColors`: nur selbst vergebene Materialien folgen dem
-  // Theme — die Materialien aus einer GLB-Datei bleiben unangetastet.
-  mesh.userData.tdcbThemedMaterial = true;
+  // Theme — die Materialien aus einer GLB-Datei bleiben unangetastet, und ein STL, das
+  // eigene Farben mitbringt, ebenfalls nicht.
+  mesh.userData.tdcbThemedMaterial = !hasOwnColors;
   return mesh;
 }

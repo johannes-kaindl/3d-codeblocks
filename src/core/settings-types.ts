@@ -30,6 +30,8 @@ export interface PluginSettings {
   maxContexts: number;
   panelPlacement: PanelPlacement;
   lockedNodePrefixes: string;
+  /** `.gltf`-Nebendateien duerfen von http(s) kommen. Aus: nur der eigene Vault. */
+  allowExternalResources: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   maxContexts: 6,
   panelPlacement: "auto",
   lockedNodePrefixes: "env__",
+  allowExternalResources: false,
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;

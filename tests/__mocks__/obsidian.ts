@@ -356,6 +356,7 @@ export function makeFakeApp(): any {
     vault: {
       readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
       getAbstractFileByPath: vi.fn().mockReturnValue(null),
+      getResourcePath: vi.fn((f: any) => `app://vault/${f?.path ?? ""}`),
       read: vi.fn().mockResolvedValue(""),
       process: vi.fn().mockResolvedValue(""),
       on: vi.fn().mockReturnValue({}),

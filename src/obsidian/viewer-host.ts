@@ -18,6 +18,9 @@ import type { EditRigCallbacks } from "../viewer/edit-controls";
 import type { SceneColors } from "../viewer/scene";
 import { renderMessage } from "./render-box";
 
+import { resourceProblemNotes } from "../core/gltf-uri";
+import type { ResourceResolver } from "./gltf-resources";
+
 export interface ViewportLike {
   setModel(object: unknown): void;
   setView(spec: ViewSpec | null): void;
@@ -80,7 +83,12 @@ export interface HostBaseDeps {
   settings: () => PluginSettings;
   factory: ViewportFactory;
   budget: ContextBudget;
-  loadModel(buffer: ArrayBuffer, format: ModelFormat, materialColor: string): Promise<unknown>;
+  loadModel(
+    buffer: ArrayBuffer,
+    format: ModelFormat,
+    materialColor: string,
+    resolveUrl?: (uri: string) => string,
+  ): Promise<unknown>;
   readColors(el: HTMLElement): SceneColors;
 }
 
@@ -97,6 +105,9 @@ export interface RenderSource {
   inspectContainer: boolean;
   /** alt-Text des Poster-Bilds. */
   label: string;
+  /** Loest Nebendateien (`.bin`, Texturen) auf. Fehlt bei Inline-glTF: dort gibt es
+      keine Datei, neben der etwas liegen koennte. */
+  resources?: ResourceResolver;
   view?: ViewSpec;
 }
 
@@ -226,7 +237,12 @@ export class ViewerHost {
     this.viewport = viewport;
 
     try {
-      const object = await this.deps.loadModel(bytes, source.format, colors.material);
+      const object = await this.deps.loadModel(
+        bytes,
+        source.format,
+        colors.material,
+        source.resources?.resolve,
+      );
       if (this.disposed) {
         this.releaseViewport();
         return;
@@ -239,9 +255,11 @@ export class ViewerHost {
       return;
     }
 
+    const notes = resourceProblemNotes(source.resources?.problems ?? []);
+
     // FileView (unmanaged): ein Modell im Pane, immer voll interaktiv.
     if (!this.deps.managed) {
-      this.show({ kind: "ready" });
+      this.show({ kind: "ready", notes });
       return;
     }
 
@@ -254,7 +272,7 @@ export class ViewerHost {
     }
 
     this.deps.budget.register(this.id, () => this.degradeToPoster());
-    this.show({ kind: "ready" });
+    this.show({ kind: "ready", notes });
   }
 
   private degradeToPoster(): void {

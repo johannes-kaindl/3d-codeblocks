@@ -14,7 +14,9 @@ export type ViewerState =
   | { kind: "load-failed"; detail: string }
   | { kind: "loading" }
   | { kind: "poster" }
-  | { kind: "ready" };
+  /** `notes` = das Modell steht, aber etwas daran war nicht ladbar (fehlende Textur,
+      blockierte externe Referenz). Kein Fehler: was da ist, wird gezeigt. */
+  | { kind: "ready"; notes?: string[] };
 
 export interface ViewModel {
   /** `null` = keine Meldungsbox zeigen. */
@@ -38,6 +40,9 @@ function error(message: string, showReloadButton = false): ViewModel {
 export function toViewModel(state: ViewerState): ViewModel {
   switch (state.kind) {
     case "ready":
+      return state.notes && state.notes.length > 0
+        ? { ...SILENT, message: state.notes.join(" "), tone: "info" }
+        : SILENT;
     case "poster":
       return SILENT;
     case "loading":

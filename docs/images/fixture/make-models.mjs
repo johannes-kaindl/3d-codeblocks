@@ -174,6 +174,22 @@ export function groundFloorEditGltf() {
   return doc;
 }
 
+/**
+ * Dasselbe Erdgeschoss, aber mit ausgelagerter Geometrie: `ground-floor.gltf` +
+ * `ground-floor.bin` daneben. Das ist die Form, die JEDER Blender-Export erzeugt — und
+ * bis 2026-08-30 lud sie dieses Plugin nicht, weil der Loader mit leerem Basis-Pfad
+ * parste und die `.bin` deshalb gegen die App-Wurzel suchte statt gegen den Vault.
+ * Das Fixture ist der Waechter dagegen: ohne Resolver muss es scheitern.
+ */
+export function splitGroundFloor() {
+  const gltf = groundFloorGltf();
+  const embedded = gltf.buffers[0].uri;
+  const bin = Buffer.from(embedded.slice(embedded.indexOf(",") + 1), "base64");
+
+  gltf.buffers = [{ byteLength: bin.length, uri: "ground-floor.bin" }];
+  return { gltf, bin };
+}
+
 /** Schreibt die Modelle nach <ziel>/models/ und meldet die Pfade. */
 export function writeModels(target) {
   const modelPath = join(target, "models", "ground-floor.gltf");
@@ -183,12 +199,21 @@ export function writeModels(target) {
   const editBase = join(target, "models", "edited-floor.gltf");
   const editPath = join(target, "models", "edited-floor.edit.gltf");
   const stlPath = join(target, "models", "octahedron.stl");
+  const splitPath = join(target, "models", "ground-floor-split.gltf");
+  const splitBin = join(target, "models", "ground-floor.bin");
   mkdirSync(dirname(modelPath), { recursive: true });
   writeFileSync(modelPath, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editBase, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editPath, JSON.stringify(groundFloorEditGltf(), null, 1) + "\n");
   writeFileSync(stlPath, octahedronStl());
-  return [modelPath, editBase, editPath, stlPath];
+
+  // Mehrteiliger Export: die `.bin` MUSS `ground-floor.bin` heissen und daneben liegen —
+  // der Dateiname steht im JSON und wird relativ zur Modelldatei aufgeloest.
+  const split = splitGroundFloor();
+  writeFileSync(splitPath, JSON.stringify(split.gltf, null, 1) + "\n");
+  writeFileSync(splitBin, split.bin);
+
+  return [modelPath, editBase, editPath, stlPath, splitPath, splitBin];
 }
 
 // Nur beim direkten Aufruf ausfuehren — der Fixture-Test importiert dieses Modul, und

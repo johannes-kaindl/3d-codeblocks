@@ -63,6 +63,14 @@ export class SettingsTab extends PluginSettingTab {
         control: { type: "toggle", key: "showGrid" },
       },
       {
+        name: "Allow external resources",
+        desc:
+          "A .gltf file can point at files it needs (geometry, textures). Normally only " +
+          "files inside your vault are loaded. Turn this on to also allow http(s) " +
+          "addresses \u2014 opening such a note then contacts those servers.",
+        control: { type: "toggle", key: "allowExternalResources" },
+      },
+      {
         name: "Maximum live 3D views",
         desc:
           "How many inline models stay interactive at once. Older ones become still images. " +

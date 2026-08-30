@@ -27,6 +27,8 @@ import {
   type HostBaseDeps,
 } from "./viewer-host";
 
+import { createResourceResolver } from "./gltf-resources";
+
 export type { TrackedView } from "./tracked-view";
 
 export interface EmbedDeps extends HostBaseDeps {
@@ -195,6 +197,11 @@ export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
       },
       format,
       inspectContainer: needsContainerInspection(file.path),
+      resources: createResourceResolver(
+        this.deps.app,
+        file.path,
+        this.deps.settings().allowExternalResources,
+      ),
       label: file.basename,
     });
 
