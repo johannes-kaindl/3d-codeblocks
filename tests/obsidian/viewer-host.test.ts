@@ -14,6 +14,7 @@ function makeVp() {
     getView: vi.fn(() => null),
     setColors: vi.fn(),
     setAutoRotate: vi.fn(),
+    setLighting: vi.fn(),
     resize: vi.fn(),
     resetCamera: vi.fn(),
     capturePoster: () => "data:image/png;base64,AAA",
@@ -277,5 +278,29 @@ describe("ViewerHost refreshAutoRotate", () => {
   it("tut ohne Viewport nichts (Poster/Fehler)", () => {
     const { host } = makeHost();
     expect(() => host.refreshAutoRotate()).not.toThrow();
+  });
+});
+
+// Gegenstueck zum refreshAutoRotate-Block darueber: dieselbe Luecke (der Wert wurde nur
+// beim Mount gelesen), dieselbe Form.
+describe("ViewerHost refreshLighting", () => {
+  it("reicht beide Beleuchtungs-Einstellungen an den Viewport durch", async () => {
+    let lighting = "faithful";
+    let modelLights = "prefer";
+    const { host, created } = makeHost({
+      settings: () => ({ ...DEFAULT_SETTINGS, lighting, modelLights }),
+    });
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+
+    lighting = "contrast";
+    modelLights = "ignore";
+    host.refreshLighting();
+
+    expect(created[0].setLighting).toHaveBeenCalledWith("contrast", "ignore");
+  });
+
+  it("tut ohne Viewport nichts (Poster/Fehler)", () => {
+    const { host } = makeHost();
+    expect(() => host.refreshLighting()).not.toThrow();
   });
 });

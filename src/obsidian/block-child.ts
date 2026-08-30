@@ -269,6 +269,10 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     this.host?.refreshColors();
   }
 
+  refreshLighting(): void {
+    this.host?.refreshLighting();
+  }
+
   refreshAutoRotate(): void {
     this.host?.refreshAutoRotate();
   }
