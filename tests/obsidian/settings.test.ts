@@ -39,6 +39,8 @@ describe("SettingsTab.getSettingDefinitions", () => {
       "defaultHeight",
       "autoRotate",
       "showGrid",
+      "lighting",
+      "modelLights",
       "allowExternalResources",
       "maxContexts",
       "panelPlacement",
@@ -204,5 +206,27 @@ describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
     tab.display();
 
     expect(((tab.containerEl as any).settings ?? []).length).toBe(first);
+  });
+});
+
+describe("Beleuchtungs-Zeilen", () => {
+  it("bietet beide Felder als Dropdown an", () => {
+    const { tab } = makeTab();
+    const byKey = new Map(
+      controls(tab.getSettingDefinitions()).map((d) => [d.control.key, d]),
+    );
+    expect(byKey.get("lighting")?.control.type).toBe("dropdown");
+    expect(byKey.get("modelLights")?.control.type).toBe("dropdown");
+  });
+
+  // Spec E2: die Kurvennamen sind interne Werte. Steht "ACES" oder "Neutral" in der UI,
+  // ist die Entscheidung gegen den Fachbegriff unterlaufen.
+  it("nennt keine Kurvennamen in der Oberflaeche", () => {
+    const text = JSON.stringify(makeTab().tab.getSettingDefinitions());
+    // Wortgrenzen sind hier load-bearing: ohne sie trifft /ACES/i das "surfaces" im
+    // eigenen Beschreibungstext, und der Test waere aus einem Grund rot, der nichts
+    // mit seinem Gegenstand zu tun hat.
+    expect(text).not.toMatch(/\bACES\b/i);
+    expect(text).not.toMatch(/\bneutral\b/i);
   });
 });
