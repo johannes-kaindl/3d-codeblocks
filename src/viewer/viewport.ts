@@ -6,21 +6,27 @@
 //  2. `dispose()` gibt ALLES frei (Geometrien, Materialien, Texturen, Kontext). Obsidian
 //     wirft Codeblock-DOM beim Tippen staendig weg; ohne das leckt WebGL in Minuten.
 import {
+  ACESFilmicToneMapping,
   Box3,
   Color,
   Mesh,
+  NeutralToneMapping,
+  NoToneMapping,
   Object3D,
+  PMREMGenerator,
   PerspectiveCamera,
   Scene,
   Texture,
   Vector3,
   WebGLRenderer,
 } from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { fitCamera } from "../core/camera-fit";
 import { cameraToView, viewToCamera, type ViewSpec } from "../core/view-spec";
 import { EditRig, type EditRigCallbacks } from "./edit-controls";
-import { GRID_NAME, type SceneColors, buildScene, makeGrid } from "./scene";
+import { decideLighting, type LightingMode, type ModelLightsMode } from "../core/lighting";
+import { GRID_NAME, type SceneColors, buildScene, hasOwnLights, makeGrid, setFillLights } from "./scene";
 
 const FOV_DEG = 50;
 
@@ -29,6 +35,8 @@ export interface ViewportOptions {
   colors: SceneColors;
   autoRotate: boolean;
   showGrid: boolean;
+  lighting: LightingMode;
+  modelLights: ModelLightsMode;
   onContextLost: () => void;
   onInteract: () => void;
 }
@@ -56,10 +64,17 @@ export class Viewport {
       rotierendes Ziel laesst sich kein Raum greifen). */
   private autoRotateWanted: boolean;
   private editSuspendsRotate = false;
+  private lighting: LightingMode;
+  private modelLights: ModelLightsMode;
+  /** PMREM-Ergebnis. Gehoert in `dispose()` — eine entkommende Environment-Textur ist
+      genau die Sorte Leck, vor der der Klassenkommentar oben warnt. */
+  private environmentMap: Texture | null = null;
 
   constructor(options: ViewportOptions) {
     this.options = options;
     this.autoRotateWanted = options.autoRotate;
+    this.lighting = options.lighting;
+    this.modelLights = options.modelLights;
     this.view = options.container.ownerDocument.defaultView ?? window;
 
     this.renderer = new WebGLRenderer({
@@ -75,7 +90,12 @@ export class Viewport {
     options.container.appendChild(this.renderer.domElement);
 
     this.currentColors = options.colors;
-    this.scene = buildScene(options.colors);
+    // Noch ohne Modellwissen: `hasOwnLights` kann erst nach `setModel` antworten.
+    // `applyLighting()` zieht die Fuelllichter dort nach.
+    this.scene = buildScene(
+      options.colors,
+      decideLighting(this.lighting, this.modelLights, false).fillLights,
+    );
     this.camera = new PerspectiveCamera(FOV_DEG, this.aspect(), 0.1, 1000);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -93,7 +113,58 @@ export class Viewport {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(options.container);
 
+    this.applyLighting();
     this.resize();
+  }
+
+  /** Den Plan auf Renderer und Szene anwenden. Wird bei jeder Aenderung gerufen, die
+      ihn beeinflussen kann: Konstruktor, `setModel` (erst dort steht fest, ob das
+      Modell eigene Lichter mitbringt) und `setLighting`. */
+  private applyLighting(): void {
+    const plan = decideLighting(
+      this.lighting,
+      this.modelLights,
+      this.model ? hasOwnLights(this.model) : false,
+    );
+
+    this.renderer.toneMapping =
+      plan.toneMapping === "aces"
+        ? ACESFilmicToneMapping
+        : plan.toneMapping === "neutral"
+          ? NeutralToneMapping
+          : NoToneMapping;
+
+    if (plan.environment) {
+      if (!this.environmentMap) {
+        const pmrem = new PMREMGenerator(this.renderer);
+        this.environmentMap = pmrem.fromScene(new RoomEnvironment()).texture;
+        pmrem.dispose();
+      }
+      this.scene.environment = this.environmentMap;
+    } else {
+      this.scene.environment = null;
+    }
+
+    setFillLights(this.scene, plan.fillLights);
+
+    // Tone Mapping steckt im Shader-Programm: ohne Invalidierung behalten bereits
+    // kompilierte Materialien die alte Kurve, und ein Umschalten bliebe wirkungslos.
+    this.model?.traverse((child) => {
+      if (child instanceof Mesh) {
+        const material = child.material as { needsUpdate?: boolean } | undefined;
+        if (material) material.needsUpdate = true;
+      }
+    });
+
+    this.requestRender();
+  }
+
+  /** Beleuchtungs-Einstellungen zur Laufzeit anwenden — Gegenstueck zu `setAutoRotate`. */
+  setLighting(lighting: LightingMode, modelLights: ModelLightsMode): void {
+    if (this.disposed) return;
+    this.lighting = lighting;
+    this.modelLights = modelLights;
+    this.applyLighting();
   }
 
   setModel(object: Object3D): void {
@@ -106,6 +177,9 @@ export class Viewport {
 
     this.model = object;
     this.scene.add(object);
+
+    // Erst jetzt ist bekannt, ob das Modell eigene Lichter mitbringt.
+    this.applyLighting();
 
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
@@ -240,6 +314,9 @@ export class Viewport {
     this.controls.dispose();
 
     disposeObject(this.scene);
+    this.scene.environment = null;
+    this.environmentMap?.dispose();
+    this.environmentMap = null;
 
     this.renderer.dispose();
     this.renderer.forceContextLoss();
