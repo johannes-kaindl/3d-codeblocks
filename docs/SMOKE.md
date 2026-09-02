@@ -293,8 +293,37 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > Draufsicht: von schräg oben verdecken sie sich gegenseitig, das Raster traf dann immer
 > dieselben zwei von sechs.
 >
+> ⚠️ **E6 war von 2026-08-30 bis 2026-09-02 unerfüllbar — und sah dabei aus wie ein
+> Plugin-Befund.** Beide Hälften meldeten denselben Knoten (`ohne Sperre: Floor · mit
+> Sperre: Floor`), der Punkt verglich also zwei identische Messungen. Zwei Ursachen, beide
+> im Prüfwerkzeug:
+>
+> 1. **Der gesperrte Knoten war gar nicht auswählbar.** Der Treiber nahm den *letzten*
+>    Top-Level-Knoten. Knoten, die sich einen `mesh`-Index teilen, sind aber generell nicht
+>    auswählbar: three's `GLTFLoader` klont für sie dasselbe Objekt und gibt allen Klonen
+>    dieselbe `associations`-Wertreferenz — danach tragen mehrere Kinder denselben
+>    `tdcbNodeIndex`, und `duplicatedIndices` sperrt solche Indizes bewusst. Im Fixture
+>    betrifft das **8 von 11 Knoten** (die vier Wände tragen alle den Index 4); auswählbar
+>    sind nur `Floor`, `Stairs`, `Stove`. Gemessen in Node über `loadModel` +
+>    `duplicatedIndices`, ohne Obsidian. Der Treiber wählt jetzt nur aus Knoten mit
+>    ungeteiltem `mesh`.
+> 2. **Das Raster traf den kleinen Körper nie.** Für „was ist überhaupt auswählbar" ist ein
+>    Raster richtig, für „ist GENAU DIESER Knoten auswählbar" nicht. E6 klickt den Knoten
+>    jetzt gezielt an: Weltposition → Kamera-Projektion → Pixel (`clickNodeNamed`).
+>
+> Damit ist auch die **Reihenfolge** der beiden Hälften umgedreht: erst *ohne* Sperre
+> klicken (belegt, dass der Klickpunkt trifft), dann *mit* Sperre auf dieselbe Stelle. Ohne
+> diesen Beleg wäre die zweite Hälfte wertlos — ein Klick ins Leere sieht genauso aus wie
+> eine wirksame Sperre.
+>
 > **Gegenprobe (2026-08-14):** Laden der `.edit`-Datei stillgelegt → nur E5 rot;
 > Präfix-Sperre ausgehebelt → nur E6 rot (und E2 sieht folgerichtig einen Knoten mehr).
+>
+> **Gegenprobe (2026-09-02, nach dem Umbau):** `isSelectable` auf „immer wahr" gesetzt →
+> **nur E6 rot**, mit sprechender Meldung (`mit Sperre: env__Stove` statt `nichts`); kein
+> anderer Punkt fiel mit. Danach zurückgebaut, Lauf wieder 7/7. Gefahren gegen eine
+> **Zweitinstanz** (eigenes `--user-data-dir`, Port 9333), weil die reguläre Instanz unter
+> einem fremden `--exclusive focus`-Lock stand und der Treiber `Page.bringToFront` nutzt.
 
 - [ ] **1. Betreten** — Block mit `eg.gltf` → **Edit model** (Pencil in der Hover-Leiste
       oder in der Sidebar) → Raum anklicken → Gizmo erscheint, Rahmen um den Raum sichtbar.

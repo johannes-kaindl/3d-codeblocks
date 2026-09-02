@@ -61,6 +61,7 @@ import { join } from "node:path";
 import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
 import {
   Cdp,
+  clearNotices,
   closeExtraLeaves,
   notices,
   openNote as openNoteViaBridge,
@@ -914,6 +915,9 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
       save: button ? (button.disabled ? "deaktiviert" : "bedienbar") : "(kein Knopf)",
     };
   `);
+  // Fremde Notices vorher wegraeumen: der Container ist app-weit, und was hier gelesen
+  // wird, soll von DIESEM Klick stammen.
+  await clearNotices(cdp);
   const clickedInEditor = await clickPanelButton(cdp, "Save view");
   const inEditor = await cdp.evaluate<string | null>(
     waitFor(`
@@ -930,9 +934,9 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
     const text = await app.vault.read(file);
     return text.split("\\n").find((l) => l.startsWith("view:")) ?? null;
   `);
-  const notices = await cdp.evaluate<string>(`
-    return [...document.querySelectorAll(".notice")].map((n) => n.textContent.trim()).join(" | ");
-  `);
+  // Ueber die Bruecke lesen, nicht selbst: sie sieht auch Notices im Einstellungs-Fenster,
+  // die `document.querySelectorAll` allein verpasst.
+  const noticeText = await notices(cdp);
   // Direktaufruf als Gegenprobe: schreibt `save()` selbst, lag es am Knopf; wirft es,
   // haben wir den Grund; tut es still nichts, ist der Schreibweg der Befund.
   const direct =
@@ -965,7 +969,7 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
     "V6. Im Editor gespeichert, per Undo rückgängig",
     liveInEditor && clickedInEditor && inEditor !== null && afterUndo === "weg",
     inEditor === null
-      ? `kein view: im Editor-Buffer — Datei: ${inFile ?? "auch nicht"} · Direktaufruf: ${direct} · (live: ${liveInEditor}, Panel: ${panelState.label}, Save: ${panelState.save}, Klick: ${clickedInEditor}, Notice: ${notices || "keine"})`
+      ? `kein view: im Editor-Buffer — Datei: ${inFile ?? "auch nicht"} · Direktaufruf: ${direct} · (live: ${liveInEditor}, Panel: ${panelState.label}, Save: ${panelState.save}, Klick: ${clickedInEditor}, Notice: ${noticeText || "keine"})`
       : `${inEditor} → ${afterUndo}`,
   );
 
@@ -2149,6 +2153,59 @@ const SELECTION_SWEEP = `
     return true;
   };
 
+  /** EINEN benannten Knoten gezielt anklicken, statt ihn im Raster zu suchen.
+   *
+   *  Warum zusaetzlich zum Raster: das Raster fragt „was ist ueberhaupt auswaehlbar" und
+   *  ist dafuer richtig. Fuer die Frage „ist GENAU DIESER Knoten auswaehlbar" taugt es
+   *  nicht — ein kleiner Koerper faellt zwischen die Rasterpunkte, und der Pruefpunkt
+   *  liest das als „nicht auswaehlbar". Genau daran ist E6 gescheitert (2026-09-02).
+   *
+   *  Gerechnet statt geraten: die Weltposition des Knotens wird mit der Kamera des
+   *  Viewports auf NDC projiziert und daraus die Pixelposition gebildet. Ohne 'THREE' im
+   *  Renderer — 'position.clone()' liefert einen Vector3, 'localToWorld' und 'project'
+   *  sind Methoden auf vorhandenen Objekten. */
+  const clickNodeNamed = async (wanted) => {
+    const canvas = document.querySelector(".tdcb-block canvas");
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    // Den Viewport STRUKTURELL suchen, nicht ueber einen festen Pfad: 'active.get()'
+    // liefert je nach Kontext einen anderen Controller (Block, Datei-Ansicht, Embed),
+    // und der haelt den Host unter einem eigenen Feldnamen. Gesucht wird das Objekt, das
+    // eine Kamera UND ein Modell hat — das ist der Viewport, wie immer er heisst.
+    const findViewport = (start) => {
+      const gesehen = new Set();
+      let ebene = [start];
+      for (let tiefe = 0; tiefe < 4 && ebene.length; tiefe++) {
+        const naechste = [];
+        for (const o of ebene) {
+          if (!o || typeof o !== "object" || gesehen.has(o) || o.isObject3D) continue;
+          gesehen.add(o);
+          if (o.camera && o.camera.isCamera && "model" in o) return o;
+          for (const k of Object.keys(o)) naechste.push(o[k]);
+        }
+        ebene = naechste;
+      }
+      return null;
+    };
+    const viewport = controller ? findViewport(controller) : null;
+    const camera = viewport && viewport.camera;
+    const root = viewport && viewport.model;
+    if (!canvas || !camera || !root) return { hit: null, grund: "kein Viewport/Kamera/Modell gefunden" };
+    const ziel = root.children.find((c) => c.name === wanted);
+    if (!ziel) return { hit: null, grund: "Knoten '" + wanted + "' nicht in der Szene" };
+
+    const p = ziel.position.clone();
+    if (ziel.parent) ziel.parent.localToWorld(p);
+    p.project(camera);
+    if (p.x < -1 || p.x > 1 || p.y < -1 || p.y > 1) {
+      return { hit: null, grund: "Knoten liegt ausserhalb des Bildes (ndc " + p.x.toFixed(2) + "," + p.y.toFixed(2) + ")" };
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round(rect.left + (p.x * 0.5 + 0.5) * rect.width);
+    const y = Math.round(rect.top + (-p.y * 0.5 + 0.5) * rect.height);
+    const hit = await clickCanvasAt(canvas, x, y);
+    return { hit, grund: hit ? "" : "Klick auf (" + x + "," + y + ") waehlte nichts aus" };
+  };
+
   const sweepSelection = async () => {
     const canvas = document.querySelector(".tdcb-block canvas");
     if (!canvas) return { names: [], clicks: 0 };
@@ -2221,9 +2278,19 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
   await setSetting(cdp, "lockedNodePrefixes", "env__");
   await closeExtraLeaves(cdp);
 
-  // Ein eigenes Prüfmodell: der letzte Top-Level-Knoten bekommt das gesperrte Präfix.
+  // Ein eigenes Prüfmodell: EIN Top-Level-Knoten bekommt das gesperrte Präfix.
   // So kennt der Lauf beide Seiten beim Namen, ohne etwas über das Vault-Modell
   // annehmen zu müssen — und das Original bleibt unangetastet.
+  //
+  // ⚠️ Nicht einfach der LETZTE Knoten (so stand es bis 2026-09-02): Knoten, die sich
+  // einen `mesh`-Index teilen, sind gar nicht auswählbar. three's `GLTFLoader` klont für
+  // sie dasselbe Objekt und propagiert dieselbe `associations`-Wertreferenz auf alle
+  // Klone — danach tragen mehrere Top-Level-Kinder denselben `tdcbNodeIndex`, und
+  // `duplicatedIndices` (src/viewer/edit-controls.ts) sperrt solche Indizes bewusst
+  // ("lieber gar keine Auswahl als die falsche"). Im Fixture betrifft das 8 von 11
+  // Knoten: die vier Wände tragen ALLE den Index 4. Ein gesperrter Knoten aus dieser
+  // Gruppe macht E6 per Konstruktion unerfüllbar — er wäre auch ohne Sperre nicht
+  // auswählbar. Gemessen am 2026-09-02 in Node über `loadModel` + `duplicatedIndices`.
   createdNotes.add(SMOKE_MODEL_EDIT);
   createdNotes.add(SMOKE_MODEL_EDIT.replace(/\.gltf$/, ".edit.gltf"));
   const probe = await cdp.evaluate<{ locked: string; free: string[] } | null>(`
@@ -2232,7 +2299,18 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     const doc = JSON.parse(await app.vault.read(source));
     const top = doc.scenes?.[doc.scene ?? 0]?.nodes ?? [];
     if (top.length < 2) return null;
-    const lockedIndex = top[top.length - 1];
+    // Nur Knoten mit einem NICHT geteilten mesh-Index kommen in Frage (s. Kommentar oben).
+    const meshCount = new Map();
+    for (const i of top) {
+      const m = doc.nodes[i].mesh;
+      if (m !== undefined) meshCount.set(m, (meshCount.get(m) ?? 0) + 1);
+    }
+    const eindeutig = top.filter((i) => {
+      const m = doc.nodes[i].mesh;
+      return m !== undefined && meshCount.get(m) === 1;
+    });
+    if (eindeutig.length < 1) return null;
+    const lockedIndex = eindeutig[eindeutig.length - 1];
     doc.nodes[lockedIndex].name = "env__" + (doc.nodes[lockedIndex].name ?? "node");
     const path = ${JSON.stringify(SMOKE_MODEL_EDIT)};
     const text = JSON.stringify(doc);
@@ -2242,13 +2320,13 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 400));
     return {
       locked: doc.nodes[lockedIndex].name,
-      free: top.slice(0, -1).map((i) => doc.nodes[i].name ?? ("#" + i)),
+      free: top.filter((i) => i !== lockedIndex).map((i) => doc.nodes[i].name ?? ("#" + i)),
     };
   `);
   if (!probe) {
     skipped(
       "Edit mode (E1-E8)",
-      "Prüfmodell ist kein Text-glTF mit mindestens zwei Top-Level-Knoten — daraus lässt sich kein gesperrter Knoten bauen",
+      "Prüfmodell ist kein Text-glTF mit mindestens zwei Top-Level-Knoten, von denen einer ein ungeteiltes mesh hat — daraus lässt sich kein auswählbarer gesperrter Knoten bauen",
     );
     return;
   }
@@ -2355,6 +2433,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     const save = [...document.querySelectorAll(".tdcb-panel-edit button")].find((b) => b.textContent === "Save edits");
     return { selected, before, after: fresh.slice(0, 3), saveEnabled: !!save && !save.disabled };
   `);
+  await clearNotices(cdp);
   const savedClick = await clickEditButton(cdp, "Save edits");
   const saveNotice = await notices(cdp);
   const editFile = await pollUntil<string>(
@@ -2397,6 +2476,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
   // Nach dem Speichern ist die Session sauber — `discard` verlässt den Modus dann ohne
   // Rückfrage, das ist der ruhige Weg hinaus.
   await clickEditButton(cdp, "Discard edits");
+  await clearNotices(cdp);
   const reentered = await clickEditButton(cdp, "Edit model");
   const reenterNotice = await notices(cdp);
   // GENAU den Knoten wiederfinden, der in E3 bewegt wurde: irgendeine andere Auswahl
@@ -2420,12 +2500,18 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
   // --- E6. Gesperrtes Präfix ---------------------------------------------
   // Der Punkt braucht beide Hälften: dass der gesperrte Knoten NICHT auswählbar ist,
   // heißt nur etwas, wenn er es ohne Sperre wäre. Sonst wäre er auch dann grün, wenn
-  // ihn schlicht kein Rasterklick trifft — ein Prüfpunkt ohne Gegenstand.
-  const withLock = await cdp.evaluate<{ names: string[]; clicks: number }>(`
-    ${SELECTION_SWEEP}
-    return await sweepSelection();
-  `);
-  const lockedNames = withLock.names;
+  // ihn schlicht kein Klick trifft — ein Prüfpunkt ohne Gegenstand.
+  //
+  // ⚠️ Bis 2026-09-02 fuhren beide Hälften einen Raster-Sweep und verglichen Namenslisten.
+  // Das konnte per Konstruktion nicht grün werden: der Sweep meldete in beiden Hälften
+  // nur `Floor`, weil das 9×7-Raster den kleinen gesperrten Körper nie traf. Der Punkt
+  // verglich also zwei identische Messungen. Jetzt wird GENAU der Knoten geklickt
+  // (Position → Kamera → Pixel), und die Reihenfolge ist umgedreht:
+  //
+  //   1. OHNE Sperre klicken → muss den Knoten auswählen. Das ist der Beleg, dass der
+  //      Klickpunkt ihn trifft; ohne diesen Beleg wäre die zweite Hälfte wertlos, denn
+  //      ein Klick ins Leere sieht genauso aus wie eine wirksame Sperre.
+  //   2. MIT Sperre an dieselbe Stelle klicken → darf nichts auswählen.
   await clickEditButton(cdp, "Discard edits");
   await cdp.evaluate<boolean>(`
     const modal = [...document.querySelectorAll(".modal-button-container button")]
@@ -2436,16 +2522,33 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
   `);
   await setSetting(cdp, "lockedNodePrefixes", "");
   await clickEditButton(cdp, "Edit model");
-  const openSweep = await cdp.evaluate<{ names: string[]; clicks: number }>(`
+  const ohneSperre = await cdp.evaluate<{ hit: string | null; grund: string }>(`
     ${SELECTION_SWEEP}
-    return await sweepSelection();
+    await spreadForSweep();
+    return await clickNodeNamed(${JSON.stringify(probe.locked)});
   `);
+
+  await clickEditButton(cdp, "Discard edits");
+  await cdp.evaluate<boolean>(`
+    const modal = [...document.querySelectorAll(".modal-button-container button")]
+      .find((b) => b.textContent === "Discard");
+    if (modal) modal.click();
+    await new Promise((r) => setTimeout(r, 500));
+    return true;
+  `);
+  await setSetting(cdp, "lockedNodePrefixes", "env__");
+  await clickEditButton(cdp, "Edit model");
+  const mitSperre = await cdp.evaluate<{ hit: string | null; grund: string }>(`
+    ${SELECTION_SWEEP}
+    await spreadForSweep();
+    return await clickNodeNamed(${JSON.stringify(probe.locked)});
+  `);
+
   record(
     "E6. Ein 'env__'-Knoten ist gesperrt — und ohne Sperre wäre er auswählbar",
-    openSweep.names.includes(probe.locked) && !lockedNames.includes(probe.locked),
-    `ohne Sperre: ${openSweep.names.join(", ") || "nichts"} · mit Sperre: ${lockedNames.join(", ") || "nichts"} · gesperrt heißt ${probe.locked}`,
+    ohneSperre.hit === probe.locked && mitSperre.hit === null,
+    `ohne Sperre: ${ohneSperre.hit ?? "nichts (" + ohneSperre.grund + ")"} · mit Sperre: ${mitSperre.hit ?? "nichts"} · gesperrt heißt ${probe.locked}`,
   );
-  await setSetting(cdp, "lockedNodePrefixes", "env__");
 
   // --- E7. Dirty-Discard mit Rückfrage -----------------------------------
   const dirty = await cdp.evaluate<boolean>(`
