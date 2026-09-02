@@ -19,3 +19,17 @@ export declare function splitGroundFloor(): {
   gltf: { buffers: { uri: string; byteLength: number }[] } & Record<string, unknown>;
   bin: Uint8Array;
 };
+
+/** Knoten und Kameras des Kamera-Fixtures — genauer typisiert als die uebrigen
+ *  Generatoren, weil der GUI-Smoke-Abschnitt `cameras` und sein Waechter-Test
+ *  (`tests/fixture-models.test.ts`) genau diese beiden Listen auslesen. */
+export interface CameraFixtureDoc {
+  nodes: { name?: string; camera?: number; translation?: number[]; rotation?: number[] }[];
+  cameras: { type: string; name?: string }[];
+  [key: string]: unknown;
+}
+
+/** Das Demo-Erdgeschoss mit fuenf Kamera-Knoten: `Front`, `Schnitt A` (mit Leerzeichen),
+ *  `Doppel` zweimal und `Plan` (orthographisch) — das Pruefmaterial fuer
+ *  `view: camera:<name>`. */
+export declare function cameraFloorGltf(): CameraFixtureDoc;

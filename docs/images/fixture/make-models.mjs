@@ -162,6 +162,62 @@ export function octahedronStl() {
   return out.join("\n");
 }
 
+/** Dasselbe Erdgeschoss, aber mit Kameras im Dokument — das Pruefmaterial fuer
+ *  `view: camera:<name>` (Roadmap S5).
+ *
+ *  Die Auswahl der Kameras ist nicht dekorativ, jede steht fuer einen Fall, den der
+ *  GUI-Smoke messen muss:
+ *  - `Front` — die normale, benannte perspektivische Kamera. Sie blickt frontal aus
+ *    z=+12; der Auto-Einpass-Blick kommt dagegen schraeg von vorn-oben (`DIRECTION` in
+ *    `core/camera-fit.ts`). Nur weil sich beide Bilder unterscheiden, kann ein
+ *    Pruefpunkt "die Kamera wurde angefahren" ueberhaupt messen.
+ *  - `Schnitt A` — **mit Leerzeichen**, und das ist der Punkt: three.js' Loader macht
+ *    daraus im geladenen Objekt `Schnitt_A` (`PropertyBinding.sanitizeNodeName`). Ein
+ *    Plugin, das gegen den Szenengraph sucht statt gegen das rohe JSON, macht genau
+ *    diesen Namen unerreichbar — den ein Autor in Blender aber vergibt.
+ *  - `Doppel` (zweimal) — zwei Knoten mit demselben Namen. three haengt beim Laden
+ *    einen Zaehler an (`createUniqueName`), die Dublette waere im Objekt also gar nicht
+ *    mehr als Dublette zu erkennen. Der Pruefling muss den ersten Treffer nehmen und
+ *    die Mehrdeutigkeit melden.
+ *  - `Plan` — orthographisch. Wird gefunden, aber nicht angefahren; der Fall existiert,
+ *    damit die Meldung dafuer einen Gegenstand hat.
+ *
+ *  Alle Blickrichtungen zeigen auf das Haus. Eine Kamera, die daneben blickt, waere
+ *  syntaktisch gueltig und fuer jeden Bild-Pruefpunkt wertlos.
+ *
+ *  Kamera-Konvention in glTF: der Knoten blickt entlang seiner lokalen **-Z**-Achse.
+ *  Die Quaternionen unten sind deshalb Vierteldrehungen um Y bzw. X, keine Willkuer:
+ *  `[0,-0.7071,0,0.7071]` = -90° um Y (Blick nach +X), `[0,1,0,0]` = 180° um Y (Blick
+ *  nach +Z), `[-0.7071,0,0,0.7071]` = -90° um X (Blick nach unten).
+ */
+const CAMERA_NODES = [
+  // name, camera-Index, translation, rotation (oder null fuer "blickt nach -Z")
+  ["Front", 0, [0, 1.6, 12], null],
+  ["Schnitt A", 0, [-12, 1.6, 0], [0, -0.7071068, 0, 0.7071068]],
+  ["Doppel", 0, [0, 1.6, -12], [0, 1, 0, 0]],
+  ["Doppel", 0, [0, 11, 0], [-0.7071068, 0, 0, 0.7071068]],
+  ["Plan", 1, [0, 14, 0], [-0.7071068, 0, 0, 0.7071068]],
+];
+
+export function cameraFloorGltf() {
+  const doc = groundFloorGltf();
+  doc.scenes[0].name = "Ground_floor_with_cameras";
+  doc.cameras = [
+    // yfov 0.7 rad = 40°, spuerbar enger als die 50° des Viewport-Defaults — damit
+    // traegt der Bildvergleich auch dann, wenn eine Position einmal aehnlich liegt.
+    { type: "perspective", perspective: { yfov: 0.7, znear: 0.05, zfar: 200 } },
+    { type: "orthographic", orthographic: { xmag: 6, ymag: 6, znear: 0.05, zfar: 200 } },
+  ];
+  const erster = doc.nodes.length;
+  for (const [name, camera, translation, rotation] of CAMERA_NODES) {
+    const node = { name, camera, translation };
+    if (rotation) node.rotation = rotation;
+    doc.nodes.push(node);
+  }
+  for (let i = erster; i < doc.nodes.length; i += 1) doc.scenes[0].nodes.push(i);
+  return doc;
+}
+
 /** Eine `.edit.gltf` neben dem Modell: dasselbe Dokument mit einem verschobenen Knoten.
  *
  *  Das Plugin zeigt daraufhin das Abzeichen „Unapplied edits" — der Zustand „neben der
@@ -201,11 +257,13 @@ export function writeModels(target) {
   const stlPath = join(target, "models", "octahedron.stl");
   const splitPath = join(target, "models", "ground-floor-split.gltf");
   const splitBin = join(target, "models", "ground-floor.bin");
+  const cameraPath = join(target, "models", "camera-floor.gltf");
   mkdirSync(dirname(modelPath), { recursive: true });
   writeFileSync(modelPath, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editBase, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editPath, JSON.stringify(groundFloorEditGltf(), null, 1) + "\n");
   writeFileSync(stlPath, octahedronStl());
+  writeFileSync(cameraPath, JSON.stringify(cameraFloorGltf(), null, 1) + "\n");
 
   // Mehrteiliger Export: die `.bin` MUSS `ground-floor.bin` heissen und daneben liegen —
   // der Dateiname steht im JSON und wird relativ zur Modelldatei aufgeloest.
@@ -213,12 +271,21 @@ export function writeModels(target) {
   writeFileSync(splitPath, JSON.stringify(split.gltf, null, 1) + "\n");
   writeFileSync(splitBin, split.bin);
 
-  return [modelPath, editBase, editPath, stlPath, splitPath, splitBin];
+  return [modelPath, editBase, editPath, stlPath, cameraPath, splitPath, splitBin];
 }
 
 // Nur beim direkten Aufruf ausfuehren — der Fixture-Test importiert dieses Modul, und
 // ein Modul, das beim Import `exit(1)` ruft, ist nicht testbar.
-if (argv[1] && fileURLToPath(import.meta.url) === argv[1]) {
+//
+// ⚠️ Der Dateiname im Vergleich ist nicht Zierde, sondern der eigentliche Schutz: wird
+// dieses Modul in einen Treiber GEBUENDELT (`scripts/gui-smoke.ts` importiert
+// `cameraFloorGltf`), zeigt `import.meta.url` auf das Bundle — und das ist dann
+// zufaellig genau `argv[1]`. Der Guard griff dadurch beim Bundle-Start und schrieb die
+// Modelle nach `argv[2]`, also in das erste beliebige Kommandozeilen-Argument des
+// Treibers: `npm run smoke:gui -- --section cameras` legte im Repo ein Verzeichnis
+// `--section/models/` an (gemessen 2026-09-02). Ein Generator darf nur laufen, wenn er
+// SELBST aufgerufen wurde, nicht wenn irgendetwas laeuft, das ihn enthaelt.
+if (argv[1] && fileURLToPath(import.meta.url) === argv[1] && argv[1].endsWith("make-models.mjs")) {
   const target = argv[2];
   if (!target) {
     console.error("Aufruf: node docs/images/fixture/make-models.mjs <zielverzeichnis>");
