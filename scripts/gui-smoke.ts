@@ -58,6 +58,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
 import {
   Cdp,
   closeExtraLeaves,
@@ -197,6 +198,13 @@ const SMOKE_MODEL_BASE = "_tdcb-smoke-model";
 /** Existierende Datei mit nicht unterstützter Endung: ohne sie meldet der Prüfling
  *  "File not found" statt "Unsupported format" und der Prüfpunkt misst den falschen Fall. */
 const SMOKE_WRONG_EXT = "_tdcb-smoke-model.obj";
+/** Pruefmaterial des Kamera-Abschnitts: das Demo-Erdgeschoss MIT Kameras, erzeugt aus
+ *  derselben Quelle wie der Aufnahme-Vault (`docs/images/fixture/make-models.mjs`).
+ *  Der Abschnitt bringt es selbst mit, weil er ueber konkrete Kameranamen redet — ein
+ *  beliebiges Modell aus dem Vault traegt sie nicht. */
+const SMOKE_MODEL_CAMERAS = "_tdcb-smoke-cameras.gltf";
+const SMOKE_NOTE_CAMERAS = "_tdcb-gui-smoke-cameras.md";
+const CAMERA_BLOCK_TITLE = "Kamera-Probe";
 
 
 
@@ -2498,12 +2506,255 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
 
 // --- Ablauf -----------------------------------------------------------------
 
+// --- Abschnitt: Kameras aus der Datei (Roadmap S5) --------------------------
+
+/** Ein Kamera-Fall: was im Block steht und was dabei herauskommen soll. */
+interface CameraCase {
+  key: string;
+  /** Inhalt der `view:`-Zeile — `null` heisst: keine Zeile, also Auto-Einpassen. */
+  view: string | null;
+  /** Modell fuer diesen Fall; Vorgabe ist das Kamera-glTF. */
+  stl?: boolean;
+}
+
+/**
+ * `view: camera:<name>` gegen ein echtes Obsidian.
+ *
+ * Warum dieser Abschnitt sein Material selbst mitbringt, statt das Vault-Modell zu
+ * nehmen wie alle anderen: er behauptet Dinge ueber KONKRETE Namen ("Schnitt A" ist
+ * erreichbar, "Doppel" ist mehrdeutig, "Plan" ist orthographisch). Ein Modell, das der
+ * Vault zufaellig liefert, traegt diese Namen nicht — der Abschnitt waere in jedem
+ * fremden Vault entweder uebersprungen oder dauerhaft rot. Das Material kommt aus
+ * `docs/images/fixture/make-models.mjs`, also aus derselben Quelle wie der
+ * Aufnahme-Vault; `tests/fixture-models.test.ts` haelt seine Voraussetzungen fest,
+ * damit ein kaputtes Fixture hier nicht wie ein Plugin-Defekt aussieht.
+ *
+ * Gemessen wird durchgaengig das BILD (Hash ueber die quantisierten Pixel, Muster von
+ * B17) und der sichtbare Meldungstext — nicht, ob eine Funktion gerufen wurde. Dass
+ * `setFileCamera` laeuft, sagt nichts darueber, ob die Kamera im Bild ankommt: genau
+ * diese Luecke war der Anlass fuer B17 und davor fuer den Auto-rotate-Befund.
+ */
+async function sectionCameras(cdp: Cdp, _model: string): Promise<void> {
+  await setSetting(cdp, "viewMode", "immediate");
+  await closeExtraLeaves(cdp);
+
+  // Material in den Vault legen. Beide Dateien werden im `finally` mit den Notizen
+  // weggeraeumt (`createdNotes` ist der Sammelpunkt, nicht nur fuer Notizen).
+  const gltfBody = JSON.stringify(cameraFloorGltf(), null, 1) + "\n";
+  await cdp.evaluate(`
+    const schreibe = async (path, body) => {
+      const current = app.vault.getAbstractFileByPath(path);
+      if (current) await app.vault.modify(current, body);
+      else await app.vault.create(path, body);
+    };
+    await schreibe(${JSON.stringify(SMOKE_MODEL_CAMERAS)}, ${JSON.stringify(gltfBody)});
+    await schreibe(${JSON.stringify(SMOKE_MODEL_STL)}, ${JSON.stringify(FALLBACK_STL)});
+    await new Promise((r) => setTimeout(r, 400));
+    return true;
+  `);
+  createdNotes.add(SMOKE_MODEL_CAMERAS);
+  createdNotes.add(SMOKE_MODEL_STL);
+
+  const faelle: CameraCase[] = [
+    { key: "auto", view: null },
+    { key: "front", view: "camera:Front" },
+    { key: "schnitt", view: "camera:Schnitt A" },
+    { key: "doppel", view: "camera:Doppel" },
+    { key: "unbekannt", view: "camera:Gibtsnicht" },
+    { key: "plan", view: "camera:Plan" },
+    { key: "stl", view: "camera:Front", stl: true },
+  ];
+
+  const shots: Record<string, { hash: number | null; coverage: number; message: string }> = {};
+
+  for (const fall of faelle) {
+    const datei = fall.stl === true ? SMOKE_MODEL_STL : SMOKE_MODEL_CAMERAS;
+    const zeilen = [`${fence}3d`, `file: ${datei}`, `title: ${CAMERA_BLOCK_TITLE}`];
+    if (fall.view !== null) zeilen.push(`view: ${fall.view}`);
+    zeilen.push(fence, "");
+    await openNote(
+      cdp,
+      SMOKE_NOTE_CAMERAS,
+      [`# GUI-Smoke Kameras — ${fall.key} (automatisch erzeugt)`, "", ...zeilen].join("\n"),
+      "preview",
+    );
+
+    const bild = await pollUntil<{ hash: number; coverage: number }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas");
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.coverage < 5) return null;
+        return { hash: stats.hash, coverage: stats.coverage };
+      `,
+      30_000,
+    );
+    // Die Meldung IMMER lesen, auch wenn ein Bild da ist — und besonders, wenn keins da
+    // ist. Ein roter Punkt, der nur "kein Bild" sagt, waehrend einen DOM-Knoten weiter
+    // im Klartext steht warum, schickt die Fehlersuche ans falsche Ende (CORE-TEST-14).
+    const message = await cdp.evaluate<string>(`
+      const box = document.querySelector(".markdown-preview-view .tdcb-block .tdcb-message");
+      return box ? box.textContent.trim() : "";
+    `);
+    shots[fall.key] = { hash: bild?.hash ?? null, coverage: bild?.coverage ?? 0, message };
+  }
+
+  const zeige = (key: string): string => {
+    const s = shots[key];
+    if (!s) return `${key} nicht gemessen`;
+    const bild = s.hash === null ? "kein Bild" : `#${s.hash} (${s.coverage}%)`;
+    return `${key} ${bild}${s.message ? ` · Meldung ${JSON.stringify(s.message)}` : ""}`;
+  };
+
+  const auto = shots["auto"];
+  const front = shots["front"];
+  const schnitt = shots["schnitt"];
+  const doppel = shots["doppel"];
+  const unbekannt = shots["unbekannt"];
+  const plan = shots["plan"];
+  const stl = shots["stl"];
+
+  // K1. Der eigentliche Punkt: die Kamera aus der Datei kommt im BILD an. Verglichen
+  // wird gegen das Auto-Einpassen desselben Modells — der Zustand, den es ohne das
+  // Feature gaebe. Ein "unterscheidet sich" ohne diesen Bezugspunkt waere wertlos:
+  // jedes zweite Bild unterscheidet sich von irgendetwas.
+  record(
+    "K1. Eine benannte Kamera aus der Datei wird angefahren (Bild ≠ Auto-Einpassen)",
+    auto?.hash != null && front?.hash != null && auto.hash !== front.hash && front.message === "",
+    `${zeige("auto")} · ${zeige("front")}`,
+  );
+
+  // K2. Der Kern-Befund aus S5, und der einzige Weg ihn zu messen: three macht aus
+  // "Schnitt A" im geladenen Objekt "Schnitt_A" (sanitizeNodeName). Ein Pruefling, der
+  // gegen den Szenengraph sucht, meldet hier "unknown camera" — und genau das ist die
+  // Bauart, die ein Unit-Test mit selbstgebauten Infos NICHT ausschliesst, weil er die
+  // Sanitisierung gar nicht durchlaeuft.
+  record(
+    "K2. Ein Kameraname mit Leerzeichen ist erreichbar (`Schnitt A`)",
+    schnitt?.hash != null && schnitt.message === "" && schnitt.hash !== auto?.hash,
+    zeige("schnitt"),
+  );
+
+  // K4. Zwei Behauptungen in einem Punkt, weil sie zusammengehoeren: der Vorwurf
+  // "unbekannt" ist nur brauchbar, wenn dabeisteht was es stattdessen gibt — und das
+  // Modell darf dabei nicht verschwinden (ein Tippfehler ist kein Ladefehler).
+  const nennt = (text: string, namen: string[]): boolean => namen.every((n) => text.includes(n));
+  record(
+    "K4. Ein unbekannter Name nennt die vorhandenen Kameras und zeigt das Modell trotzdem",
+    unbekannt?.hash != null &&
+      unbekannt.message.includes("Gibtsnicht") &&
+      nennt(unbekannt.message, ["Front", "Schnitt A", "Doppel", "Plan"]),
+    zeige("unbekannt"),
+  );
+
+  record(
+    "K5. Eine orthographische Kamera meldet sich als nicht unterstützt",
+    plan?.hash != null &&
+      plan.message.toLowerCase().includes("orthographic") &&
+      plan.message.toLowerCase().includes("not supported"),
+    zeige("plan"),
+  );
+
+  // K6. Mehrdeutig heisst NICHT Fehler: der erste Treffer wird angefahren, die Wahl
+  // wird nur offengelegt. Deshalb beides pruefen — Meldung UND ein Bild, das vom
+  // Auto-Einpassen abweicht. Nur die Meldung zu pruefen liesse offen, ob ueberhaupt
+  // eine Kamera gesetzt wurde.
+  record(
+    "K6. Ein doppelt vergebener Name meldet die Mehrdeutigkeit und fährt trotzdem an",
+    doppel?.hash != null &&
+      doppel.message.toLowerCase().includes("more than one") &&
+      doppel.hash !== auto?.hash,
+    zeige("doppel"),
+  );
+
+  record(
+    "K7. `camera:` auf einer STL nennt das Format als Bedingung",
+    stl?.hash != null && stl.message.includes("needs a glTF file"),
+    zeige("stl"),
+  );
+
+  // K3. Nach dem Anfahren muss der Blick FREI bleiben. Die Sorge ist konkret: die
+  // Datei-Kamera setzt Position, Ziel und Bildwinkel auf einmal — bliebe dabei ein
+  // Zustand haengen (Controls nicht aktualisiert, Ziel im Ruecken der Kamera), sahe
+  // das Standbild richtig aus und waere trotzdem eingefroren. Gemessen wird deshalb
+  // ein echter Maus-Drag, nicht `applyView`.
+  {
+    await openNote(
+      cdp,
+      SMOKE_NOTE_CAMERAS,
+      [
+        "# GUI-Smoke Kameras — orbit (automatisch erzeugt)",
+        "",
+        `${fence}3d`,
+        `file: ${SMOKE_MODEL_CAMERAS}`,
+        `title: ${CAMERA_BLOCK_TITLE}`,
+        "view: camera:Front",
+        fence,
+        "",
+      ].join("\n"),
+      "preview",
+    );
+    const vorher = await pollUntil<{ hash: number }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas");
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.coverage < 5) return null;
+        return { hash: stats.hash };
+      `,
+      30_000,
+    );
+    // Drag und Nachmessung in EINEM Renderer-Aufruf, und das Ergebnis in einem Objekt:
+    // ein blankes `return null` aus `evaluate` kommt auf der Node-Seite als `undefined`
+    // an, der Fehlschlag las sich dann als "Drag scheiterte: undefined" — also als
+    // Plugin-Defekt, obwohl der Drag geklappt hatte (gemessen 2026-09-02, erster Lauf).
+    const orbit = await cdp.evaluate<{
+      before: number | null;
+      after: number | null;
+      error: string | null;
+    }>(`
+      ${SAMPLER}
+      const canvasOf = () => document.querySelector(".markdown-preview-view .tdcb-block canvas");
+      const hashOf = () => {
+        const stats = sample(canvasOf());
+        return stats && stats.coverage >= 5 ? stats.hash : null;
+      };
+      const before = hashOf();
+      const error = ${dragCanvas("canvasOf()", 140, 40)};
+      // OrbitControls laeuft mit Daempfung: nach dem Zug zieht die Kamera noch ueber
+      // mehrere Frames nach. Auf die Aenderung WARTEN statt eine Frist abzusitzen —
+      // bleibt sie aus, laeuft das Warten in seine Frist und der Punkt wird rot.
+      // Langsam ist der bessere Fehlausgang gegenueber falsch.
+      let after = hashOf();
+      const deadline = Date.now() + 4000;
+      while (after === before && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 150));
+        after = hashOf();
+      }
+      return { before, after, error };
+    `);
+    record(
+      "K3. Nach dem Anfahren bleibt der Blick frei (Orbit ändert das Bild)",
+      orbit.error === null &&
+        orbit.before !== null &&
+        orbit.after !== null &&
+        orbit.before !== orbit.after,
+      orbit.error !== null
+        ? `Drag scheiterte: ${orbit.error}`
+        : `angefahren ${vorher ? `#${vorher.hash}` : "kein Bild"} · vor dem Zug ${orbit.before === null ? "kein Bild" : `#${orbit.before}`} · danach ${orbit.after === null ? "kein Bild" : `#${orbit.after}`}`,
+    );
+  }
+}
+
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
   { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
+  { key: "cameras", title: "Kameras aus der Datei (SMOKE.md 2026-09-02)", run: sectionCameras },
 ];
 
 /** Misst der Lauf ueberhaupt den Code dieses Checkouts?

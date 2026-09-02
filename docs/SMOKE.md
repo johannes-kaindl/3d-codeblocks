@@ -344,6 +344,77 @@ weiter das Original — der Badge sagt, dass daneben ein ungenutzter Änderungsw
       Badge (man schaut ja genau auf den Wunsch).
 - [x] **8. Theme** — hell ↔ dunkel: Badge bleibt lesbar (nur Theme-Variablen).
 
+## Kameras aus der Datei (2026-09-02)
+
+`view: camera:<name>` fährt eine Kamera an, die der Autor des Modells selbst gesetzt hat —
+Position, Blickrichtung und Bildwinkel kommen aus der Datei, danach orbitiert man frei um
+deren Blickziel (Roadmap S5).
+
+**Automatisiert:** `npm run smoke:gui -- --section cameras`. Der Abschnitt bringt sein
+Prüfmaterial selbst mit (`camera-floor.gltf` aus `docs/images/fixture/make-models.mjs`) und
+räumt es hinterher weg. Grund: er redet über **konkrete** Kameranamen — ein beliebiges
+Modell aus dem Vault trägt sie nicht, der Abschnitt wäre dort dauerhaft rot statt aussagend.
+Die Voraussetzungen des Materials hält `tests/fixture-models.test.ts` fest, damit ein
+kaputtes Fixture nicht wie ein Plugin-Defekt aussieht.
+
+Die fünf Kameras im Prüfmodell und wofür jede steht:
+
+| Name | Art | prüft |
+|---|---|---|
+| `Front` | perspektivisch | der Normalfall — Bild ≠ Auto-Einpassen |
+| `Schnitt A` | perspektivisch | **Name mit Leerzeichen** — three macht daraus beim Laden `Schnitt_A` |
+| `Doppel` (2×) | perspektivisch | doppelt vergebener Name — erster Treffer, Mehrdeutigkeit gemeldet |
+| `Plan` | orthographisch | wird gefunden, aber nicht angefahren |
+
+> [!check] Durchlauf 2026-09-02 — alle sieben Punkte grün, vier Gegenproben rot
+> Gefahren gegen Obsidian 1.13.7 im Staging-Vault `3d-codeblocks` (eigener Build, der
+> Guard bestätigte Byte-Gleichheit). `npm run smoke:gui -- --section cameras`: **7/7**,
+> im Gesamtlauf ebenfalls 7/7.
+>
+> **Der Wert steckt in den Gegenproben** — vier Mutationen, jede mit vorher notierter
+> Erwartung, und jede einzelne traf genau ihre Punkte, ohne dass ein anderer mitfiel:
+>
+> | Feature totgelegt | erwartet rot | gemessen |
+> |---|---|---|
+> | `setFileCamera` → `setView(null)` | K1, K2, K6 | K1, K2, K6 |
+> | Kamera-Hinweise auf `[]` | K4, K5, K6 | K4, K5, K6 |
+> | Namen aus dem **Szenengraph** statt aus dem JSON | K2, K4, K6 | K2, K4, K6 |
+> | Format-Guard entfernt | K7 | K7 |
+> | Controls nach dem Anfahren deaktiviert | K3 | K3 |
+>
+> Die dritte Zeile ist die interessante: sie stellt genau die Bauart her, die S5
+> verhindert, und der Prüfling meldete daraufhin wörtlich
+> `this file has: Front, Schnitt_A, Doppel, Doppel_1, Plan` — der Unterstrich und die
+> erfundene fünfte Kamera, sichtbar im Bild statt nur im Unit-Test.
+>
+> **K7 fiel bei der zweiten Mutation NICHT mit**, obwohl erwartet: die Formatmeldung
+> liegt auf einem früheren `return`-Pfad in `applyView`. Erwartung war ungenau, nicht die
+> Messung — die vierte Mutation holt den Punkt nach.
+>
+> Zwei Treiberfehler fand erst der Lauf, nicht das Schreiben: ein blankes `return null`
+> aus `evaluate` kommt als `undefined` an (K3 las sich als „Drag scheiterte"), und der
+> Selbstaufruf-Guard von `make-models.mjs` griff im **gebündelten** Treiber, weil
+> `import.meta.url` dort aufs Bundle zeigt — `-- --section cameras` legte dadurch ein
+> Verzeichnis `--section/models/` im Repo an. Beides behoben.
+
+- [x] **K1. Angefahren** — Block mit `view: camera:Front` zeigt ein **anderes** Bild als
+      derselbe Block ohne `view:`-Zeile. Keine Meldung darunter.
+- [x] **K2. Leerzeichen** — `view: camera:Schnitt A` lädt still und zeigt ein drittes Bild.
+      Der Punkt, an dem sich entscheidet, ob die Auflösung auf dem rohen JSON läuft: gegen
+      den Szenengraph gesucht hieße hier „unknown camera".
+- [x] **K3. Frei danach** — nach dem Anfahren mit der Maus ziehen → das Bild ändert sich.
+      Die Kamera setzt Position, Ziel und Bildwinkel auf einmal; bliebe dabei etwas hängen,
+      sähe das Standbild richtig aus und wäre trotzdem eingefroren.
+- [x] **K4. Unbekannter Name** — `view: camera:Gibtsnicht` nennt den Namen **und** die
+      vorhandenen (`Front, Schnitt A, Doppel, Plan`); das Modell bleibt sichtbar. Ein
+      Tippfehler ist kein Ladefehler.
+- [x] **K5. Orthographisch** — `view: camera:Plan` meldet „orthographic camera — not
+      supported"; das Modell bleibt sichtbar.
+- [x] **K6. Mehrdeutig** — `view: camera:Doppel` meldet „names more than one camera — using
+      the first" **und** fährt an (Bild ≠ Auto-Einpassen). Mehrdeutig ist kein Fehler.
+- [x] **K7. Falsches Format** — `view: camera:Front` auf einer `.stl` meldet
+      „`view: camera:…` needs a glTF file"; das Modell bleibt sichtbar.
+
 ## Befunde
 
 _Hier notieren, was auffällt._

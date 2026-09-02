@@ -7,7 +7,10 @@
 import { describe, expect, it } from "vitest";
 import type { Object3D } from "three";
 import { loadModel } from "../src/viewer/loaders";
-import { groundFloorGltf, octahedronStl, splitGroundFloor } from "../docs/images/fixture/make-models.mjs";
+import { cameraFloorGltf, groundFloorGltf, octahedronStl, splitGroundFloor } from "../docs/images/fixture/make-models.mjs";
+import { fitCamera } from "../src/core/camera-fit";
+import { fileCameraNames, findFileCamera, type FileCameraInfo } from "../src/core/gltf-cameras";
+import { fileCameraFit } from "../src/viewer/file-camera";
 
 /** Ohne Leerzeichen — three.js' GLTFLoader wuerde sie sonst zu Unterstrichen machen,
  *  und der Screenshot zeigte einen anderen Namen als die Fixture-Datei traegt. */
@@ -96,5 +99,84 @@ describe("split model (geometry in a separate .bin)", () => {
     const bytes = new TextEncoder().encode(JSON.stringify(gltf)).buffer as ArrayBuffer;
 
     await expect(loadModel(bytes, "gltf", "#888888")).rejects.toBeDefined();
+  });
+});
+
+/**
+ * Das Kamera-Fixture ist das Pruefmaterial des GUI-Smoke-Abschnitts `cameras`
+ * (`scripts/gui-smoke.ts`). Ein Smoke-Pruefpunkt, dessen Material stillschweigend
+ * kaputtgeht, wird rot und zeigt dabei auf den Prueffling statt auf sich selbst — genau
+ * die Gattung Fehldiagnose, die am 2026-08-30 eine Session gekostet hat (eine spec-widrige
+ * .glb aus dem Produktivvault liess 17 Punkte fallen). Deshalb haelt dieser Test die
+ * Voraussetzungen des Abschnitts fest, wo sie in Sekunden pruefbar sind statt in Minuten
+ * am laufenden Obsidian.
+ */
+describe("camera-floor.gltf — Pruefmaterial fuer `view: camera:<name>`", () => {
+  /** Dieselbe Uebersetzung, die `collectCameras` in `viewer/loaders.ts` aus dem rohen
+   *  JSON macht — hier nachgebaut, damit die Namensfragen ohne three beantwortbar sind. */
+  const infos = (): FileCameraInfo[] => {
+    const doc = cameraFloorGltf();
+    return doc.nodes
+      .filter((node) => node.camera !== undefined)
+      .map((node) => {
+        const def = doc.cameras[node.camera as number];
+        return {
+          nodeName: node.name ?? null,
+          cameraName: def?.name ?? null,
+          orthographic: def?.type === "orthographic",
+        };
+      });
+  };
+
+  it("laedt durch den Plugin-Loader und liefert die Kameras mit", async () => {
+    const model = await loadModel(
+      new TextEncoder().encode(JSON.stringify(cameraFloorGltf())).buffer as ArrayBuffer,
+      "gltf",
+      "#888888",
+    );
+    expect(model.cameras).toHaveLength(5);
+  });
+
+  it("traegt die Namen, die der GUI-Smoke anspricht — Leerzeichen inbegriffen", () => {
+    // `Schnitt A` ist der Kern des Fixtures: three macht daraus im geladenen Objekt
+    // `Schnitt_A`. Verliert der Generator das Leerzeichen, prueft der Smoke-Punkt
+    // "Name mit Leerzeichen ist erreichbar" nur noch sich selbst.
+    expect(fileCameraNames(infos())).toEqual(["Front", "Schnitt A", "Doppel", "Plan"]);
+  });
+
+  it("haelt genau eine orthographische Kamera bereit und vier perspektivische", () => {
+    const ortho = infos().filter((c) => c.orthographic);
+    expect(ortho).toHaveLength(1);
+    expect(ortho[0]?.nodeName).toBe("Plan");
+  });
+
+  it("meldet `Doppel` als mehrdeutig, `Front` als eindeutig", () => {
+    expect(findFileCamera(infos(), "Doppel")).toEqual({ kind: "found", index: 2, ambiguous: true });
+    expect(findFileCamera(infos(), "Front")).toEqual({ kind: "found", index: 0, ambiguous: false });
+  });
+
+  it("stellt `Front` spuerbar anders als das Auto-Einpassen — sonst misst der Bildvergleich nichts", async () => {
+    // Der Smoke-Punkt K1 entscheidet ueber einen Bild-Hash. Liegen beide Kameras nah
+    // beieinander, waeren die Bilder gleich und der Punkt dauerhaft rot — bei intaktem
+    // Plugin. Die Schwelle gehoert deshalb hierher, wo sie ohne Obsidian pruefbar ist.
+    const model = await loadModel(
+      new TextEncoder().encode(JSON.stringify(cameraFloorGltf())).buffer as ArrayBuffer,
+      "gltf",
+      "#888888",
+    );
+    const front = model.cameras[0];
+    expect(front?.nodeName).toBe("Front");
+
+    const min = { x: -4.1, y: -0.2, z: -3.1 };
+    const max = { x: 4.1, y: 2.4, z: 3.1 };
+    const auto = fitCamera(min, max, 50, 1.5);
+    const datei = fileCameraFit(front as NonNullable<typeof front>, min, max);
+
+    const abstand = Math.hypot(
+      auto.position.x - datei.position.x,
+      auto.position.y - datei.position.y,
+      auto.position.z - datei.position.z,
+    );
+    expect(abstand).toBeGreaterThan(3);
   });
 });
