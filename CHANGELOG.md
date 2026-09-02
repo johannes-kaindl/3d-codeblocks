@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-02
+
 ### Added
 
 - **A model can now be shown from a camera its own author placed.** Many `.gltf` and `.glb`
