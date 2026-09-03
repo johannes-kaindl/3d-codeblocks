@@ -1427,6 +1427,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
       // ist gleichgültig — der Punkt misst die Reaktion, nicht die Geometrie.
       const node = (doc.nodes ?? [])[0];
       if (!node) return { before: before ? before.hash : null, after: null, moved: "kein Knoten in der Datei" };
+      const zurueck = node.translation ? [...node.translation] : [0, 0, 0];
       node.translation = [(node.translation?.[0] ?? 0) + 25, (node.translation?.[1] ?? 0) + 15, node.translation?.[2] ?? 0];
       await app.vault.modify(file, JSON.stringify(doc));
       const after = await (async () => {
@@ -1435,6 +1436,16 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
           return stats && before && stats.hash !== before.hash ? stats.hash : 0;
         `, 12_000)}
       })();
+      // ⚠️ Die Verschiebung ZURUECKNEHMEN. Ohne das laeuft der ganze restliche Abschnitt
+      // gegen ein Modell, dessen erster Knoten 25 Einheiten neben dem Rest steht — der
+      // Auto-Fit passt dann korrekt auf eine Bounding-Box mit Radius ~24 ein, und das
+      // eigentliche Modell ist ein Fleck am Bildrand. Das kostete B17 als "kein Bild"
+      // (gemessen 2026-09-03: bounds bis (29,15), Blickziel (12.5,7.5,0), coverage 3
+      // gegen die geforderten 5) und sah dabei wie ein Beleuchtungs-Befund aus.
+      // Genau deshalb war B17 ISOLIERT gruen und im Lauf rot.
+      node.translation = zurueck;
+      await app.vault.modify(file, JSON.stringify(doc));
+      await new Promise((r) => setTimeout(r, 600));
       return { before: before ? before.hash : null, after, moved: node.name ?? "(namenlos)" };
     `);
     record(
