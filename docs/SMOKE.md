@@ -97,7 +97,20 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > Anlass war die Beleuchtungs-Arbeit (Roadmap S2). Drei Dinge sind dabei angefallen, und
 > nur eines davon ist ein Ergebnis am Plugin.
 >
-> **1. B17 ist neu und grün — aber nicht aus diesem Lauf.** Im Treiber-Durchlauf meldete er
+> ✅ **B17 AUFGEKLÄRT am 2026-09-03 — es war B8, nicht die Beleuchtung** (`2234376`).
+> B8 verschiebt den ersten Knoten der Prüfmodell-Kopie um `+25/+15` und nahm das nie
+> zurück. Jeder folgende Prüfpunkt lief gegen ein Modell, dessen erster Knoten 25 Einheiten
+> neben dem Rest steht; der Auto-Fit passt darauf korrekt ein — auf eine Box mit Radius ~24
+> statt ~5 (`bounds` bis `(29,15,3.1)`, Blickziel `(12.5,7.5,0)`). Das eigentliche Modell
+> ist dann ein Fleck am Bildrand: `coverage 3` gegen die geforderten 5. **Das erklärt, warum
+> B17 isoliert grün und im Lauf rot war.** Gefunden, indem der Viewport nach seiner eigenen
+> Bounding-Box gefragt wurde statt nach dem Bild. Gegenprobe: `applyLighting()` totgelegt →
+> drei identische Hashes, nur B17 rot.
+>
+> ⚠️ **Merksatz für neue Prüfpunkte:** wer den Prüfling verändert, stellt ihn wieder her —
+> sonst erbt jeder folgende Punkt den Zustand, und der Befund erscheint irgendwo anders.
+>
+> **1. (historisch) B17 ist neu und grün — aber nicht aus diesem Lauf.** Im Treiber-Durchlauf meldete er
 > „kein Bild"; belastbar wurde er erst **isoliert** gemessen: `off`/`faithful`/`contrast`
 > liefern drei verschiedene Bildhashes (`#3745294529` · `#2406501078` · `#78492787`).
 > **Gegenprobe:** `applyLighting()` mit einem `return;` totgelegt → **alle drei Hashes
