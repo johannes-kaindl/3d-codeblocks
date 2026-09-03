@@ -103,7 +103,40 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > **Gegenprobe:** `applyLighting()` mit einem `return;` totgelegt → **alle drei Hashes
 > identisch**, und zwar exakt der `off`-Wert. Der Punkt misst also seinen Gegenstand.
 >
-> **2. B13–B16 sind rot, und die Ursache ist offen.** Was belegt ist: sie kommen **nicht**
+> ✅ **AUFGEKLÄRT am 2026-09-03 — die Ursache war der Prüfpunkt, nicht das Plugin.** Der
+> Treiber suchte die Fehlerblöcke mit `document.querySelectorAll(".tdcb-block")`, also im
+> **ganzen Dokument**. Obsidian hält aber beide Ansichten derselben Notiz im DOM: die
+> Live-Preview-Fassung im `markdown-source-view` (unsichtbar, `0x0`, ohne Canvas und ohne
+> Meldung) und die gerenderte im `markdown-preview-view`. Jeder Block existierte damit
+> **zweimal**, und `.find()` nahm den ersten — den leeren. Gemessen mit einer
+> Instrumentierung, die den Zustand **während** des Laufs protokolliert (Ahnenpfad,
+> `offsetParent`, Größe je Block):
+>
+> | # | Titel | sichtbar | Canvas | Container |
+> |---|---|---|---|---|
+> | 1–3 | Fehlt/Endung/Tippfehler | nein, `0x0` | 0 | `markdown-source-view` |
+> | 4–6 | Fehlt/Endung/Tippfehler | ja | 0/0/1 | `markdown-preview-view` |
+>
+> Die Blöcke 4–6 trugen alle korrekten Meldungen. **Das Plugin war nie beteiligt.**
+>
+> **Das erklärt auch, warum dieselben Punkte am 2026-08-19 im outpost-Vault grün waren:**
+> dort steht `livePreview: false`, im Legacy-Quelltextmodus rendert Obsidian den Codeblock
+> im Source-View gar nicht — es gibt keine Doppelung. Die „Umgebung", die man seit dem
+> 30.08. verdächtigte, war genau diese eine Einstellung.
+>
+> **Der Fix ist ein Scope**, kein neues Verfahren: `.markdown-preview-view` als Wurzel, wie
+> es B10–B12 längst tun. **Gegenprobe (2026-09-03):** die beiden Meldungen in
+> `view-model.ts` durch `"GEGENPROBE"` ersetzt → **nur B13 und B14 rot**, mit genau diesem
+> Text im Ergebnis; B15 blieb grün (sein Hinweis kommt aus anderer Quelle). Danach
+> zurückgebaut → 15/17.
+>
+> ⚠️ **Was das über die Fehlersuche sagt:** die Vermutung „etwas im Ablauf vergiftet den
+> Zustand" war die ganze Zeit falsch, und sie war **plausibel** — fünf Punkte kippen
+> gemeinsam, das sieht nach einem gemeinsamen Zustand aus. Es war stattdessen ein
+> gemeinsamer *Selektor*. Beantwortet hat es keine Theorie, sondern eine Messung, die
+> ausdruckt, **wo** die gefundenen Elemente im Baum hängen.
+>
+> **2. (historisch) B13–B16 sind rot, und die Ursache ist offen.** Was belegt ist: sie kommen **nicht**
 > von der Beleuchtungs-Arbeit. Der Nachweis war eine **Baseline** — derselbe Treiber gegen
 > den `main`-Stand, also ohne die Änderung. Ergebnis Zeichen für Zeichen identisch: 12/17,
 > dieselben fünf rot. Ohne diese Baseline wäre die Suche im neuen Code gelandet.

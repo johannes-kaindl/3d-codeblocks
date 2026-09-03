@@ -1590,11 +1590,13 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     "",
   ].join("\n");
   await closeExtraLeaves(cdp);
+
   await openNote(cdp, SMOKE_NOTE_ERRORS, errorBody, "preview");
   await pollUntil(
     cdp,
     `
-      const block = [...document.querySelectorAll(".tdcb-block")].find(
+      const preview = document.querySelector(".markdown-preview-view");
+      const block = [...(preview?.querySelectorAll(".tdcb-block") ?? [])].find(
         (b) => b.querySelector(".tdcb-title")?.textContent.trim() === "Tippfehler",
       );
       return block && block.querySelector("canvas") ? 1 : 0;
@@ -1602,8 +1604,15 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     40_000,
   );
   const errors = await cdp.evaluate<{ missing: string; format: string; hint: string; canvas: number }>(`
+    // ⚠️ Auf die LESE-Ansicht scopen, nicht aufs ganze Dokument. Obsidian haelt beide
+    // Ansichten derselben Notiz im DOM: die Live-Preview-Fassung im
+    // 'markdown-source-view' (unsichtbar, 0x0, ohne Canvas und ohne Meldung) und die
+    // gerenderte im 'markdown-preview-view'. Ein ungescoptes 'querySelectorAll' findet
+    // beide, und '.find' nimmt die erste — also die leere. Referenzform ist dieselbe wie
+    // in B10-B12. Gemessen 2026-09-02, s. docs/SMOKE.md.
+    const preview = document.querySelector(".markdown-preview-view");
     const byTitle = (title) =>
-      [...document.querySelectorAll(".tdcb-block")].find(
+      [...(preview?.querySelectorAll(".tdcb-block") ?? [])].find(
         (b) => b.querySelector(".tdcb-title")?.textContent.trim() === title,
       );
 
