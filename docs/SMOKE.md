@@ -97,7 +97,19 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > Anlass war die Beleuchtungs-Arbeit (Roadmap S2). Drei Dinge sind dabei angefallen, und
 > nur eines davon ist ein Ergebnis am Plugin.
 >
-> ✅ **B17 AUFGEKLÄRT am 2026-09-03 — es war B8, nicht die Beleuchtung** (`2234376`).
+> ✅ **B18 ist neu (2026-09-03): mehrteiliges glTF.** Der Fall, den S1 gebaut hat und der
+> bis dahin in der GUI ungeprüft war — `.gltf` mit einer `.bin` daneben, die Form, die jeder
+> Blender-Export erzeugt. Geprüft wird, dass three die Nebendatei **im Vault** findet: ohne
+> den Resolver (`src/obsidian/gltf-resources.ts`) sucht der `LoadingManager` sie gegen die
+> App-Wurzel. Der Treiber stellt sein Material selbst her — er lagert den eingebetteten
+> data-URI-Buffer des vorhandenen Prüfmodells in eine echte `.bin` aus —, statt vom Fixture
+> abzuhängen; sonst liefe der Punkt nur im Staging-Vault und würde anderswo still
+> übersprungen (dieselbe Entscheidung wie bei B16/STL).
+> **Gegenprobe:** die `.bin` nach dem Schreiben gelöscht → **nur B18 rot**
+> („nichts gezeichnet — die .bin wurde nicht gefunden oder nicht geladen"). Danach
+> zurückgebaut, voller Lauf **65/65**.
+>
+> > ✅ **B17 AUFGEKLÄRT am 2026-09-03 — es war B8, nicht die Beleuchtung** (`2234376`).
 > B8 verschiebt den ersten Knoten der Prüfmodell-Kopie um `+25/+15` und nahm das nie
 > zurück. Jeder folgende Prüfpunkt lief gegen ein Modell, dessen erster Knoten 25 Einheiten
 > neben dem Rest steht; der Auto-Fit passt darauf korrekt ein — auf eine Box mit Radius ~24

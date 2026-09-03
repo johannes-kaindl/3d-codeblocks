@@ -104,6 +104,12 @@ const SMOKE_MODEL_EDIT = "_tdcb-smoke-edit.gltf";
  *  in jedem Vault ohne STL dauerhaft uebersprungen wird und die Lade-/Material-Kette
  *  fuer dieses Format nie jemand faehrt. Eine echte STL aus dem Vault hat Vorrang. */
 const SMOKE_MODEL_STL = "_tdcb-smoke-model.stl";
+/** Mehrteiliger Export: `.gltf` + `.bin` daneben — die Form, die jeder Blender-Export
+    erzeugt. Beide Pfade werden einzeln aufgeraeumt (kein Ordner: `vault.delete` auf einem
+    Ordner braucht `force`, und ein leerer Ordner bliebe sonst zurueck). */
+const SMOKE_MODEL_SPLIT = "_tdcb-smoke-split.gltf";
+const SMOKE_BIN_SPLIT = "_tdcb-smoke-split.bin";
+const SMOKE_NOTE_SPLIT = "_tdcb-gui-smoke-split.md";
 const FALLBACK_STL = [
   "solid tdcb",
   "facet normal 0 0 -1",
@@ -1755,7 +1761,83 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
       .join(" · "),
   );
 
-  skipped(
+  // --- B18. Mehrteiliges glTF: `.gltf` + `.bin` daneben --------------------
+  // Der Fall, den S1 gebaut hat, und der bis 2026-09-03 in der GUI ungeprueft war: three
+  // laedt die `.bin` ueber den `LoadingManager`, und ohne den Vault-Resolver
+  // (`src/obsidian/gltf-resources.ts`) sucht es sie gegen die APP-Wurzel statt gegen den
+  // Vault. Genau das ist die Form, die jeder Blender-Export erzeugt.
+  //
+  // Der Treiber bringt sein Material selbst mit — wie B16 bei der STL —, statt vom Fixture
+  // abzuhaengen: sonst laeuft der Punkt nur im Staging-Vault und wird anderswo still
+  // uebersprungen. Hergestellt wird er aus dem vorhandenen Pruefmodell, indem dessen
+  // eingebetteter data-URI-Buffer in eine echte Nebendatei ausgelagert wird.
+  const split = await cdp.evaluate<{ ok: boolean; grund: string }>(`
+    const src = app.vault.getAbstractFileByPath(${JSON.stringify(probe)});
+    if (!src || !src.path.endsWith(".gltf")) return { ok: false, grund: "Pruefmodell ist kein Text-glTF" };
+    const doc = JSON.parse(await app.vault.read(src));
+    const buf = (doc.buffers || [])[0];
+    if (!buf || typeof buf.uri !== "string" || buf.uri.indexOf("data:") !== 0) {
+      return { ok: false, grund: "Pruefmodell hat keinen eingebetteten Buffer zum Auslagern" };
+    }
+    const b64 = buf.uri.slice(buf.uri.indexOf(",") + 1);
+    const roh = atob(b64);
+    const bytes = new Uint8Array(roh.length);
+    for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+
+    const binPfad = ${JSON.stringify(SMOKE_BIN_SPLIT)};
+    const altBin = app.vault.getAbstractFileByPath(binPfad);
+    if (altBin) await app.vault.modifyBinary(altBin, bytes.buffer);
+    else await app.vault.createBinary(binPfad, bytes.buffer);
+
+    // Die URI ist VAULT-relativ zur .gltf — beide liegen im Wurzelverzeichnis.
+    doc.buffers[0] = { byteLength: bytes.length, uri: binPfad };
+    const gltfPfad = ${JSON.stringify(SMOKE_MODEL_SPLIT)};
+    const text = JSON.stringify(doc);
+    const altGltf = app.vault.getAbstractFileByPath(gltfPfad);
+    if (altGltf) await app.vault.modify(altGltf, text);
+    else await app.vault.create(gltfPfad, text);
+    await new Promise((r) => setTimeout(r, 400));
+    return { ok: true, grund: "" };
+  `);
+  createdNotes.add(SMOKE_MODEL_SPLIT);
+  createdNotes.add(SMOKE_BIN_SPLIT);
+  createdNotes.add(SMOKE_NOTE_SPLIT);
+
+  if (!split.ok) {
+    skipped("B18. Mehrteiliges glTF", split.grund);
+  } else {
+    await closeExtraLeaves(cdp);
+    await openNote(
+      cdp,
+      SMOKE_NOTE_SPLIT,
+      [`${fence}3d`, `file: ${SMOKE_MODEL_SPLIT}`, "title: Mehrteilig", fence, ""].join("\n"),
+      "preview",
+    );
+    const splitStats = await pollUntil<{ coverage: number; colors: number; meldung: string }>(
+      cdp,
+      `
+        ${SAMPLER}
+        // Auf die LESE-Ansicht scopen: Obsidian haelt die Live-Preview-Fassung derselben
+        // Notiz unsichtbar daneben im DOM (s. B13-B15, 2026-09-03).
+        const preview = document.querySelector(".markdown-preview-view");
+        const canvas = preview ? preview.querySelector(".tdcb-block canvas") : null;
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.coverage < 5) return null;
+        const box = preview ? preview.querySelector(".tdcb-message-error, .tdcb-message") : null;
+        return { coverage: stats.coverage, colors: stats.colors, meldung: box ? box.textContent.trim() : "" };
+      `,
+      30_000,
+    );
+    record(
+      "B18. Ein mehrteiliges glTF findet seine .bin im Vault",
+      splitStats !== null && splitStats.meldung === "",
+      splitStats
+        ? `${splitStats.coverage}% der Fläche belegt · ${splitStats.colors} Farbtöne · Meldung: ${splitStats.meldung || "keine"}`
+        : "nichts gezeichnet — die .bin wurde nicht gefunden oder nicht geladen",
+    );
+  }
+
+    skipped(
     "SMOKE.md Punkt 9 (Draco-GLB)",
     "braucht eine Draco-komprimierte Datei im Vault — der Treiber bringt keine Testdaten mit",
   );
