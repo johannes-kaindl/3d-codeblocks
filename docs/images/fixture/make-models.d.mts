@@ -41,3 +41,7 @@ export interface CameraFixtureDoc {
  *  `Doppel` zweimal und `Plan` (orthographisch) — das Pruefmaterial fuer
  *  `view: camera:<name>`. */
 export declare function cameraFloorGltf(): CameraFixtureDoc;
+
+/** Dasselbe Erdgeschoss mit GENAU EINER Kamera ("Overview") — reines Doku-Material fuer
+ *  `docs/images/camera-view.png`, getrennt von `cameraFloorGltf()` (GUI-Smoke-Pruefmaterial). */
+export declare function docCameraGltf(): Record<string, unknown>;

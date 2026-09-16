@@ -15,15 +15,34 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 
 ## Status
 
-**Stand 2026-09-16: 0.4.0-Nachtrag — vier neue Aufnahmen fuer Beleuchtung,
-Datei-Kameras und Farb-STL.** Die zehn Aufnahmen aus 0.3.x (unten) stehen weiter;
-dazu kommen `lighting-off.png`/`lighting-faithful.png` (Vorher/Nachher-Paar),
-`camera-view.png` und `colored-stl.png`. **Mehrteilige Modelle (S1) bekommen bewusst
-kein eigenes Bild** — das Fixture (`ground-floor-split.gltf` + `.bin`) rendert
-pixelgleich zu `ground-floor.gltf`, ein Bild würde also nichts zeigen, was `hero.png`
-nicht schon zeigt. Die Faehigkeit steht stattdessen als Satz unter „Supported
-formats" in der README; belegt ist sie durch `tests/fixture-models.test.ts`
-(„split model … renders once the resolver hands over the .bin").
+**Stand 2026-09-16: 0.4.0-Nachtrag — alle vier neuen Aufnahmen stehen, aufgenommen
+gegen die REGULÄRE Instanz (Fenster von Johannes geöffnet, nicht neu gestartet).**
+Die zehn Aufnahmen aus 0.3.x (unten) stehen weiter; dazu kommen
+`lighting-off.png`/`lighting-faithful.png` (Vorher/Nachher-Paar), `camera-view.png`
+und `colored-stl.png`. **Mehrteilige Modelle (S1) bekommen bewusst kein eigenes
+Bild** — das Fixture (`ground-floor-split.gltf` + `.bin`) rendert pixelgleich zu
+`ground-floor.gltf`, ein Bild würde also nichts zeigen, was `hero.png` nicht schon
+zeigt. Die Faehigkeit steht stattdessen als Satz unter „Supported formats" in der
+README; belegt ist sie durch `tests/fixture-models.test.ts` („split model … renders
+once the resolver hands over the .bin").
+
+**Zwei Befunde aus diesem Lauf, festgehalten weil sie beim naechsten Nachziehen
+wieder zuschlagen:**
+- **Ein langlebiges Fenster verliert seinen WebGL-Kontext nach genug Aufnahmen in
+  Folge** — `sidebar-controls.png` kam beim ersten Vollauf leer heraus (Modell
+  unsichtbar, ein rotes „Context lost"-Icon am Fensterrand), obwohl der Lauf
+  „Erfolg" meldete. Ein `Page.reload` des Vault-Fensters vor dem naechsten Lauf
+  behebt es; `npm run shots` selbst prueft das nicht.
+- **`.tdcb-panel` fuellt die Sidebar bis zum Fensterrand** — ein Ausschnitt bis zur
+  vollen Panel-Hoehe (`boxAround`) faengt in der leeren Flaeche darunter ein
+  OS-/Fenster-Artefakt (Screenshot-Rand-Icon, kein Plugin-Element) mit ein. Neue
+  Hilfsfunktion `blockPlusPanelBox()` begrenzt die Hoehe auf den Block
+  (`sidebar-controls.png`, `edit-mode.png`).
+- `edit-mode.png` zeigte bis zu diesem Lauf **keinen ausgewaehlten Knoten** — das
+  Rezept oeffnete den Edit-Modus, klickte aber nie ins Canvas. Der Vertrag
+  versprach seit jeher „ein ausgewaehlter Knoten mit Gizmo"; jetzt klickt der
+  Treiber gemessen (nicht geraten) an eine Bildkoordinate, die den „Stove"-Wuerfel
+  trifft.
 
 **Stand 2026-08-15: alle zehn Aufnahmen der 0.3.x-Reihe stehen** — `npm run shots:check` meldet „keine
 Befunde": jedes im Vertrag zugesagte Bild existiert, hält seine Klasse, sein Budget und
@@ -96,13 +115,13 @@ Verbindlich ist der workspace-weite Bild-Standard in `_docs/readme/readme-spec.j
 | `sidebar-controls.png` | feature | `README.md` (Saving a camera angle) | Die Sidebar (Kommando **Open 3D view controls**) neben einem aktiven Modell: Kamerawerte und dieselben Aktionen als Schaltflächen. Kein leerer Zustand — **„Click a 3D model to control it here."** darf *nicht* zu sehen sein. |
 | `saved-view.png` | feature | `README.md` (Saving a camera angle) | Notiz **Saved view**: die Zeile `view: 225,28,14` im Block **und** das entsprechend gedrehte Modell im selben Bild — die Aussage ist, dass der Blickwinkel in der Notiz steht. |
 | `orbit.gif` | detail (aufgenommen als feature) | `README.md` (Features) | Eine Umkreisung des Modells samt Zoom, 6–8 s, ~800 px. Das eine Feature, das als Standbild nicht erzählbar ist. ⚠️ **Eingebettet als klickbare 380-px-Vorschau, nicht in voller Breite** (2026-08-18): `framesToGif` skaliert die Frames auf eine feste Zielbreite (800) und rechnet die Retina-Dichte dabei heraus — `image-scale` unterstellt jeder Datei unter `capture_width` aber eine dpr-2-Aufnahme und lässt deshalb nur 400 Anzeigebreite zu. Wer das GIF wieder breit einbetten will, muss es in 1200 px erzeugen (GIF-Budget 2048 KB prüfen, aktuell 1131 KB bei 800 px), nicht die Einbettung hochsetzen. |
-| `edit-mode.png` | detail | `README.md` (Edit mode) | Edit-Modus aktiv: ein ausgewählter Knoten mit Gizmo, die Sidebar mit **Move**/**Scale**, den Zahlenfeldern für Translation und Skalierung, **Reset node** und **Save edits**/**Discard edits**. Der Knotenname (z. B. `Stairs`) muss lesbar sein. |
+| `edit-mode.png` | detail | `README.md` (Edit mode) | Edit-Modus aktiv: ein ausgewählter Knoten mit Gizmo, die Sidebar mit **Move**/**Scale**, den Zahlenfeldern für Translation und Skalierung, **Reset node** und **Save edits**/**Discard edits**. Der Knotenname (z. B. `Stove`) muss lesbar sein — die Auswahl ist ein Klick ins WebGL-Canvas (Raycasting), kein DOM-Element; der Treiber klickt an einer am Blickwinkel `blickwinkel(320,46)` gemessenen Bildkoordinate. |
 | `unapplied-edits.png` | detail | `README.md` (Edit mode) | Das Abzeichen **Unapplied edits** über dem Viewport, mit dem Modell dahinter — der Zustand „neben der Datei liegt eine `.edit.gltf`". Nutzt die Notiz **Edited** und ein **eigenes** Modell (`edited-floor.gltf`): läge die `.edit.gltf` neben dem gemeinsam genutzten Modell, trüge *jedes* Bild dieses Abzeichen. |
 | `unknown-key.png` | detail | `README.md` (Block keys) | Notiz **Unknown key**: die Meldung unter dem Viewport, die `heigth:` als unbekannten Schlüssel benennt, mit dem gerenderten Modell darüber. Zeigt, dass ein Tippfehler nicht wie ein Plugin-Fehler aussieht. ⚠️ **Das Bild widerlegt eine bis 2026-08-18 geführte Annahme:** der Prüfling versteckt das Modell bei unbekanntem Schlüssel *nicht* — Meldung und Modell stehen beide da. GUI-Smoke B15 prüft genau diese Kombination (`hint` enthält `heigth` und `canvas > 0`) und ist trotzdem rot; er misst allerdings in einer Notiz mit **drei** Fehlerblöcken. Der Verdacht liegt damit beim Messpunkt, nicht am Plugin — offen, braucht einen Smoke-Lauf. |
 | `settings.png` | detail | `README.md` (Configuration) | Der Einstellungen-Tab: **Default height**, **Show ground grid**, **Maximum live 3D views**, **Controls placement**, **Locked node prefixes**, **Auto-rotate**. |
 | `lighting-off.png` | feature (Paar mit `lighting-faithful.png`) | `README.md` (Lighting) | Der metallische Demo-Würfel (`metallic-orb.gltf`, `metallicFactor: 1`) mit Einstellung **Lighting: Off** — schwarz bis auf harte Kanten, nichts zum Spiegeln da. |
 | `lighting-faithful.png` | feature (Paar mit `lighting-off.png`) | `README.md` (Lighting) | Derselbe Würfel, derselbe Blickwinkel, Einstellung **Lighting: Faithful colors** (Default seit 0.4.0) — sichtbare Reflexionen statt einer schwarzen Fläche. Beide Bilder nebeneinander sind die Aussage; keines für sich allein. |
-| `camera-view.png` | feature | `README.md` (Aiming a camera from the file) | `camera-floor.gltf` mit `view: camera:Schnitt A` — der Blick sitzt an der Position und Ausrichtung, die die Datei für diese Kamera vorgibt, nicht an der Auto-Einpassung. Zeigt bewusst den Namen **mit Leerzeichen** (`Schnitt A`), weil er den Kernfall des Features trägt. |
+| `camera-view.png` | feature | `README.md` (Aiming a camera from the file) | `doc-camera-floor.gltf` mit `view: camera:Overview` — ein eigenes, reines Doku-Fixture (getrennt von `camera-floor.gltf`, dem GUI-Smoke-Prüfmaterial mit den namenstragenden Testfällen). Erhöhter, leicht nach unten geneigter Blick von der Datei — sichtbar anders als die kugelkoordinatenbasierte Auto-Einpassung, und zeigt das dachlose Haus von schräg oben. |
 | `colored-stl.png` | detail | `README.md` (Supported formats) | `colored-octahedron.stl` — ein binäres STL im „Magics"-Farbformat, jede Facette in einer eigenen Farbe aus der Bau-Palette. Kontrast zu `edit-mode.png`/`octahedron.stl` (einfarbig, Theme-Default), das im selben Abschnitt referenziert bleibt. |
 
 ## Reproduktion

@@ -152,7 +152,7 @@ Position, direction and field of view come straight from the file. From there yo
 zoom and pan as usual, turning around the point that camera looks at rather than the middle
 of the model — so a camera that frames a detail keeps its detail.
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="A model shown from a camera the file itself carries, named 'Schnitt A' — a different angle than the auto-fitted default">
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="A model shown from a camera the file itself carries, an elevated angle looking down into the roofless house — different from the auto-fitted default">
 
 **The name is the one in the file**, matched without regard to case: first the names of the
 camera *nodes* (in Blender, the object name in the outliner), then the names of the camera

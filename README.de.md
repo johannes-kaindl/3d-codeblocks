@@ -163,7 +163,7 @@ sich wie gewohnt orbitieren, zoomen und schwenken — gedreht wird um den Punkt,
 Kamera blickt, nicht um die Modellmitte. Eine Kamera, die einen Ausschnitt rahmt, behält
 damit ihren Ausschnitt.
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="Ein Modell aus einer Kamera, die die Datei selbst mitbringt, benannt 'Schnitt A' — ein anderer Blickwinkel als das automatische Einpassen">
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="Ein Modell aus einer Kamera, die die Datei selbst mitbringt, erhöhter Blick von schräg oben in das dachlose Haus — anders als das automatische Einpassen">
 
 **Gesucht wird der Name, der in der Datei steht**, ohne Rücksicht auf Groß- und
 Kleinschreibung: erst unter den Namen der Kamera-*Knoten* (in Blender der Objektname aus

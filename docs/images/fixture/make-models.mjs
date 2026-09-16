@@ -315,6 +315,38 @@ export function cameraFloorGltf() {
   return doc;
 }
 
+/** Dasselbe Erdgeschoss mit GENAU EINER benannten Kamera ("Overview") — reines
+ *  Doku-Material fuer `docs/images/camera-view.png`, absichtlich GETRENNT von
+ *  `cameraFloorGltf()`: dessen fuenf Knoten sind Pruefmaterial fuer den GUI-Smoke-
+ *  Abschnitt `cameras` (Namen, Mehrdeutigkeit, Bild-Hash-Schwelle,
+ *  `tests/fixture-models.test.ts`) und duerfen sich nicht fuer ein huebscheres
+ *  Screenshot-Framing verschieben.
+ *
+ *  Position/Rotation folgen demselben Schema wie `hero.png` (`blickwinkel()` in
+ *  `scripts/shots.ts`: Auto-Einpassung mit 50°-FOV, dann auf 0.82x der Distanz
+ *  heranzoomen) — nur mit Azimut 140° statt 320°, damit das Bild sichtbar eine
+ *  ANDERE Ecke des Hauses zeigt als der Standard-Blick. Koordinaten einmalig mit
+ *  `core/camera-fit.ts`-Formel + three.js' `Camera.lookAt` fuer die Quaternion
+ *  berechnet (nicht per Hand geraten — ein erster Versuch mit Handrechnung landete
+ *  zu flach und zu weit weg, kaum mehr als ein duenner Streifen Haus im Bild). */
+export function docCameraGltf() {
+  const doc = groundFloorGltf();
+  doc.scenes[0].name = "Ground_floor_with_doc_camera";
+  doc.cameras = [{
+    type: "perspective",
+    perspective: { yfov: (50 * Math.PI) / 180, znear: 0.05, zfar: 200 },
+  }];
+  const index = doc.nodes.length;
+  doc.nodes.push({
+    name: "Overview",
+    camera: 0,
+    translation: [5.27, 9.58, -6.28],
+    rotation: [-0.13355729035887742, 0.8650880063959113, 0.36692140686772257, 0.3148870790682802],
+  });
+  doc.scenes[0].nodes.push(index);
+  return doc;
+}
+
 /** Eine `.edit.gltf` neben dem Modell: dasselbe Dokument mit einem verschobenen Knoten.
  *
  *  Das Plugin zeigt daraufhin das Abzeichen „Unapplied edits" — der Zustand „neben der
@@ -355,6 +387,7 @@ export function writeModels(target) {
   const splitPath = join(target, "models", "ground-floor-split.gltf");
   const splitBin = join(target, "models", "ground-floor.bin");
   const cameraPath = join(target, "models", "camera-floor.gltf");
+  const docCameraPath = join(target, "models", "doc-camera-floor.gltf");
   const colouredStlPath = join(target, "models", "colored-octahedron.stl");
   const metallicPath = join(target, "models", "metallic-orb.gltf");
   mkdirSync(dirname(modelPath), { recursive: true });
@@ -363,6 +396,7 @@ export function writeModels(target) {
   writeFileSync(editPath, JSON.stringify(groundFloorEditGltf(), null, 1) + "\n");
   writeFileSync(stlPath, octahedronStl());
   writeFileSync(cameraPath, JSON.stringify(cameraFloorGltf(), null, 1) + "\n");
+  writeFileSync(docCameraPath, JSON.stringify(docCameraGltf(), null, 1) + "\n");
   writeFileSync(colouredStlPath, Buffer.from(colouredOctahedronStl()));
   writeFileSync(metallicPath, JSON.stringify(metallicOrbGltf(), null, 1) + "\n");
 
@@ -373,7 +407,7 @@ export function writeModels(target) {
   writeFileSync(splitBin, split.bin);
 
   return [
-    modelPath, editBase, editPath, stlPath, cameraPath, splitPath, splitBin,
+    modelPath, editBase, editPath, stlPath, cameraPath, docCameraPath, splitPath, splitBin,
     colouredStlPath, metallicPath,
   ];
 }

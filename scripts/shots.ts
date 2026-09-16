@@ -62,7 +62,6 @@ import {
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 import {
-  boxAround,
   boxOf,
   capture,
   framesToGif,
@@ -223,6 +222,21 @@ async function splitAufloesen(cdp: Cdp): Promise<void> {
   await setAppConfig(cdp, "livePreview", true);
 }
 
+/** Block + Sidebar-Panel zusammen, aber auf die BLOCK-Hoehe begrenzt, nicht die volle
+ *  Panel-Hoehe: `.tdcb-panel` fuellt die Sidebar bis zum Fensterrand, weit ueber die
+ *  paar Knoepfe/Felder hinaus. In dieser leeren Flaeche unten rechts sitzt ein
+ *  OS-/Fenster-Artefakt (ein rotes Icon, kein Plugin-Element — bestaetigt per
+ *  `elementFromPoint` an genau der Stelle: "nichts an dieser Stelle" im Seiten-DOM),
+ *  das ein bis zum Panel-Ende reichender Ausschnitt sonst mit einfaengt. */
+async function blockPlusPanelBox(cdp: Cdp): Promise<Rect | null> {
+  const block = await boxOf(cdp, ".tdcb-block", PADDING);
+  const panel = await boxOf(cdp, ".tdcb-panel", PADDING);
+  if (!block || !panel) return null;
+  const x = Math.min(block.x, panel.x);
+  const right = Math.max(block.x + block.width, panel.x + panel.width);
+  return { x, y: Math.min(block.y, panel.y), width: right - x, height: block.height };
+}
+
 /** Den Block aktiv machen und die Kamera einpassen.
  *
  * Beides ist noetig, bevor ein Bild etwas taugt: ohne Aktivierung liefert
@@ -332,23 +346,20 @@ const SHOTS: Shot[] = [
         return !!(panel && !panel.querySelector(".tdcb-empty"));
       `, 10_000, 300);
       if (!gefuellt) return null;
-      return boxAround(cdp, [".tdcb-block", ".tdcb-panel"], PADDING);
+      return blockPlusPanelBox(cdp);
     },
   },
   {
     name: "unknown-key.png",
     klasse: "detail",
     async run(cdp) {
-      // NICHT ueber blockBereit: bei unbekanntem Schluessel rendert der Pruefling kein
-      // Modell (GUI-Smoke B15 ist genau deshalb rot). Auf ein Canvas zu warten hiesse,
-      // auf etwas zu warten, das per Design nicht kommt.
-      if (!(await openExisting(cdp, "Unknown-key.md", "preview"))) return null;
-      await cdp.evaluate(`
-        const play = [...document.querySelectorAll(".tdcb-play")]
-          .filter((e) => e.getBoundingClientRect().width > 1)[0];
-        if (play) play.click();
-        return true;
-      `);
+      // Ueber blockBereit statt eines eigenen, ungeduldigeren Klicks: das Modell rendert
+      // trotz unbekanntem Schluessel (Vertrag-Befund 2026-08-18 — eine aeltere Annahme
+      // hier im Kommentar behauptete das Gegenteil und war falsch), blockBereit wartet
+      // aber zuverlaessig auf das sichtbare Standbild-Overlay, BEVOR es klickt — ein
+      // Klick direkt nach openExisting traf das Overlay manchmal, bevor es im DOM stand,
+      // und das Bild zeigte dann "Click to activate" statt des Modells.
+      if (!(await blockBereit(cdp, "Unknown-key.md"))) return null;
       // Auf den TEXT im Block warten, nicht auf .tdcb-message-slot: gemessen sind die
       // Slot-Elemente leer, die Meldung steht an anderer Stelle im Block.
       const meldung = await pollUntil<boolean>(cdp, `
@@ -368,6 +379,10 @@ const SHOTS: Shot[] = [
     klasse: "detail",
     async run(cdp) {
       if (!(await blockBereit(cdp, "Ground-floor.md"))) return null;
+      // Bekannten Blickwinkel erzwingen statt den mitzunehmen, den ein frueherer Shot
+      // zufaellig hinterlassen hat — sonst landet der Klick unten (Stairs-Wuerfel bei
+      // ~37%/62% dieses Blickwinkels) im Leeren.
+      await blickwinkel(cdp, 320, 46);
       const block = await boxOf(cdp, ".tdcb-block");
       if (block) await hover(cdp, block);
       await cdp.evaluate(
@@ -388,7 +403,36 @@ const SHOTS: Shot[] = [
         return !!(document.querySelector(".tdcb-editing") || document.querySelector(".tdcb-panel-edit"));
       `);
       if (!gestartet) return null;
-      return boxAround(cdp, [".tdcb-block", ".tdcb-panel"], PADDING);
+      // Die Auswahl ist ein Rig-Zustand, kein DOM-Klick auf ein Element — der 3D-Canvas
+      // hat kein anklickbares Node-Element, nur Raycasting auf Mausposition. Ohne diesen
+      // Klick zeigt das Bild den leeren Edit-Zustand ("Click a part of the model to
+      // select it."), Reset/Save/Discard bleiben deaktiviert — genau das war der Befund
+      // beim ersten Nachziehen dieses Rezepts fuer 0.4.0 (Vertrag verspricht einen
+      // ausgewaehlten Knoten mit Gizmo, das Bild hatte keinen).
+      // Fraktion am blickwinkel(320,46)-Blick GEMESSEN (nicht geraten): trifft den
+      // "Stove"-Wuerfel. Eine erste Schaetzung (0.37/0.62) traf daneben — ohne
+      // sichtbares Fehlersignal ("kein Knoten ausgewaehlt" kam erst durch den
+      // pollUntil-Check unten zutage, nicht durch den Klick selbst.
+      const blockBox = await boxOf(cdp, ".tdcb-block");
+      if (!blockBox) return null;
+      const modellPunkt = {
+        x: Math.round(blockBox.x + blockBox.width * 0.32),
+        y: Math.round(blockBox.y + blockBox.height * 0.55),
+      };
+      for (const type of ["mousePressed", "mouseReleased"] as const) {
+        await cdp.send("Input.dispatchMouseEvent", {
+          type, x: modellPunkt.x, y: modellPunkt.y, button: "left", clickCount: 1,
+        });
+      }
+      const ausgewaehlt = await pollUntil<boolean>(cdp, `
+        const label = document.querySelector(".tdcb-panel-edit-label");
+        return !!(label && label.textContent.trim().length > 0);
+      `, 6_000, 300);
+      if (!ausgewaehlt) {
+        console.log("      · kein Knoten ausgewaehlt — Klickpunkt traf daneben");
+        return null;
+      }
+      return blockPlusPanelBox(cdp);
     },
   },
   {
@@ -437,9 +481,9 @@ const SHOTS: Shot[] = [
     klasse: "feature",
     async run(cdp) {
       if (!(await blockBereit(cdp, "Camera-view.md"))) return null;
-      // KEIN blickwinkel() hier: die Kamera kommt aus der Datei (`view: camera:Schnitt A`),
-      // ein applyView(null) wuerde sie durch die Auto-Einpassung ersetzen — genau das
-      // Gegenteil dessen, was das Bild zeigen soll.
+      // KEIN blickwinkel() hier: die Kamera kommt aus der Datei (`view: camera:Overview`,
+      // `doc-camera-floor.gltf`), ein applyView(null) wuerde sie durch die
+      // Auto-Einpassung ersetzen — genau das Gegenteil dessen, was das Bild zeigen soll.
       return boxOf(cdp, ".tdcb-block", PADDING);
     },
   },
@@ -559,6 +603,13 @@ async function settingsBild(cdp: Cdp, port: number, opts: ShotOptions): Promise<
   if (!fenster) return "settings.png — kein Einstellungen-Fenster gefunden";
   try {
     await fenster.send("Page.bringToFront");
+    // Das Einstellungen-Fenster ist bei Standardgroesse zu klein fuer den mit 0.4.0
+    // gewachsenen Tab (Lighting, Model's own lights, Allow external resources kamen
+    // dazu) — `.vertical-tab-content` scrollt dann intern, und `getBoundingClientRect`
+    // liefert nur die SICHTBARE Hoehe, nicht `scrollHeight`. Ein screenshot davon
+    // schneidet die unteren Felder (Controls placement, Locked node prefixes) einfach
+    // ab, ohne Fehler. Grosszuegige feste Fenstergroesse statt Scroll-Handling.
+    await setWindowSize(fenster, 1100, 1500);
     await new Promise((r) => setTimeout(r, 600));
     const box = await boxOf(fenster, ".vertical-tab-content", 0)
       ?? await boxOf(fenster, ".modal-content", 0);

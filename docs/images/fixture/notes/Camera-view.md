@@ -4,8 +4,8 @@
 whoever built the model considered the right one.
 
 ```3d
-file: models/camera-floor.gltf
-title: Section A
-view: camera:Schnitt A
+file: models/doc-camera-floor.gltf
+title: Overview
+view: camera:Overview
 height: 420
 ```
