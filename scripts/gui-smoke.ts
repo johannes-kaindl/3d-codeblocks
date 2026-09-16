@@ -62,6 +62,7 @@ import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
 import {
   Cdp,
   clearNotices,
+  clickReal,
   closeExtraLeaves,
   notices,
   openNote as openNoteViaBridge,
@@ -2953,6 +2954,99 @@ async function sectionCameras(cdp: Cdp, _model: string): Promise<void> {
   }
 }
 
+/** Beantwortet die Task-Frage „clickReal misst am ersetzten DOM womoeglich vorbei"
+ *  (`control-panel.ts:82` ruft bei jedem Zustandswechsel `root.empty()`, ersetzt also
+ *  jeden Panel-Knopf): geht ein Klick zwischen Press und Release ins Leere, wenn das
+ *  Panel dazwischen neu zeichnet?
+ *
+ *  Der Treiber selbst benutzt dafuer nirgends `clickReal` — jeder Panel-Klick
+ *  (`clickPanelButton`/`clickEditButton`) ist ein synchrones `element.click()`
+ *  INNERHALB eines einzigen `cdp.evaluate()`-Aufrufs, ohne `await` zwischen Suchen und
+ *  Klicken. Der Renderer hat einen Thread — `draw()` kann zwischen Suchen und Klicken
+ *  darum nicht dazwischenfunken, das ist strukturell sicher. Diese Probe misst es
+ *  trotzdem statt es nur zu behaupten (CORE-TEST-01), und liefert die Positivkontrolle
+ *  gleich mit: derselbe Knopf, derselbe Sturm, aber mit `clickReal` (echter
+ *  Press/Release-Split) geklickt, MUSS Treffer verlieren — sonst waere der Sturm zu
+ *  schwach, um ueberhaupt etwas zu beweisen, und R2 (0 Verluste) waere wertlos. */
+async function sectionClickRace(cdp: Cdp, model: string): Promise<void> {
+  const noteBody = [`${fence}3d`, `file: ${model}`, fence, ""].join("\n");
+  await openNote(cdp, SMOKE_NOTE, noteBody, "preview");
+  await cdp.evaluate(
+    `await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-controls`)}); return true;`,
+  );
+  const active = await activateBlock(cdp, 0);
+  if (!active) {
+    record("R0. Block aktivierbar (Voraussetzung der Klick-Sturm-Probe)", false, "kein Controller — Probe übersprungen");
+    return;
+  }
+
+  const FIT = `[...document.querySelectorAll(".tdcb-panel-actions button")].find((b) => b.textContent === "Fit")`;
+  const N = 20;
+
+  // Zaehler auf `document`, nicht am Knopf: der Knopf wird pro Sturm-Tick neu erzeugt,
+  // ein Listener direkt darauf ginge mit ihm verloren.
+  await cdp.evaluate(`
+    window.__tdcbClickHandler = () => { window.__tdcbClicks = (window.__tdcbClicks || 0) + 1; };
+    document.addEventListener("click", window.__tdcbClickHandler, true);
+    return true;
+  `);
+  const clickAtomic = async (): Promise<void> => {
+    await cdp.evaluate(`
+      const el = ${FIT};
+      if (el) el.click();
+      return true;
+    `);
+  };
+
+  // --- Grundlinie: ruhiges Ziel, kein Sturm --------------------------------
+  await cdp.evaluate(`window.__tdcbClicks = 0; return true;`);
+  for (let i = 0; i < N; i++) await clickAtomic();
+  const baseline = await cdp.evaluate<number>(`return window.__tdcbClicks;`);
+  record("R1. Grundlinie: 20 atomare Klicks ohne Sturm kommen alle an", baseline === N, `${baseline}/${N}`);
+  if (baseline !== N) {
+    record("R2/R3. Sturm-Fälle übersprungen", false, "Grundlinie schon nicht 20/20 — alles Folgende wäre wertlos");
+    await cdp.evaluate(`document.removeEventListener("click", window.__tdcbClickHandler, true); return true;`);
+    return;
+  }
+
+  // --- Sturm: root.empty() im 10ms-Takt via active.notify() -----------------
+  await cdp.evaluate(`
+    const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+    window.__tdcbStorm = setInterval(() => plugin.active.notify(), 10);
+    return true;
+  `);
+  await new Promise((r) => setTimeout(r, 100));
+
+  // --- Lastfall: derselbe atomare Klick, jetzt unter Sturm -------------------
+  await cdp.evaluate(`window.__tdcbClicks = 0; return true;`);
+  for (let i = 0; i < N; i++) await clickAtomic();
+  const underLoad = await cdp.evaluate<number>(`return window.__tdcbClicks;`);
+  record(
+    "R2. Lastfall: der reale Klick-Pfad (synchrones element.click()) übersteht den Panel-Sturm",
+    underLoad === N,
+    `${underLoad}/${N} — root.empty() alle 10ms während geklickt wurde`,
+  );
+
+  // --- Positivkontrolle: echter Press/Release-Split (clickReal) im selben Sturm ---
+  await cdp.evaluate(`window.__tdcbClicks = 0; return true;`);
+  for (let i = 0; i < N; i++) {
+    await clickReal(cdp, FIT, 15);
+  }
+  const splitClicks = await cdp.evaluate<number>(`return window.__tdcbClicks;`);
+  record(
+    "R3. Positivkontrolle: Press/Release-Split (clickReal, 15ms Haltezeit) verliert Treffer im selben Sturm",
+    splitClicks < N,
+    `${splitClicks}/${N} click-Events angekommen — belegt, dass der Sturm stark genug ist, den in ` +
+      `'clickReal misst am ersetzten DOM womoeglich vorbei' beschriebenen Fehler auszulösen`,
+  );
+
+  await cdp.evaluate(`
+    clearInterval(window.__tdcbStorm);
+    document.removeEventListener("click", window.__tdcbClickHandler, true);
+    return true;
+  `);
+}
+
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
@@ -2960,6 +3054,7 @@ const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => 
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
   { key: "cameras", title: "Kameras aus der Datei (SMOKE.md 2026-09-02)", run: sectionCameras },
+  { key: "clickrace", title: "Klick-Sturm-Probe (Task 'clickReal misst am ersetzten DOM womoeglich vorbei')", run: sectionClickRace },
 ];
 
 /** Misst der Lauf ueberhaupt den Code dieses Checkouts?

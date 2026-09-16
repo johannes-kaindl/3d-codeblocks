@@ -502,6 +502,29 @@ Die fünf Kameras im Prüfmodell und wofür jede steht:
 - [x] **K7. Falsches Format** — `view: camera:Front` auf einer `.stl` meldet
       „`view: camera:…` needs a glTF file"; das Modell bleibt sichtbar.
 
+## Klick-Sturm-Probe (2026-09-16)
+
+> [!success] Automatisiert seit 2026-09-16 — `npm run smoke:gui -- --section clickrace`
+> Beantwortet die Cockpit-Task „clickReal misst am ersetzten DOM womoeglich vorbei":
+> `ControlPanelView.draw()` (`control-panel.ts:82`) ruft bei jedem Zustandswechsel
+> `root.empty()` und ersetzt damit jeden Panel-Knopf. Der Treiber benutzt für Panel-Klicks
+> aber nirgends `clickReal` (echter Press/Release-Split über zwei CDP-Roundtrips) — jeder
+> Klick (`clickPanelButton`/`clickEditButton`) ist ein synchrones `element.click()`
+> **innerhalb eines einzigen `cdp.evaluate()`-Aufrufs**, ohne `await` zwischen Suchen und
+> Klicken. Der Renderer hat einen Thread: `draw()` kann dazwischen nicht laufen.
+>
+> | Punkt | Was gemessen wird |
+> |---|---|
+> | R1. Grundlinie | 20 atomare Klicks auf "Fit" ohne Störung — muss 20/20 sein, sonst ist alles Folgende wertlos |
+> | R2. Lastfall | dieselben 20 Klicks, während `active.notify()` alle 10ms `root.empty()` auslöst — der reale Klick-Pfad |
+> | R3. Positivkontrolle | dieselben 20 Klicks, aber mit `clickReal` (15ms Haltezeit) statt `element.click()` — muss Treffer verlieren, sonst wäre der Sturm zu schwach, um R2 etwas zu beweisen |
+>
+> **Ergebnis (2026-09-16, Obsidian 1.14.2):** R1 20/20 · R2 20/20 · R3 0/20. Der reale
+> Klick-Mechanismus ist strukturell immun; die Positivkontrolle belegt, dass der Sturm
+> stark genug ist, den Fehler aus der Task tatsächlich auszulösen — wäre der Treiber je
+> auf `clickReal` oder ein `await` zwischen Suchen und Klicken umgestellt, würde R2 das
+> fangen. Kein Fix nötig, weder hier noch in der Bruecke (`tools/obsidian-cdp/cdp.ts`).
+
 ## Befunde
 
 _Hier notieren, was auffällt._
