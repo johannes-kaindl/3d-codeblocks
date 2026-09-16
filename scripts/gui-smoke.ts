@@ -2952,6 +2952,11 @@ async function sectionCameras(cdp: Cdp, _model: string): Promise<void> {
         : `angefahren ${vorher ? `#${vorher.hash}` : "kein Bild"} · vor dem Zug ${orbit.before === null ? "kein Bild" : `#${orbit.before}`} · danach ${orbit.after === null ? "kein Bild" : `#${orbit.after}`}`,
     );
   }
+
+  // Zurück auf den Standard, den main() vor der Sektionsschleife setzt — sonst erbt jede
+  // Sektion NACH dieser hier "immediate" und activateBlock() wartet auf ein .tdcb-play,
+  // das nie erscheint. Bis 2026-09-16 folgenlos, weil cameras die letzte Sektion war.
+  await setSetting(cdp, "viewMode", "on-click");
 }
 
 /** Beantwortet die Task-Frage „clickReal misst am ersetzten DOM womoeglich vorbei"
