@@ -7,6 +7,14 @@ export declare function groundFloorGltf(): Record<string, unknown>;
 /** ASCII-STL eines Oktaeders — das Format kennt keine Materialien. */
 export declare function octahedronStl(): string;
 
+/** Dasselbe Oktaeder als BINAERES STL im "Magics"-Farbformat — jede Facette traegt
+ *  ihre eigene Farbe. Der Prueffall fuer "STL files that carry their own colours". */
+export declare function colouredOctahedronStl(): ArrayBuffer;
+
+/** Ein einzelner metallischer Wuerfel (`metallicFactor: 1`) — der Prueffall fuer
+ *  "Metallic models are no longer black" (Lighting-Einstellung). */
+export declare function metallicOrbGltf(): Record<string, unknown>;
+
 /** glTF mit einem verschobenen Knoten — erzeugt das „Unapplied edits"-Abzeichen. */
 export declare function groundFloorEditGltf(): Record<string, unknown>;
 

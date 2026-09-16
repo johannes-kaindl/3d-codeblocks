@@ -406,6 +406,53 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Vorher/Nachher der Beleuchtung (0.4.0): dieselbe Notiz, zweimal aufgenommen — einmal
+    // mit "Off" (das alte Verhalten), einmal mit dem neuen Default "Faithful colors". Die
+    // Einstellung wirkt live (`saveSettings` → `refreshLighting`, s. `src/main.ts`), ein
+    // Notiz-Neuaufbau ist also nicht noetig — nur der Setting-Wechsel zwischen den beiden
+    // Aufnahmen. `klasse: "feature"` fuer beide, weil sie als Paar nebeneinander stehen.
+    name: "lighting-off.png",
+    klasse: "feature",
+    async run(cdp) {
+      await setPluginSetting(cdp, PLUGIN_ID, "lighting", "off");
+      if (!(await blockBereit(cdp, "Lighting.md"))) return null;
+      await blickwinkel(cdp, 35, 22);
+      return boxOf(cdp, ".tdcb-block", PADDING);
+    },
+  },
+  {
+    name: "lighting-faithful.png",
+    klasse: "feature",
+    async run(cdp) {
+      // Dieselbe Notiz bleibt offen (kein blockBereit-Neuaufbau) — nur die Einstellung
+      // wechselt. Ein Reopen wuerde denselben Zustand liefern, aber unnoetig Zeit kosten
+      // und die Kette der Aufraeum-Fallstricke (siehe Kopfkommentar) unnoetig verlaengern.
+      await setPluginSetting(cdp, PLUGIN_ID, "lighting", "faithful");
+      await new Promise((r) => setTimeout(r, 400));
+      return boxOf(cdp, ".tdcb-block", PADDING);
+    },
+  },
+  {
+    name: "camera-view.png",
+    klasse: "feature",
+    async run(cdp) {
+      if (!(await blockBereit(cdp, "Camera-view.md"))) return null;
+      // KEIN blickwinkel() hier: die Kamera kommt aus der Datei (`view: camera:Schnitt A`),
+      // ein applyView(null) wuerde sie durch die Auto-Einpassung ersetzen — genau das
+      // Gegenteil dessen, was das Bild zeigen soll.
+      return boxOf(cdp, ".tdcb-block", PADDING);
+    },
+  },
+  {
+    name: "colored-stl.png",
+    klasse: "detail",
+    async run(cdp) {
+      if (!(await blockBereit(cdp, "Colored-stl.md"))) return null;
+      await blickwinkel(cdp, 35, 18);
+      return boxOf(cdp, ".tdcb-block", PADDING);
+    },
+  },
+  {
     name: "code-and-render.png",
     klasse: "feature",
     async run(cdp) {

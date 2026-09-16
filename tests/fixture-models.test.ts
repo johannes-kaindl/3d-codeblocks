@@ -7,7 +7,14 @@
 import { describe, expect, it } from "vitest";
 import type { Object3D } from "three";
 import { loadModel } from "../src/viewer/loaders";
-import { cameraFloorGltf, groundFloorGltf, octahedronStl, splitGroundFloor } from "../docs/images/fixture/make-models.mjs";
+import {
+  cameraFloorGltf,
+  colouredOctahedronStl,
+  groundFloorGltf,
+  metallicOrbGltf,
+  octahedronStl,
+  splitGroundFloor,
+} from "../docs/images/fixture/make-models.mjs";
 import { fitCamera } from "../src/core/camera-fit";
 import { fileCameraNames, findFileCamera, type FileCameraInfo } from "../src/core/gltf-cameras";
 import { fileCameraFit } from "../src/viewer/file-camera";
@@ -47,6 +54,31 @@ describe("Fixture-Modelle fuer die README-Aufnahmen", () => {
       if (geo?.attributes?.position) hatGeometrie = true;
     });
     expect(hatGeometrie).toBe(true);
+  });
+
+  it("metallic-orb.gltf laedt und traegt ein metallisches Material", async () => {
+    const scene = await load(JSON.stringify(metallicOrbGltf()), "gltf");
+    let material: { metalness?: number } | undefined;
+    scene.traverse((child) => {
+      const m = (child as { material?: { metalness?: number } }).material;
+      if (m) material = m;
+    });
+    expect(material?.metalness).toBe(1);
+  });
+});
+
+describe("colored-octahedron.stl — Pruefmaterial fuer eigene Facet-Farben", () => {
+  it("laedt durch den Plugin-Loader und traegt eigene Farben", async () => {
+    const bytes = colouredOctahedronStl();
+    const scene = (await loadModel(bytes, "stl", "#888888")).object as Object3D & {
+      material?: { vertexColors?: boolean };
+    };
+    let vertexColors = false;
+    scene.traverse((child) => {
+      const m = (child as { material?: { vertexColors?: boolean } }).material;
+      if (m?.vertexColors) vertexColors = true;
+    });
+    expect(vertexColors).toBe(true);
   });
 });
 

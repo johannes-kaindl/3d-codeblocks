@@ -95,6 +95,8 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 | `.glb`, `.gltf` | Materials and colours come from the file |
 | `.stl` | No materials in the format; the plugin applies a theme-aware default, unless the file carries per-facet colours |
 
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/colored-stl.png" width="380" alt="An STL model with its own per-facet colours, each face a different colour instead of the theme default">
+
 A `.gltf` often does not stand alone: the geometry lives in a `.bin` next to it, textures
 in a folder beside them. Those files are loaded from your vault, resolved relative to the
 model — so a Blender export works when you drop the whole folder in. Anything the file
@@ -107,6 +109,22 @@ thread, so `EXT_meshopt_compression` files load like any other — useful, becau
 often cuts a model to a fraction of its size. Draco's decoder is hard-wired to a web
 worker, which Obsidian's renderer forbids; those files are detected and reported in plain
 language instead of failing with a parser error. `gltfpack -cc` produces meshopt files.
+
+### Lighting
+
+Metallic surfaces need an environment to reflect — without one there is nothing to see,
+and a material that only sets a base colour still defaults to fully metallic in glTF. The
+**Lighting** setting decides what the viewport provides: *Faithful colors* (the default;
+reflections on, your theme's colours stay intact), *High contrast* (punchier, shifts
+theme colours somewhat), or *Off* (no environment — the old behaviour).
+
+<p align="center">
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/lighting-off.png" width="400" alt="A metallic model with Lighting set to Off — rendered almost black, nothing to reflect"> <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/lighting-faithful.png" width="400" alt="The same metallic model with Lighting set to Faithful colors — visible reflections instead of a black surface">
+</p>
+<p align="center"><sub>Lighting: Off (left) vs. Faithful colors, the default since 0.4.0 (right)</sub></p>
+
+A second setting, **Model's own lights**, steps back when a file brings its own lighting
+— set it to *Ignore them* for files whose lights are exported at unusable brightness.
 
 ### Block keys
 
@@ -133,6 +151,8 @@ view: camera:Section
 Position, direction and field of view come straight from the file. From there you orbit,
 zoom and pan as usual, turning around the point that camera looks at rather than the middle
 of the model — so a camera that frames a detail keeps its detail.
+
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="A model shown from a camera the file itself carries, named 'Schnitt A' — a different angle than the auto-fitted default">
 
 **The name is the one in the file**, matched without regard to case: first the names of the
 camera *nodes* (in Blender, the object name in the outliner), then the names of the camera

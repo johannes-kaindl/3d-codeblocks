@@ -130,36 +130,133 @@ export function groundFloorGltf() {
   };
 }
 
+// Oktaeder-Geometrie, geteilt zwischen dem einfarbigen (ASCII) und dem farbigen
+// (binaeren "Magics") STL — dieselbe Form, damit ein Bildvergleich zwischen beiden
+// nur die Farbe zeigt, nicht auch noch eine andere Silhouette.
+const OKTA_V = [
+  [0, 1.4, 0], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1], [0, -1.4, 0],
+];
+const OKTA_FACES = [
+  [0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 1],
+  [5, 2, 1], [5, 3, 2], [5, 4, 3], [5, 1, 4],
+];
+
+/** Echte Flaechennormale aus dem Kreuzprodukt. `facet normal 0 0 0` waere syntaktisch
+ *  gueltig, laesst das Modell im Viewer aber unbeleuchtet — es laedt und ist trotzdem
+ *  nicht zu sehen. Genau das ist am 2026-08-15 im GUI-Smoke aufgefallen, nachdem ein
+ *  Unit-Test, der nur die Positionen prueft, es fuer in Ordnung erklaert hatte. */
+function oktaNormale(a, b, c) {
+  const u = [OKTA_V[b][0] - OKTA_V[a][0], OKTA_V[b][1] - OKTA_V[a][1], OKTA_V[b][2] - OKTA_V[a][2]];
+  const w = [OKTA_V[c][0] - OKTA_V[a][0], OKTA_V[c][1] - OKTA_V[a][1], OKTA_V[c][2] - OKTA_V[a][2]];
+  const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+  const len = Math.hypot(...n) || 1;
+  return n.map((x) => x / len);
+}
+
 /** Ein ASCII-STL: das Format kennt keine Materialien, der Prueffall fuer das
  *  theme-abhaengige Default-Material. Ein Oktaeder — erkennbar dreidimensional,
  *  ohne Achsen-Symmetrie, die eine schiefe Kamera kaschieren wuerde. */
 export function octahedronStl() {
-  const v = [
-    [0, 1.4, 0], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1], [0, -1.4, 0],
-  ];
-  const faces = [
-    [0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 1],
-    [5, 2, 1], [5, 3, 2], [5, 4, 3], [5, 1, 4],
-  ];
-  /** Echte Flaechennormale aus dem Kreuzprodukt. `facet normal 0 0 0` waere syntaktisch
-   *  gueltig, laesst das Modell im Viewer aber unbeleuchtet — es laedt und ist trotzdem
-   *  nicht zu sehen. Genau das ist am 2026-08-15 im GUI-Smoke aufgefallen, nachdem ein
-   *  Unit-Test, der nur die Positionen prueft, es fuer in Ordnung erklaert hatte. */
-  const normale = (a, b, c) => {
-    const u = [v[b][0] - v[a][0], v[b][1] - v[a][1], v[b][2] - v[a][2]];
-    const w = [v[c][0] - v[a][0], v[c][1] - v[a][1], v[c][2] - v[a][2]];
-    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
-    const len = Math.hypot(...n) || 1;
-    return n.map((x) => (x / len).toFixed(6));
-  };
   const out = ["solid demo"];
-  for (const [a, b, c] of faces) {
-    out.push(` facet normal ${normale(a, b, c).join(" ")}`, "  outer loop");
-    for (const i of [a, b, c]) out.push(`   vertex ${v[i].join(" ")}`);
+  for (const [a, b, c] of OKTA_FACES) {
+    out.push(` facet normal ${oktaNormale(a, b, c).map((x) => x.toFixed(6)).join(" ")}`, "  outer loop");
+    for (const i of [a, b, c]) out.push(`   vertex ${OKTA_V[i].join(" ")}`);
     out.push("  endloop", " endfacet");
   }
   out.push("solid demo".replace("solid", "endsolid"), "");
   return out.join("\n");
+}
+
+/** Dasselbe Oktaeder, aber als BINAERES STL im "Magics"-Farbformat (Header `COLOR=`,
+ *  je Facet ein RGB555-Wert mit Bit 15 aus — siehe `STLLoader.js`, `tests/viewer/loaders.test.ts`).
+ *  Acht Facetten, acht Farben aus der Bau-Palette oben: der Prueffall fuer
+ *  "STL files that carry their own colours now show them" (0.4.0) — ASCII-STL kann das
+ *  Format nicht tragen, deshalb ein zweiter Generator statt eines Flags am ersten. */
+export function colouredOctahedronStl() {
+  const FARBEN = MATERIALS.slice(0, 6).concat([
+    { color: [0.361, 0.612, 0.416, 1] },
+    { color: [0.702, 0.345, 0.643, 1] },
+  ]);
+  const pack555 = (rgba) => {
+    const to5 = (x) => Math.round(Math.min(1, Math.max(0, x)) * 31);
+    // r in Bits 0-4, g in 5-9, b in 10-14 (STLLoader.js Z. 217-219) — Bit 15 bleibt 0,
+    // sonst gilt die Farbe als "kein eigenes Facet" und der Default-Header greift.
+    return to5(rgba[0]) | (to5(rgba[1]) << 5) | (to5(rgba[2]) << 10);
+  };
+
+  const buffer = new ArrayBuffer(84 + OKTA_FACES.length * 50);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  // "COLOR=" + Default-RGBA (0-255) — greift nur, wenn eine Facet KEINE eigene Farbe traegt.
+  bytes.set([0x43, 0x4f, 0x4c, 0x4f, 0x52, 0x3d, 200, 200, 200, 255], 0);
+  view.setUint32(80, OKTA_FACES.length, true);
+
+  OKTA_FACES.forEach(([a, b, c], i) => {
+    const start = 84 + i * 50;
+    const n = oktaNormale(a, b, c);
+    view.setFloat32(start, n[0], true);
+    view.setFloat32(start + 4, n[1], true);
+    view.setFloat32(start + 8, n[2], true);
+    [a, b, c].forEach((idx, vi) => {
+      const off = start + 12 + vi * 12;
+      view.setFloat32(off, OKTA_V[idx][0], true);
+      view.setFloat32(off + 4, OKTA_V[idx][1], true);
+      view.setFloat32(off + 8, OKTA_V[idx][2], true);
+    });
+    view.setUint16(start + 48, pack555(FARBEN[i].color), true);
+  });
+  return buffer;
+}
+
+/** Ein einzelner Wuerfel mit metallischem Material (metallicFactor 1, niedrige Rauheit)
+ *  — der Prueffall fuer "Metallic models are no longer black" (0.4.0). Ohne Umgebung
+ *  (Lighting: Off) hat eine polierte Metallflaeche nichts zu spiegeln und rendert
+ *  schwarz; mit Umgebung (Faithful colors, Default) zeigt sie Reflexionen. Dieselbe
+ *  Wuerfelgeometrie wie `groundFloorGltf`, aber ein einzelner Knoten — die Aussage ist
+ *  die Materialeigenschaft, nicht der Raum drumherum. */
+export function metallicOrbGltf() {
+  const floats = [...P.flat(), ...N.flat()];
+  const bytes = Buffer.concat([
+    Buffer.from(new Float32Array(floats).buffer),
+    Buffer.from(new Uint16Array(IDX).buffer),
+  ]);
+  const posLen = P.length * 3 * 4;
+  const nrmLen = N.length * 3 * 4;
+
+  return {
+    asset: {
+      version: "2.0",
+      generator: "3d-codeblocks docs/images/fixture/make-models.mjs",
+      extras: { note: "Demo-Material fuer die README-Aufnahmen. Frei erzeugt, nichts Privates." },
+    },
+    scene: 0,
+    scenes: [{ name: "Metallic_orb", nodes: [0] }],
+    nodes: [{ name: "Orb", mesh: 0, scale: [1.6, 1.6, 1.6] }],
+    meshes: [{ name: "Orb", primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 }] }],
+    materials: [{
+      name: "Polished",
+      pbrMetallicRoughness: {
+        baseColorFactor: [0.75, 0.75, 0.78, 1],
+        metallicFactor: 1.0,
+        roughnessFactor: 0.15,
+      },
+    }],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: P.length, type: "VEC3",
+        min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
+      { bufferView: 1, componentType: 5126, count: N.length, type: "VEC3" },
+      { bufferView: 2, componentType: 5123, count: IDX.length, type: "SCALAR" },
+    ],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: posLen, target: 34962 },
+      { buffer: 0, byteOffset: posLen, byteLength: nrmLen, target: 34962 },
+      { buffer: 0, byteOffset: posLen + nrmLen, byteLength: IDX.length * 2, target: 34963 },
+    ],
+    buffers: [{
+      byteLength: bytes.length,
+      uri: "data:application/octet-stream;base64," + bytes.toString("base64"),
+    }],
+  };
 }
 
 /** Dasselbe Erdgeschoss, aber mit Kameras im Dokument — das Pruefmaterial fuer
@@ -258,12 +355,16 @@ export function writeModels(target) {
   const splitPath = join(target, "models", "ground-floor-split.gltf");
   const splitBin = join(target, "models", "ground-floor.bin");
   const cameraPath = join(target, "models", "camera-floor.gltf");
+  const colouredStlPath = join(target, "models", "colored-octahedron.stl");
+  const metallicPath = join(target, "models", "metallic-orb.gltf");
   mkdirSync(dirname(modelPath), { recursive: true });
   writeFileSync(modelPath, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editBase, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editPath, JSON.stringify(groundFloorEditGltf(), null, 1) + "\n");
   writeFileSync(stlPath, octahedronStl());
   writeFileSync(cameraPath, JSON.stringify(cameraFloorGltf(), null, 1) + "\n");
+  writeFileSync(colouredStlPath, Buffer.from(colouredOctahedronStl()));
+  writeFileSync(metallicPath, JSON.stringify(metallicOrbGltf(), null, 1) + "\n");
 
   // Mehrteiliger Export: die `.bin` MUSS `ground-floor.bin` heissen und daneben liegen —
   // der Dateiname steht im JSON und wird relativ zur Modelldatei aufgeloest.
@@ -271,7 +372,10 @@ export function writeModels(target) {
   writeFileSync(splitPath, JSON.stringify(split.gltf, null, 1) + "\n");
   writeFileSync(splitBin, split.bin);
 
-  return [modelPath, editBase, editPath, stlPath, cameraPath, splitPath, splitBin];
+  return [
+    modelPath, editBase, editPath, stlPath, cameraPath, splitPath, splitBin,
+    colouredStlPath, metallicPath,
+  ];
 }
 
 // Nur beim direkten Aufruf ausfuehren — der Fixture-Test importiert dieses Modul, und

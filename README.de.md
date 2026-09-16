@@ -102,6 +102,8 @@ Datei nehmen.)
 | `.glb`, `.gltf` | Materialien und Farben kommen aus der Datei |
 | `.stl` | Das Format kennt keine Materialien; das Plugin setzt ein theme-treues Standardmaterial — außer die Datei bringt Flächenfarben mit |
 
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/colored-stl.png" width="380" alt="Ein STL-Modell mit eigenen Flächenfarben — jede Fläche in einer anderen Farbe statt dem Theme-Standard">
+
 Eine `.gltf` steht selten allein: die Geometrie liegt in einer `.bin` daneben, Texturen in
 einem Ordner dabei. Diese Dateien werden aus dem Vault geladen, aufgelöst **relativ zur
 Modelldatei** — ein Blender-Export funktioniert also, wenn der ganze Ordner im Vault
@@ -115,6 +117,24 @@ sich lohnt, weil Meshopt ein Modell oft auf einen Bruchteil schrumpft. Dracos De
 fest an einen Web-Worker gebunden, den Obsidians Renderer verbietet; solche Dateien werden
 erkannt und in Klartext gemeldet, statt mit einem Parser-Fehler abzubrechen.
 `gltfpack -cc` erzeugt Meshopt-Dateien.
+
+### Beleuchtung
+
+Metallische Oberflächen brauchen eine Umgebung, um zu spiegeln — ohne sie gibt es
+nichts zu sehen, und ein Material, das nur eine Grundfarbe setzt, ist in glTF per
+Default trotzdem vollständig metallisch. Die Einstellung **Lighting** entscheidet, was
+das Ansichtsfenster bereitstellt: *Faithful colors* (Standard; Reflexionen an, die
+Theme-Farben bleiben erhalten), *High contrast* (kontrastreicher, verschiebt Theme-Farben
+etwas) oder *Off* (keine Umgebung — das alte Verhalten).
+
+<p align="center">
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/lighting-off.png" width="400" alt="Ein metallisches Modell mit Lighting: Off — fast schwarz gerendert, nichts zum Spiegeln da"> <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/lighting-faithful.png" width="400" alt="Dasselbe metallische Modell mit Lighting: Faithful colors — sichtbare Reflexionen statt einer schwarzen Fläche">
+</p>
+<p align="center"><sub>Lighting: Off (links) vs. Faithful colors, Standard seit 0.4.0 (rechts)</sub></p>
+
+Eine zweite Einstellung, **Model's own lights**, tritt zurück, wenn eine Datei eigene
+Beleuchtung mitbringt — auf *Ignore them* stellen für Dateien, deren Lichter mit
+unbrauchbarer Helligkeit exportiert wurden.
 
 ### Block-Schlüssel
 
@@ -142,6 +162,8 @@ Position, Blickrichtung und Bildwinkel kommen unverändert aus der Datei. Von da
 sich wie gewohnt orbitieren, zoomen und schwenken — gedreht wird um den Punkt, auf den die
 Kamera blickt, nicht um die Modellmitte. Eine Kamera, die einen Ausschnitt rahmt, behält
 damit ihren Ausschnitt.
+
+<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="Ein Modell aus einer Kamera, die die Datei selbst mitbringt, benannt 'Schnitt A' — ein anderer Blickwinkel als das automatische Einpassen">
 
 **Gesucht wird der Name, der in der Datei steht**, ohne Rücksicht auf Groß- und
 Kleinschreibung: erst unter den Namen der Kamera-*Knoten* (in Blender der Objektname aus

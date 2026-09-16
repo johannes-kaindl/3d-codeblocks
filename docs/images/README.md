@@ -15,7 +15,17 @@ eine Datei ohne Eintrag und eine Einbettung ohne Vertragszeile sind je ein Befun
 
 ## Status
 
-**Stand 2026-08-15: alle zehn Aufnahmen stehen** — `npm run shots:check` meldet „keine
+**Stand 2026-09-16: 0.4.0-Nachtrag — vier neue Aufnahmen fuer Beleuchtung,
+Datei-Kameras und Farb-STL.** Die zehn Aufnahmen aus 0.3.x (unten) stehen weiter;
+dazu kommen `lighting-off.png`/`lighting-faithful.png` (Vorher/Nachher-Paar),
+`camera-view.png` und `colored-stl.png`. **Mehrteilige Modelle (S1) bekommen bewusst
+kein eigenes Bild** — das Fixture (`ground-floor-split.gltf` + `.bin`) rendert
+pixelgleich zu `ground-floor.gltf`, ein Bild würde also nichts zeigen, was `hero.png`
+nicht schon zeigt. Die Faehigkeit steht stattdessen als Satz unter „Supported
+formats" in der README; belegt ist sie durch `tests/fixture-models.test.ts`
+(„split model … renders once the resolver hands over the .bin").
+
+**Stand 2026-08-15: alle zehn Aufnahmen der 0.3.x-Reihe stehen** — `npm run shots:check` meldet „keine
 Befunde": jedes im Vertrag zugesagte Bild existiert, hält seine Klasse, sein Budget und
 seine Einbettungsform. Ordner-Summe 2,3 MB.
 
@@ -90,6 +100,10 @@ Verbindlich ist der workspace-weite Bild-Standard in `_docs/readme/readme-spec.j
 | `unapplied-edits.png` | detail | `README.md` (Edit mode) | Das Abzeichen **Unapplied edits** über dem Viewport, mit dem Modell dahinter — der Zustand „neben der Datei liegt eine `.edit.gltf`". Nutzt die Notiz **Edited** und ein **eigenes** Modell (`edited-floor.gltf`): läge die `.edit.gltf` neben dem gemeinsam genutzten Modell, trüge *jedes* Bild dieses Abzeichen. |
 | `unknown-key.png` | detail | `README.md` (Block keys) | Notiz **Unknown key**: die Meldung unter dem Viewport, die `heigth:` als unbekannten Schlüssel benennt, mit dem gerenderten Modell darüber. Zeigt, dass ein Tippfehler nicht wie ein Plugin-Fehler aussieht. ⚠️ **Das Bild widerlegt eine bis 2026-08-18 geführte Annahme:** der Prüfling versteckt das Modell bei unbekanntem Schlüssel *nicht* — Meldung und Modell stehen beide da. GUI-Smoke B15 prüft genau diese Kombination (`hint` enthält `heigth` und `canvas > 0`) und ist trotzdem rot; er misst allerdings in einer Notiz mit **drei** Fehlerblöcken. Der Verdacht liegt damit beim Messpunkt, nicht am Plugin — offen, braucht einen Smoke-Lauf. |
 | `settings.png` | detail | `README.md` (Configuration) | Der Einstellungen-Tab: **Default height**, **Show ground grid**, **Maximum live 3D views**, **Controls placement**, **Locked node prefixes**, **Auto-rotate**. |
+| `lighting-off.png` | feature (Paar mit `lighting-faithful.png`) | `README.md` (Lighting) | Der metallische Demo-Würfel (`metallic-orb.gltf`, `metallicFactor: 1`) mit Einstellung **Lighting: Off** — schwarz bis auf harte Kanten, nichts zum Spiegeln da. |
+| `lighting-faithful.png` | feature (Paar mit `lighting-off.png`) | `README.md` (Lighting) | Derselbe Würfel, derselbe Blickwinkel, Einstellung **Lighting: Faithful colors** (Default seit 0.4.0) — sichtbare Reflexionen statt einer schwarzen Fläche. Beide Bilder nebeneinander sind die Aussage; keines für sich allein. |
+| `camera-view.png` | feature | `README.md` (Aiming a camera from the file) | `camera-floor.gltf` mit `view: camera:Schnitt A` — der Blick sitzt an der Position und Ausrichtung, die die Datei für diese Kamera vorgibt, nicht an der Auto-Einpassung. Zeigt bewusst den Namen **mit Leerzeichen** (`Schnitt A`), weil er den Kernfall des Features trägt. |
+| `colored-stl.png` | detail | `README.md` (Supported formats) | `colored-octahedron.stl` — ein binäres STL im „Magics"-Farbformat, jede Facette in einer eigenen Farbe aus der Bau-Palette. Kontrast zu `edit-mode.png`/`octahedron.stl` (einfarbig, Theme-Default), das im selben Abschnitt referenziert bleibt. |
 
 ## Reproduktion
 
