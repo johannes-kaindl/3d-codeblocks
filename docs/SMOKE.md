@@ -529,6 +529,15 @@ Die fünf Kameras im Prüfmodell und wofür jede steht:
 
 _Hier notieren, was auffällt._
 
+### 2026-09-16 · B16 (STL lädt) — einmaliger Flake, nicht reproduziert
+
+Beim Bau der Klick-Sturm-Probe aufgefallen, gehört nicht dazu. Drei Vollläufe gegen dieselbe
+Zweitinstanz/denselben Vault/dasselbe `models/octahedron.stl`: 2x grün (7% bzw. 6% Farbtöne
+belegt), 1x „nichts gezeichnet". Kein Zusammenhang mit den `viewMode`- oder `clickrace`-Änderungen
+erkennbar (B16 läuft in der `basis`-Sektion, deutlich vor `cameras`/`clickrace`). Nicht
+weiterverfolgt — außerhalb des Welle-3-Auftrags. Bei erneutem Auftreten: reproduzierbar machen,
+bevor am Code gesucht wird (CORE-TEST-01).
+
 ### 2026-07-30 · `TransformControls.dispose()` wirft — der Edit-Modus ließ sich nicht verlassen
 
 Beim Badge-Durchlauf aufgefallen, betrifft aber **nicht** den Badge: three r169 hat
