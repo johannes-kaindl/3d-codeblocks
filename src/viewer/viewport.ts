@@ -70,14 +70,16 @@ export class Viewport {
       Abweichung dann faelschlich gegen die NEUE Breite). */
   private layoutSettled = false;
   private layoutSettleSize: { width: number; height: number } | null = null;
-  /** Hat der Nutzer die Kamera SELBST bewegt (echter Orbit/Pan, nicht nur ein Klick, der
-      den Block nur aktiviert)? Dann darf `resize()` den Fit nicht mehr nachziehen, egal
-      wie instabil das Layout noch ist — sonst risse ein Sidebar-Wechsel eine laufende
-      Interaktion weg. Gemessen an "start" allein war das FRUEHER falsch (feuert schon
-      beim blossen Aktivierungsklick, bevor sich etwas bewegt hat) — deshalb wird auf
-      "end" verglichen, ob Position ODER Ziel sich wirklich veraendert haben. */
+  /** Hat der Nutzer die Kamera SELBST bewegt (echter Orbit/Pan/Zoom)? Dann darf
+      `resize()` den Fit nicht mehr nachziehen, egal wie instabil das Layout noch ist —
+      sonst risse ein Sidebar-Wechsel eine laufende Interaktion weg. Erkannt wird das
+      NICHT über OrbitControls' "start"/"end" (die haengen an `setPointerCapture` und
+      feuern bei synthetischen Pointer-Events im GUI-Smoke gemessen unzuverlaessig —
+      B6b blieb rot, obwohl der Orbit selbst nachweislich griff), sondern über das
+      "change"-Event: jede Positions-/Zieländerung, die NICHT aus einem eigenen Fit
+      (`applyFit()`) stammt, ist per Definition eine Nutzeraktion. */
   private userMoved = false;
-  private dragStart: { position: Vector3; target: Vector3 } | null = null;
+  private applyingFit = false;
   /** Datei-Kamera, gesetzt bevor ein Modell da ist — angewendet sobald Bounds vorliegen.
       Schliesst `pendingView` gegenseitig aus: es gilt immer nur die zuletzt gesetzte Ansicht. */
   private pendingFileCamera: FileCamera | null = null;
@@ -125,23 +127,16 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.autoRotate = options.autoRotate;
-    this.controls.addEventListener("change", () => this.requestRender());
+    this.controls.addEventListener("change", () => {
+      // s. Feldkommentar an `userMoved`: jede Aenderung ausserhalb eines eigenen Fits
+      // ist eine Nutzeraktion (Orbit, Pan, Zoom-Rad) — auch waehrend des Damping-
+      // Nachlaufs nach einem Drag, der ja Teil derselben Interaktion ist.
+      if (!this.applyingFit) this.userMoved = true;
+      this.requestRender();
+    });
     // Nur echte Nutzerinteraktion fuettert das Kontext-Budget — sonst wuerde
     // Autorotate den Viewport dauerhaft als "gerade benutzt" markieren.
-    this.controls.addEventListener("start", () => {
-      options.onInteract();
-      this.dragStart = { position: this.camera.position.clone(), target: this.controls.target.clone() };
-    });
-    this.controls.addEventListener("end", () => {
-      const before = this.dragStart;
-      this.dragStart = null;
-      if (
-        before &&
-        (!before.position.equals(this.camera.position) || !before.target.equals(this.controls.target))
-      ) {
-        this.userMoved = true;
-      }
-    });
+    this.controls.addEventListener("start", () => options.onInteract());
 
     this.renderer.domElement.addEventListener("webglcontextlost", this.handleContextLost);
     // Doppelklick setzt die Kamera auf den Einpass-Blick zurueck.
@@ -227,7 +222,6 @@ export class Viewport {
     this.layoutSettled = false;
     this.layoutSettleSize = { width: this.options.container.clientWidth, height: this.options.container.clientHeight };
     this.userMoved = false;
-    this.dragStart = null;
     if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
     else this.setView(this.pendingView);
   }
@@ -331,12 +325,14 @@ export class Viewport {
   /** Kamera, Clipping und Orbit-Ziel aus einem fertigen Fit setzen — der eine Ort, an dem
       beide Wege (gerechnete Ansicht und Datei-Kamera) zusammenlaufen. */
   private applyFit(fit: CameraFit): void {
+    this.applyingFit = true;
     this.camera.position.set(fit.position.x, fit.position.y, fit.position.z);
     this.camera.near = fit.near;
     this.camera.far = fit.far;
     this.camera.updateProjectionMatrix();
     this.controls.target.set(fit.target.x, fit.target.y, fit.target.z);
     this.controls.update();
+    this.applyingFit = false;
     this.requestRender();
   }
 
