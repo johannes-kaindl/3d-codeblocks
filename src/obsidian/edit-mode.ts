@@ -18,6 +18,8 @@ import type { EditRigCallbacks } from "../viewer/edit-controls";
 export const EDIT_UNAVAILABLE_FORMAT = "Editing requires a glTF or GLB file";
 export const EDIT_UNAVAILABLE_LOADING = "The model is still loading";
 export const EDIT_STALE_ON_DISK = "Model changed on disk — re-open edit mode to continue";
+export const EDIT_BLOCKED_DUPLICATE =
+  "This node shares its mesh with others and cannot be edited individually";
 
 const same = (a: readonly [number, number, number], b: readonly [number, number, number]) =>
   a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
@@ -448,6 +450,9 @@ export class EditCoordinator {
         this.deps.onChange();
       },
       onInteract: () => {},
+      onSelectBlocked: (reason) => {
+        if (reason === "duplicate") this.deps.notice(EDIT_BLOCKED_DUPLICATE);
+      },
     };
   }
 

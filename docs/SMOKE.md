@@ -49,6 +49,18 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > **Gegenprobe (2026-08-14):** Doppelklick-Reset stillgelegt → nur B5 rot; Theme-Nachziehen
 > stillgelegt → nur B7 rot; Verdrängung im Kontext-Budget stillgelegt → B11 und B12 rot,
 > B10 zu Recht grün. Der Abschnitt misst also, was er behauptet.
+>
+> **B5 war vom 2026-09-03 bis Welle 6 (2026-09-17) bekannt rot.** Ursache (gemessen
+> 2026-09-03): der Erst-Fit lief gegen die noch nicht endgültige Blockbreite (614px,
+> `aspect ≥ 1`), danach verschmälerte Obsidians Layout auf 314px (`aspect 0.79`) — `resize()`
+> zog dabei nur `camera.aspect` nach, nie die Kameraposition. Fix (Welle 6,
+> `src/viewer/viewport.ts`): der Fit wird ans erste STABILE Layout gebunden, nicht an
+> `resize()` weitergeflickt — `resize()` wiederholt denselben Fit an der jeweils aktuellen
+> Größe, solange zwei aufeinanderfolgende Aufrufe noch unterschiedliche Größen melden, und
+> hört auf, sobald sie übereinstimmen ODER der Nutzer die Kamera nachweislich selbst bewegt
+> hat (`userMoved`, echte Positions-/Zieländerung auf `end`, nicht nur `start`). Damit bleibt
+> B6 (Kamera bewegt sich bei einem SPÄTEREN Split-Resize nicht) unverändert grün. Task
+> [[GUI-Smoke B5 rot — Doppelklick-Reset landet auf distance 1]].
 
 > [!check] Durchlauf 2026-08-22 — **16/16 grün** nach dem Kit-0.27.0-Vendoring (Obsidian 1.13.7, outpost-worldbuilding)
 > Gegen `weltmodell/3d/turm.gltf`, auf dem gemergten Stand `dbdddb0` — dem ersten, in dem
@@ -328,7 +340,7 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 ## Edit mode (2026-07-26)
 
 > [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui -- --section edit`
-> Die Punkte 1–5 fährt der CDP-Treiber (Abschnitt `edit`): **7 Prüfpunkte.**
+> Die Punkte 1–5 fährt der CDP-Treiber (Abschnitt `edit`): **8 Prüfpunkte.**
 >
 > | Punkt | Prüfpunkte im Treiber |
 > |---|---|
@@ -339,6 +351,18 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > | 5. Dirty-Discard | E7 (Rückfrage erscheint, „Keep editing" bleibt, „Discard" verlässt) |
 > | 6. Abnahme-Test | nicht automatisiert — prüft ein Python-Skript im Konsumenten-Repo |
 > | 7. Regeneration im Modus | nicht automatisiert — braucht einen Erzeuger, der während des offenen Modus umbenennt |
+> | 8. Geteiltes Mesh | E8 (Klick auf einen Knoten mit geteiltem `mesh`-Index wählt nichts aus **und** meldet eine Notice — Welle 6) |
+>
+> **E8 (Welle 6, 2026-09-17):** bis dahin blieb ein Klick auf einen Knoten mit geteiltem
+> `mesh`-Index (s. `duplicatedIndices`, `src/viewer/edit-controls.ts`) STUMM —
+> ununterscheidbar von einem Klick daneben oder einem kaputten Plugin. Am eigenen Fixture
+> betrifft das 8 von 11 Knoten, der Regelfall bei jedem Blender-Export mit kopierten
+> Objekten. `EditRigCallbacks.onSelectBlocked("duplicate")` löst jetzt
+> `EDIT_BLOCKED_DUPLICATE` als Notice aus ("This node shares its mesh with others and
+> cannot be edited individually"). Task
+> [[Edit-Modus greift bei geteilten Meshes ins Leere]], Entscheidung Johannes: mindestens
+> Weg 1 (Panel-Meldung) — Weg 2 (eigene Indexvergabe) bleibt mit der S6-Animationsarbeit
+> verknüpft und ist damit weiterhin offen.
 >
 > **Der Gizmo-Drag selbst bleibt ungeprüft** und der Lauf sagt das an: der Griff ist eine
 > 3D-Trefferfläche in der Szene, seine Pixelposition hängt an Modell und Kamera — ein Drag

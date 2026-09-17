@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The initial camera fit could land ~18% too close when a note's layout narrowed after
+  the block first rendered** (typical in a sidebar-narrow column) — the camera never moved
+  to match, only its aspect ratio did. The fit now binds to the first layout that actually
+  holds still, without disturbing a camera the reader has since orbited themselves.
+- **Clicking a node that shares its mesh with another (a common case — any model with
+  repeated objects, e.g. four walls built from one instanced mesh) silently selected
+  nothing in edit mode**, indistinguishable from a click that missed or a broken plugin.
+  It now shows a notice explaining that the node can't be edited individually.
+
 ## [0.4.0] — 2026-09-02
 
 ### Added

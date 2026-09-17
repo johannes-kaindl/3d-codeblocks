@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  EDIT_BLOCKED_DUPLICATE,
   EDIT_STALE_ON_DISK,
   EDIT_UNAVAILABLE_LOADING,
   EditCoordinator,
   type EditIo,
 } from "../../src/obsidian/edit-mode";
+import type { EditRigCallbacks } from "../../src/viewer/edit-controls";
 import { contractGltfText, makeContractGltf } from "../helpers/contract-gltf";
 import type { NodeTrs } from "../../src/core/gltf-patch";
 
@@ -67,7 +69,7 @@ function makeRig() {
 function makeCoordinator(files: Record<string, string>, over: Record<string, unknown> = {}) {
   const io = makeIo(files);
   const rig = makeRig();
-  const host = { createEditRig: vi.fn(() => rig), pin: vi.fn() };
+  const host = { createEditRig: vi.fn((_cb: EditRigCallbacks) => rig), pin: vi.fn() };
   const notices: string[] = [];
   const confirm = vi.fn().mockResolvedValue(true);
   const coordinator = new EditCoordinator({
@@ -224,6 +226,22 @@ describe("EditCoordinator", () => {
     expect(coordinator.active).toBe(true);
     expect(coordinator.uiModel().dirty).toBe(false);
     expect(notices.some((n) => n.includes("Could not read"))).toBe(true);
+  });
+
+  it("rigCallbacks: onSelectBlocked('duplicate') meldet die Sperre als Notice (Welle 6)", async () => {
+    const { coordinator, host, notices } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
+    await coordinator.enter();
+    const cb = host.createEditRig.mock.calls[0][0];
+    cb.onSelectBlocked?.("duplicate");
+    expect(notices).toContain(EDIT_BLOCKED_DUPLICATE);
+  });
+
+  it("rigCallbacks: onSelectBlocked('locked') bleibt stumm — nur 'duplicate' meldet (Welle 6)", async () => {
+    const { coordinator, host, notices } = makeCoordinator({ "3d/eg.gltf": contractGltfText() });
+    await coordinator.enter();
+    const cb = host.createEditRig.mock.calls[0][0];
+    cb.onSelectBlocked?.("locked");
+    expect(notices).toEqual([]);
   });
 
   it("save: patcht frisch gelesenes Original in die Nachbar-Datei; dirty faellt", async () => {

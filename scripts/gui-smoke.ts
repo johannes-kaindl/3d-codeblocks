@@ -2396,7 +2396,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
   // auswählbar. Gemessen am 2026-09-02 in Node über `loadModel` + `duplicatedIndices`.
   createdNotes.add(SMOKE_MODEL_EDIT);
   createdNotes.add(SMOKE_MODEL_EDIT.replace(/\.gltf$/, ".edit.gltf"));
-  const probe = await cdp.evaluate<{ locked: string; free: string[] } | null>(`
+  const probe = await cdp.evaluate<{ locked: string; free: string[]; duplicate: string | null } | null>(`
     const source = app.vault.getAbstractFileByPath(${JSON.stringify(model)});
     if (!source || !source.path.endsWith(".gltf")) return null;
     const doc = JSON.parse(await app.vault.read(source));
@@ -2415,6 +2415,13 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     if (eindeutig.length < 1) return null;
     const lockedIndex = eindeutig[eindeutig.length - 1];
     doc.nodes[lockedIndex].name = "env__" + (doc.nodes[lockedIndex].name ?? "node");
+    // Fuer E8 (Welle 6, "Edit-Modus greift bei geteilten Meshes ins Leere"): EIN
+    // Top-Level-Knoten, dessen mesh-Index sich ein Geschwister teilt. Der Name bleibt
+    // im SMOKE_MODEL_EDIT-Klon unangetastet, nur der 'locked'-Knoten wird umbenannt.
+    const dupliziert = top.filter((i) => {
+      const m = doc.nodes[i].mesh;
+      return i !== lockedIndex && m !== undefined && meshCount.get(m) > 1;
+    });
     const path = ${JSON.stringify(SMOKE_MODEL_EDIT)};
     const text = JSON.stringify(doc);
     const existing = app.vault.getAbstractFileByPath(path);
@@ -2424,6 +2431,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     return {
       locked: doc.nodes[lockedIndex].name,
       free: top.filter((i) => i !== lockedIndex).map((i) => doc.nodes[i].name ?? ("#" + i)),
+      duplicate: dupliziert.length > 0 ? (doc.nodes[dupliziert[0]].name ?? ("#" + dupliziert[0])) : null,
     };
   `);
   if (!probe) {
@@ -2652,6 +2660,34 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     ohneSperre.hit === probe.locked && mitSperre.hit === null,
     `ohne Sperre: ${ohneSperre.hit ?? "nichts (" + ohneSperre.grund + ")"} · mit Sperre: ${mitSperre.hit ?? "nichts"} · gesperrt heißt ${probe.locked}`,
   );
+
+  // --- E8. Geteiltes Mesh: kein stiller Klick ins Leere (Welle 6) --------
+  // Auftrag "Edit-Modus greift bei geteilten Meshes ins Leere": ein Knoten, der seinen
+  // mesh-Index mit einem Geschwister teilt, ist nicht auswählbar (s. `duplicatedIndices`,
+  // src/viewer/edit-controls.ts) — bis Welle 6 blieb der Klick dabei STUMM, ununterscheidbar
+  // von einem Klick daneben. Seit `onSelectBlocked("duplicate")` meldet er sich als Notice.
+  if (probe.duplicate) {
+    await setSetting(cdp, "lockedNodePrefixes", "");
+    await clearNotices(cdp);
+    const sharedClick = await cdp.evaluate<{ hit: string | null; grund: string }>(`
+      ${SELECTION_SWEEP}
+      await spreadForSweep();
+      return await clickNodeNamed(${JSON.stringify(probe.duplicate)});
+    `);
+    const sharedNotice = await notices(cdp);
+    record(
+      "E8. Ein Klick auf einen Knoten mit geteiltem Mesh wählt nichts aus — und meldet warum",
+      sharedClick.hit === null && sharedNotice.includes("shares its mesh"),
+      `Klick auf ${probe.duplicate}: ${sharedClick.hit ?? "keine Auswahl"} (${sharedClick.grund}) · Notice: ${sharedNotice || "keine"}`,
+    );
+  } else {
+    skipped(
+      "E8. Geteiltes Mesh meldet sich beim Klick",
+      "Prüfmodell hat keinen zweiten Top-Level-Knoten mit geteiltem mesh-Index außer dem gesperrten",
+    );
+  }
+  // Ausgangszustand fuer E7 wiederherstellen — E8 hatte die Sperre testweise geloescht.
+  await setSetting(cdp, "lockedNodePrefixes", "env__");
 
   // --- E7. Dirty-Discard mit Rückfrage -----------------------------------
   const dirty = await cdp.evaluate<boolean>(`

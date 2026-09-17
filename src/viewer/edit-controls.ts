@@ -24,6 +24,9 @@ export interface EditRigCallbacks {
   onSelect(index: number | null): void;
   onTransformEnd(index: number, trs: NodeTrs): void;
   onInteract(): void;
+  /** Klick traf einen Knoten, der NICHT ausgewaehlt wurde — mit Grund. Optional, damit
+   *  bestehende Callback-Objekte (Tests, Mocks) ohne Anpassung gueltig bleiben. */
+  onSelectBlocked?(reason: "duplicate" | "locked"): void;
 }
 
 /** Treffer im Baum → Index des Top-Level-Vorfahren (Kind eines `root`-Kindes zaehlt zum Kind). */
@@ -58,20 +61,39 @@ export function duplicatedIndices(root: Object3D): Set<number> {
   return duplicated;
 }
 
+/** Wie `pickIndex`, aber unterscheidet WARUM ein Treffer nicht zur Auswahl wurde — pur,
+ * damit auch die Meldung an den Nutzer ohne WebGL, Kamera und Pointer-Events testbar ist.
+ * `duplicated` wird VOR `isSelectable` geprueft: ein mehrdeutiger Index darf gar nicht
+ * erst als Kandidat durchgereicht werden. */
+export type SelectOutcome =
+  | { kind: "selected"; index: number }
+  | { kind: "blocked"; reason: "duplicate" | "locked" }
+  | { kind: "none" };
+
+export function resolveSelect(
+  root: Object3D,
+  hit: Object3D | null,
+  duplicated: ReadonlySet<number>,
+  isSelectable: (index: number) => boolean,
+): SelectOutcome {
+  if (!hit) return { kind: "none" };
+  const index = topLevelIndex(root, hit);
+  if (index === null) return { kind: "none" };
+  if (duplicated.has(index)) return { kind: "blocked", reason: "duplicate" };
+  return isSelectable(index) ? { kind: "selected", index } : { kind: "blocked", reason: "locked" };
+}
+
 /** Die ganze Auswahl-Entscheidung als pure Funktion: aus einem Raycast-Treffer wird ein
- * auswaehlbarer Top-Level-Index — oder `null`. Herausgeloest, damit sie ohne WebGL,
- * Kamera und Pointer-Events testbar ist. `duplicated` wird VOR `isSelectable` geprueft:
- * ein mehrdeutiger Index darf gar nicht erst als Kandidat durchgereicht werden. */
+ * auswaehlbarer Top-Level-Index — oder `null`. Duennner Wrapper um `resolveSelect` fuer
+ * Aufrufer, die den Sperrgrund nicht brauchen. */
 export function pickIndex(
   root: Object3D,
   hit: Object3D | null,
   duplicated: ReadonlySet<number>,
   isSelectable: (index: number) => boolean,
 ): number | null {
-  if (!hit) return null;
-  const index = topLevelIndex(root, hit);
-  if (index === null || duplicated.has(index)) return null;
-  return isSelectable(index) ? index : null;
+  const outcome = resolveSelect(root, hit, duplicated, isSelectable);
+  return outcome.kind === "selected" ? outcome.index : null;
 }
 
 export function objectTrs(object: Object3D): NodeTrs {
@@ -222,8 +244,10 @@ export class EditRig implements EditRigLike {
     const first = hits[0]?.object ?? null;
     // `isSelectable` als Lambda weiterreichen, nicht als blosse Methodenreferenz —
     // sonst haenge die Bindung an `cb` am Aufrufer.
-    this.cb.onSelect(
-      pickIndex(this.ctx.modelRoot, first, this.duplicated, (index) => this.cb.isSelectable(index)),
+    const outcome = resolveSelect(this.ctx.modelRoot, first, this.duplicated, (index) =>
+      this.cb.isSelectable(index),
     );
+    this.cb.onSelect(outcome.kind === "selected" ? outcome.index : null);
+    if (outcome.kind === "blocked") this.cb.onSelectBlocked?.(outcome.reason);
   };
 }

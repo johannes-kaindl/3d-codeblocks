@@ -5,6 +5,7 @@ import {
   findByIndex,
   objectTrs,
   pickIndex,
+  resolveSelect,
   topLevelIndex,
 } from "../../src/viewer/edit-controls";
 
@@ -121,5 +122,53 @@ describe("pickIndex", () => {
     const isSelectable = vi.fn(() => true);
     expect(pickIndex(root, a, duplicatedIndices(root), isSelectable)).toBeNull();
     expect(isSelectable).not.toHaveBeenCalled();
+  });
+});
+
+// Welle 6: der Nutzer soll erfahren, WARUM ein Klick keine Auswahl ergibt — dafuer
+// braucht es den Grund, den `pickIndex` bewusst wegwirft.
+describe("resolveSelect", () => {
+  function sharedTree() {
+    const root = new Group();
+    const a = new Object3D();
+    a.userData.tdcbNodeIndex = 0;
+    const b = new Object3D();
+    b.userData.tdcbNodeIndex = 0;
+    const c = new Object3D();
+    c.userData.tdcbNodeIndex = 2;
+    root.add(a, b, c);
+    return { root, a, b, c };
+  }
+
+  const always = () => true;
+
+  it("meldet 'blocked'/'duplicate' fuer einen geteilten Index", () => {
+    const { root, a } = sharedTree();
+    expect(resolveSelect(root, a, duplicatedIndices(root), always)).toEqual({
+      kind: "blocked",
+      reason: "duplicate",
+    });
+  });
+
+  it("meldet 'blocked'/'locked' fuer einen gesperrten, aber eindeutigen Index", () => {
+    const { root, c } = sharedTree();
+    expect(resolveSelect(root, c, duplicatedIndices(root), () => false)).toEqual({
+      kind: "blocked",
+      reason: "locked",
+    });
+  });
+
+  it("meldet 'selected' fuer einen eindeutigen, auswaehlbaren Index", () => {
+    const { root, c } = sharedTree();
+    expect(resolveSelect(root, c, duplicatedIndices(root), always)).toEqual({
+      kind: "selected",
+      index: 2,
+    });
+  });
+
+  it("meldet 'none' ohne Treffer und fuer Objekte ausserhalb des Modells", () => {
+    const { root } = sharedTree();
+    expect(resolveSelect(root, null, new Set(), always)).toEqual({ kind: "none" });
+    expect(resolveSelect(root, new Object3D(), new Set(), always)).toEqual({ kind: "none" });
   });
 });

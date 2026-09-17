@@ -59,6 +59,25 @@ export class Viewport {
   private needsRender = true;
   private frame: number | null = null;
   private disposed = false;
+  /** Solange das Layout nach einem `setModel()` noch nicht STEHT, bindet `resize()` den
+      Fit an die jeweils AKTUELLE Groesse nach (s. `layoutSettleSize`) — statt ihn wie
+      frueher einmalig bei der ersten (moeglicherweise noch nicht endgueltigen) Groesse
+      einzufrieren. Sobald zwei aufeinanderfolgende `resize()`-Aufrufe dieselbe Groesse
+      melden, gilt das Layout als fertig und `resize()` faellt auf reines
+      Aspect-Update zurueck (Bug B5, Task "GUI-Smoke B5 rot — Doppelklick-Reset landet
+      auf distance 1": ein Block wurde bei 614px eingepasst und danach auf 314px
+      verschmaelert, ohne dass die Kamera nachgezogen wurde — `getView()` maass die
+      Abweichung dann faelschlich gegen die NEUE Breite). */
+  private layoutSettled = false;
+  private layoutSettleSize: { width: number; height: number } | null = null;
+  /** Hat der Nutzer die Kamera SELBST bewegt (echter Orbit/Pan, nicht nur ein Klick, der
+      den Block nur aktiviert)? Dann darf `resize()` den Fit nicht mehr nachziehen, egal
+      wie instabil das Layout noch ist — sonst risse ein Sidebar-Wechsel eine laufende
+      Interaktion weg. Gemessen an "start" allein war das FRUEHER falsch (feuert schon
+      beim blossen Aktivierungsklick, bevor sich etwas bewegt hat) — deshalb wird auf
+      "end" verglichen, ob Position ODER Ziel sich wirklich veraendert haben. */
+  private userMoved = false;
+  private dragStart: { position: Vector3; target: Vector3 } | null = null;
   /** Datei-Kamera, gesetzt bevor ein Modell da ist — angewendet sobald Bounds vorliegen.
       Schliesst `pendingView` gegenseitig aus: es gilt immer nur die zuletzt gesetzte Ansicht. */
   private pendingFileCamera: FileCamera | null = null;
@@ -109,7 +128,20 @@ export class Viewport {
     this.controls.addEventListener("change", () => this.requestRender());
     // Nur echte Nutzerinteraktion fuettert das Kontext-Budget — sonst wuerde
     // Autorotate den Viewport dauerhaft als "gerade benutzt" markieren.
-    this.controls.addEventListener("start", () => options.onInteract());
+    this.controls.addEventListener("start", () => {
+      options.onInteract();
+      this.dragStart = { position: this.camera.position.clone(), target: this.controls.target.clone() };
+    });
+    this.controls.addEventListener("end", () => {
+      const before = this.dragStart;
+      this.dragStart = null;
+      if (
+        before &&
+        (!before.position.equals(this.camera.position) || !before.target.equals(this.controls.target))
+      ) {
+        this.userMoved = true;
+      }
+    });
 
     this.renderer.domElement.addEventListener("webglcontextlost", this.handleContextLost);
     // Doppelklick setzt die Kamera auf den Einpass-Blick zurueck.
@@ -189,6 +221,13 @@ export class Viewport {
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
     this.updateGrid();
+    // Neues Modell, neue Settle-Beobachtung: der Container kann sich seit dem letzten
+    // Fit weiterentwickelt haben (Sidebar, Split) — `resize()` prueft ab jetzt wieder
+    // von vorn, ob die aktuelle Groesse die endgueltige ist (s. Feldkommentar oben).
+    this.layoutSettled = false;
+    this.layoutSettleSize = { width: this.options.container.clientWidth, height: this.options.container.clientHeight };
+    this.userMoved = false;
+    this.dragStart = null;
     if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
     else this.setView(this.pendingView);
   }
@@ -230,6 +269,21 @@ export class Viewport {
     this.renderer.setSize(clientWidth, clientHeight, false);
     this.camera.aspect = this.aspect();
     this.camera.updateProjectionMatrix();
+
+    if (!this.layoutSettled && !this.userMoved && this.bounds) {
+      const stable =
+        this.layoutSettleSize?.width === clientWidth && this.layoutSettleSize?.height === clientHeight;
+      if (stable) {
+        this.layoutSettled = true;
+      } else {
+        this.layoutSettleSize = { width: clientWidth, height: clientHeight };
+        // Denselben Fit, den `setModel()` schon einmal versucht hat, an der JETZT
+        // aktuellen Groesse wiederholen — kein neuer Fit-Typ, nur eine neue Aspect-Basis.
+        if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
+        else this.setView(this.pendingView);
+      }
+    }
+
     this.requestRender();
   }
 
