@@ -3181,6 +3181,52 @@ async function main(): Promise<void> {
   // Wiederherstellung darf nicht daran hängen, dass jeder von ihnen sauber zu Ende läuft.
   let previousSettings: string | null = null;
 
+  // Dieselbe Aufraeumarbeit wie im `finally` unten — als eigene Funktion, damit der
+  // SIGINT/SIGTERM-Handler sie aufrufen kann, ohne Code zu duplizieren. Ein Ctrl-C mitten
+  // im Lauf ueberspringt das `finally` NICHT (try/catch-Semantik), sondern beendet den
+  // Node-Prozess sofort — ohne eigenen Handler bleiben `previousSettings` unwiederhergestellt
+  // und `createdNotes` im Vault stehen (gemessen: der naechste Lauf liest sie als Fremdzustand,
+  // z. B. `viewMode: on-click` verfaelscht B-Pruefpunkte, `_tdcb-*`-Notizen verstopfen B9/B10).
+  const cleanupState = async (): Promise<void> => {
+    if (previousSettings !== null) {
+      await cdp
+        .evaluate(`
+          const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+          if (plugin) {
+            Object.assign(plugin.settings, JSON.parse(${JSON.stringify(previousSettings)}));
+            await plugin.saveSettings?.();
+          }
+          return true;
+        `)
+        .catch(() => undefined);
+    }
+    if (!keep) {
+      await cdp
+        .evaluate(`
+          for (const path of ${JSON.stringify([...createdNotes])}) {
+            const file = app.vault.getAbstractFileByPath(path);
+            if (file) await app.vault.delete(file);
+          }
+          return true;
+        `)
+        .catch(() => undefined);
+    }
+  };
+
+  let signalCleanupRunning = false;
+  const onAbortSignal = (signal: NodeJS.Signals) => {
+    if (signalCleanupRunning) return;
+    signalCleanupRunning = true;
+    void (async () => {
+      console.log(`\n\nAbbruch durch ${signal} — raeume Smoke-Zustand auf...`);
+      await cleanupState();
+      cdp.close();
+      process.exit(130);
+    })();
+  };
+  process.on("SIGINT", onAbortSignal);
+  process.on("SIGTERM", onAbortSignal);
+
   try {
     // Ohne Fokus drosselt Chromium den Renderer. `Page.bringToFront` allein genuegt auf
     // macOS NICHT: es holt das Fenster innerhalb der App nach vorn, nicht die App nach
@@ -3250,6 +3296,31 @@ async function main(): Promise<void> {
     `);
     if (!plugin.ok) throw new Error(`Plugin ${PLUGIN_ID} ist nicht aktiv. Erst \`npm run deploy\`.`);
     console.log(`Plugin-Version im Vault: ${plugin.version}\n`);
+
+    // Alle Namen, die dieser Treiber je anlegt, tragen das Praefix `_tdcb-` (SMOKE_NOTE_*/
+    // SMOKE_MODEL_* oben, ausnahmslos) — das macht liegen gebliebene Dateien aus einem per
+    // SIGINT/SIGTERM abgebrochenen frueheren Lauf erkennbar, BEVOR dieser Lauf selbst welche
+    // anlegt. Ohne diesen Punkt faellt so ein Rest still unter den Tisch: `createdNotes` ist
+    // in diesem Lauf leer, das `finally` raeumt also nur eigene Spuren weg, nie fremde.
+    const leftover = await cdp.evaluate<string[]>(`
+      return app.vault.getFiles().map((f) => f.path).filter((p) => p.startsWith("_tdcb-"));
+    `);
+    record(
+      "Keine liegen gebliebenen Smoke-Dateien aus einem abgebrochenen frueheren Lauf",
+      leftover.length === 0,
+      leftover.length === 0
+        ? "kein Rest im Vault"
+        : `${leftover.length} Datei(en) gefunden und entfernt: ${leftover.join(", ")} — vermutlich Ctrl-C/Crash im vorigen Lauf vor dessen Aufraeumen; dieser Lauf faehrt normal weiter`,
+    );
+    if (leftover.length > 0) {
+      await cdp.evaluate(`
+        for (const path of ${JSON.stringify(leftover)}) {
+          const file = app.vault.getAbstractFileByPath(path);
+          if (file) await app.vault.delete(file);
+        }
+        return true;
+      `);
+    }
 
     // Ein Modell aus dem Vault nehmen: der Treiber bringt keine Testdaten mit, damit
     // im Repo keine Vault-Pfade landen (Pfad-Guard) und er in jedem Vault läuft.
@@ -3327,28 +3398,11 @@ async function main(): Promise<void> {
     }
   } finally {
     // Aufräumen darf nie am Ergebnis hängen: auch ein abgebrochener Lauf gibt den Vault
-    // so zurück, wie er ihn vorgefunden hat.
-    if (previousSettings !== null) {
-      await cdp
-        .evaluate(`
-          const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
-          Object.assign(plugin.settings, JSON.parse(${JSON.stringify(previousSettings)}));
-          await plugin.saveSettings?.();
-          return true;
-        `)
-        .catch(() => undefined);
-    }
-    if (!keep) {
-      await cdp
-        .evaluate(`
-          for (const path of ${JSON.stringify([...createdNotes])}) {
-            const file = app.vault.getAbstractFileByPath(path);
-            if (file) await app.vault.delete(file);
-          }
-          return true;
-        `)
-        .catch(() => undefined);
-    }
+    // so zurück, wie er ihn vorgefunden hat. Dieselbe Funktion wie der SIGINT/SIGTERM-Handler
+    // oben — kein Doppelcode.
+    process.off("SIGINT", onAbortSignal);
+    process.off("SIGTERM", onAbortSignal);
+    await cleanupState();
     cdp.close();
   }
 
