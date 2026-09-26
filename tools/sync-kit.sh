@@ -15,6 +15,9 @@ set -e
 
 KIT="${KIT_DIR:-../obsidian-kit}"
 KIT_REF="${KIT_REF:-0.27.0}"
+# help-setting.ts (Hilfe-Zeile, UI-STANDARD §8) gibt es erst ab 0.43.0; die uebrigen Module
+# bleiben auf KIT_REF. Eigene Ref, damit kein Modul still mit angehoben wird.
+KIT_REF_HELP="${KIT_REF_HELP:-0.43.0}"
 
 [ -d "$KIT/.git" ] || { echo "Kit-Repo nicht gefunden unter $KIT (KIT_DIR setzen)" >&2; exit 1; }
 git -C "$KIT" rev-parse --verify --quiet "${KIT_REF}^{commit}" >/dev/null \
@@ -28,15 +31,15 @@ SHA=$(git -C "$KIT" rev-parse --short "${KIT_REF}^{commit}")
 # hinterlaesst eine Datei, die nur aus dem Herkunftsstempel besteht und wie ein gueltiges
 # Vendoring aussieht (Befund finance-ledger, 2026-08-27).
 fetch() {
-  src="$1"; dst="$2"
-  git -C "$KIT" cat-file -e "$KIT_REF:src/$src" 2>/dev/null \
+  src="$1"; dst="$2"; ref="${3:-$KIT_REF}"
+  git -C "$KIT" cat-file -e "$ref:src/$src" 2>/dev/null \
     || { echo "FEHLT in $KIT_REF: src/$src — nichts geschrieben" >&2; exit 1; }
   tmp="$dst.tmp"
-  printf '// vendored from obsidian-kit@%s, src/%s — do not hand-edit; re-vendor via tools/sync-kit.sh\n' "$VER" "$src" > "$tmp"
-  git -C "$KIT" show "$KIT_REF:src/$src" >> "$tmp"
+  printf '// vendored from obsidian-kit@%s, src/%s — do not hand-edit; re-vendor via tools/sync-kit.sh\n' "$ref" "$src" > "$tmp"
+  git -C "$KIT" show "$ref:src/$src" >> "$tmp"
   [ -s "$tmp" ] || { echo "leeres Ergebnis fuer src/$src — nichts geschrieben" >&2; rm -f "$tmp"; exit 1; }
   mv "$tmp" "$dst"
-  echo "vendored obsidian-kit@$VER/$src"
+  echo "vendored obsidian-kit@$ref/$src"
 }
 
 mkdir -p src/vendor/kit src/vendor/kit-obsidian
@@ -50,6 +53,9 @@ done
 for m in confirm folder-suggest settings_walker; do
   fetch "obsidian/$m.ts" "src/vendor/kit-obsidian/$m.ts"
 done
+
+fetch "obsidian/help-setting.ts" "src/vendor/kit-obsidian/help-setting.ts" "$KIT_REF_HELP"
+HELP_SHA=$(git -C "$KIT" rev-parse --short "${KIT_REF_HELP}^{commit}")
 
 cat > src/vendor/kit/VENDOR.json <<JSON
 {
@@ -65,8 +71,9 @@ cat > src/vendor/kit-obsidian/VENDOR.json <<JSON
   "source": "obsidian-kit",
   "version": "$VER",
   "sha": "$SHA",
-  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts",
-  "note": "Verbatim snapshot aus der Git-Ref $VER (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. confirm.ts ist zwischen 0.27.0 und 0.28.0 byte-identisch. kit/ siehe dortige VENDOR.json."
+  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts, help-setting.ts",
+  "perFile": { "help-setting.ts": { "version": "$KIT_REF_HELP", "sha": "$HELP_SHA" } },
+  "note": "help-setting.ts liegt auf eigener Ref (perFile), die uebrigen Module auf version. Verbatim snapshot aus der Git-Ref $VER (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. confirm.ts ist zwischen 0.27.0 und 0.28.0 byte-identisch. kit/ siehe dortige VENDOR.json."
 }
 JSON
 echo "VENDOR.json → $VER ($SHA)"

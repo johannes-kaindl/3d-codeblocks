@@ -226,6 +226,10 @@ export class Setting {
         w.onChangeHandler = fn;
         return w;
       },
+      onClick(fn: () => void) {
+        w.onClickHandler = fn;
+        return w;
+      },
     };
     this.widgets.push(w);
     return w;
@@ -245,6 +249,14 @@ export class Setting {
   }
   addSlider(cb: any) {
     cb(this.widget("slider"));
+    return this;
+  }
+  addButton(cb: any) {
+    cb(this.widget("button", { setButtonText: (t: string) => ((this.widgets.at(-1).text = t), this.widgets.at(-1)) }));
+    return this;
+  }
+  addExtraButton(cb: any) {
+    cb(this.widget("extra-button", { setIcon: (i: string) => ((this.widgets.at(-1).icon = i), this.widgets.at(-1)), setTooltip: (t: string) => ((this.widgets.at(-1).tooltip = t), this.widgets.at(-1)) }));
     return this;
   }
 }

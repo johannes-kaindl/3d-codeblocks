@@ -2,6 +2,7 @@
   "source": "obsidian-kit",
   "version": "0.27.0",
   "sha": "548041b",
-  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts",
-  "note": "Verbatim snapshot aus der Git-Ref 0.27.0 (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. confirm.ts ist zwischen 0.27.0 und 0.28.0 byte-identisch. kit/ siehe dortige VENDOR.json."
+  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts, help-setting.ts",
+  "perFile": { "help-setting.ts": { "version": "0.43.0", "sha": "bcd1805" } },
+  "note": "help-setting.ts liegt auf eigener Ref (perFile), die uebrigen Module auf version. Verbatim snapshot aus der Git-Ref 0.27.0 (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. confirm.ts ist zwischen 0.27.0 und 0.28.0 byte-identisch. kit/ siehe dortige VENDOR.json."
 }

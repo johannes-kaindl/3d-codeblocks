@@ -19,6 +19,8 @@ import {
 } from "obsidian";
 import { MAX_CONTEXTS_LIMIT, validateSettings, type PluginSettings } from "../core/settings-types";
 import type ThreeDCodeblocksPlugin from "../main";
+import { HELP_TEXTS } from "../i18n/strings";
+import { githubHelpUrls, helpSettingDefinition } from "../vendor/kit-obsidian/help-setting";
 import { renderSettingDefinitions } from "../vendor/kit-obsidian/settings_walker";
 
 export class SettingsTab extends PluginSettingTab {
@@ -35,6 +37,9 @@ export class SettingsTab extends PluginSettingTab {
   // (der Host liest den Wert nur ueber getControlValue).
   getSettingDefinitions(): SettingDefinitionItem<keyof PluginSettings>[] {
     return [
+      // Hilfe-Zeile (UI-STANDARD §8): immer das ERSTE Element, vor allem anderen. Der
+      // Fallback-Walker zeichnet sie ueber denselben Render-Hatch.
+      helpSettingDefinition({ ...githubHelpUrls("3d-codeblocks"), texts: HELP_TEXTS }),
       {
         name: "View mode",
         desc: "How 3D blocks behave when a note opens.",

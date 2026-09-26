@@ -125,8 +125,19 @@ describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
     tab.display();
 
     const rows = (tab.containerEl as any).settings ?? [];
-    expect(rows).toHaveLength(controls(tab.getSettingDefinitions()).length);
+    // +1: die Hilfe-Zeile ist keine Control-Definition, sondern ein Render-Hatch.
+    expect(rows).toHaveLength(controls(tab.getSettingDefinitions()).length + 1);
     expect(rows.map((r: any) => r.name)).toContain("View mode");
+  });
+
+  it("zeichnet die Hilfe-Zeile als ERSTE Zeile, vor allen anderen", () => {
+    const { tab } = makeTab();
+    tab.display();
+
+    const rows = (tab.containerEl as any).settings ?? [];
+    expect(rows[0].name).toBe("Help");
+    expect(rows[0].widgets.map((w: any) => w.type)).toEqual(["button", "extra-button"]);
+    expect(rows[0].widgets[1].icon).toBe("bug");
   });
 
   it("waehlt pro Control-Typ das passende Widget", () => {
@@ -228,5 +239,72 @@ describe("Beleuchtungs-Zeilen", () => {
     // mit seinem Gegenstand zu tun hat.
     expect(text).not.toMatch(/\bACES\b/i);
     expect(text).not.toMatch(/\bneutral\b/i);
+  });
+});
+
+describe("Hilfe-Zeile", () => {
+  /** Minimales Setting, das die Kit-Zeile befuellen kann. */
+  function fakeSetting() {
+    const log: { name?: string; desc?: string; docsText?: string; icon?: string; tooltip?: string } = {};
+    const clicks: Array<() => void> = [];
+    const setting: any = {
+      setName: (n: string) => ((log.name = n), setting),
+      setDesc: (d: string) => ((log.desc = d), setting),
+      addButton: (cb: (b: any) => void) => {
+        const b: any = {
+          setButtonText: (t: string) => ((log.docsText = t), b),
+          onClick: (fn: () => void) => (clicks.push(fn), b),
+        };
+        cb(b);
+        return setting;
+      },
+      addExtraButton: (cb: (b: any) => void) => {
+        const b: any = {
+          setIcon: (i: string) => ((log.icon = i), b),
+          setTooltip: (t: string) => ((log.tooltip = t), b),
+          onClick: (fn: () => void) => (clicks.push(fn), b),
+        };
+        cb(b);
+        return setting;
+      },
+    };
+    return { setting, log, clicks };
+  }
+
+  it("ist das ERSTE Element der Definitionen", () => {
+    const { tab } = makeTab();
+    const first: any = tab.getSettingDefinitions()[0];
+    expect(typeof first.render).toBe("function");
+    expect(first.name).toBe("Help");
+  });
+
+  it("oeffnet Doku-Index und Issues dieses Repos", () => {
+    const open = vi.fn();
+    vi.stubGlobal("window", { open });
+    try {
+      const { tab } = makeTab();
+      const first: any = tab.getSettingDefinitions()[0];
+      const { setting, log, clicks } = fakeSetting();
+      first.render(setting);
+
+      expect(log.docsText).toBe("Open documentation");
+      expect(log.icon).toBe("bug");
+      clicks[0]?.();
+      clicks[1]?.();
+      expect(open).toHaveBeenNthCalledWith(
+        1,
+        "https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/README.md",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(open).toHaveBeenNthCalledWith(
+        2,
+        "https://github.com/johannes-kaindl/3d-codeblocks/issues",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
