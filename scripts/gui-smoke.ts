@@ -2080,6 +2080,9 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
     type: string;
     min: string;
     max: string;
+    firstRow: string;
+    helpButton: string;
+    helpBug: boolean;
   }>(`
     app.setting.open();
     app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
@@ -2096,6 +2099,9 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
       type: input ? input.type : "",
       min: input ? input.min : "",
       max: input ? input.max : "",
+      firstRow: rows[0]?.querySelector(".setting-item-name")?.textContent ?? "",
+      helpButton: rows[0]?.querySelector("button")?.textContent ?? "",
+      helpBug: !!rows[0]?.querySelector(".extra-setting-button"),
     };
     app.setting.close();
     await new Promise((r) => setTimeout(r, 300));
@@ -2105,6 +2111,12 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
     "F8. 'Maximum live 3D views' ist ein Slider von 0 bis 12",
     slider.found && slider.type === "range" && slider.min === "0" && slider.max === "12",
     slider.found ? `${slider.tag}[type=${slider.type}] ${slider.min}..${slider.max}` : "Zeile nicht gefunden",
+  );
+
+  record(
+    "F8b. Die Hilfe-Zeile steht als ERSTE Zeile im Settings-Tab",
+    slider.firstRow === "Help" && slider.helpButton === "Open documentation" && slider.helpBug,
+    `erste Zeile "${slider.firstRow}" · Knopf "${slider.helpButton}" · Bug-Icon ${slider.helpBug ? "ja" : "nein"}`,
   );
 
   // --- F9. Grenze aus: nichts wird zum Standbild --------------------------
