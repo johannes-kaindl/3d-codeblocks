@@ -3,13 +3,14 @@
 View 3D artifacts (GLB, glTF, STL) inside Obsidian — orbit, zoom and pan without
 leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed.
 
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/gitea/v/release/jkaindl/3d-codeblocks?gitea_url=https%3A%2F%2Fgit.jkaindl.de&label=release)](https://git.jkaindl.de/jkaindl/3d-codeblocks/releases)
-[![Obsidian](https://img.shields.io/badge/obsidian-1.5.0%2B-purple)](https://obsidian.md)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/LICENSE)
+[![Docs: CC BY-SA 4.0](https://img.shields.io/badge/docs-CC%20BY--SA%204.0-lightgrey.svg)](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/LICENSE-DOCS)
+[![Release](https://img.shields.io/github/v/release/johannes-kaindl/3d-codeblocks?label=release)](https://github.com/johannes-kaindl/3d-codeblocks/releases)
+[![Obsidian](https://img.shields.io/badge/obsidian-1.6.6%2B-purple)](https://obsidian.md)
 
-*Auch auf Deutsch verfügbar: [`README.de.md`](README.de.md).*
+*Auch auf Deutsch verfügbar: [`README.de.md`](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/README.de.md).*
 
-<p align="center"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/hero.png" width="820" alt="A ground-floor model rendered inside an Obsidian note, walls and rooms visible from above"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/hero.png" width="820" alt="A ground-floor model rendered inside an Obsidian note, walls and rooms visible from above"></p>
 
 ## Features
 
@@ -25,11 +26,11 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 - Theme-aware default material for STL, which carries none of its own.
 - No continuous render loop: a frame is drawn only when something changes.
 
-<a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/orbit.gif" width="380" alt="The model being orbited and zoomed inside the note"></a><br><sub>Click the preview for the full-size loop</sub>
+<a href="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/orbit.gif"><img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/orbit.gif" width="380" alt="The model being orbited and zoomed inside the note"></a><br><sub>Click the preview for the full-size loop</sub>
 
 ## Requirements
 
-- Obsidian **1.5.0** or newer.
+- Obsidian **1.6.6** or newer.
 - WebGL support in the renderer — standard on desktop. Mobile works, but large models
   are slow and the browser's limit on simultaneous 3D views is reached sooner.
 - **No Draco compression.** Meshopt-compressed files work; Draco-compressed ones cannot be
@@ -80,11 +81,11 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 ```
 ````
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/code-and-render.png" width="820" alt="A 3d code block in the editor on the left, the rendered model on the right">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/code-and-render.png" width="820" alt="A 3d code block in the editor on the left, the rendered model on the right">
 
 ### Guides
 
-- [Writing a 3D model by hand](docs/guide/writing-gltf-by-hand.md) — build a model as text
+- [Writing a 3D model by hand](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/writing-gltf-by-hand.md) — build a model as text
   inside a note, and learn to read any `.gltf` file along the way. Every example is
   verified on every commit.
 
@@ -95,7 +96,7 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 | `.glb`, `.gltf` | Materials and colours come from the file |
 | `.stl` | No materials in the format; the plugin applies a theme-aware default, unless the file carries per-facet colours |
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/colored-stl.png" width="380" alt="An STL model with its own per-facet colours, each face a different colour instead of the theme default">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/colored-stl.png" width="380" alt="An STL model with its own per-facet colours, each face a different colour instead of the theme default">
 
 A `.gltf` often does not stand alone: the geometry lives in a `.bin` next to it, textures
 in a folder beside them. Those files are loaded from your vault, resolved relative to the
@@ -119,7 +120,7 @@ reflections on, your theme's colours stay intact), *High contrast* (punchier, sh
 theme colours somewhat), or *Off* (no environment — the old behaviour).
 
 <p align="center">
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/lighting-off.png" width="400" alt="A metallic model with Lighting set to Off — rendered almost black, nothing to reflect"> <img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/lighting-faithful.png" width="400" alt="The same metallic model with Lighting set to Faithful colors — visible reflections instead of a black surface">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/lighting-off.png" width="400" alt="A metallic model with Lighting set to Off — rendered almost black, nothing to reflect"> <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/lighting-faithful.png" width="400" alt="The same metallic model with Lighting set to Faithful colors — visible reflections instead of a black surface">
 </p>
 <p align="center"><sub>Lighting: Off (left) vs. Faithful colors, the default since 0.4.0 (right)</sub></p>
 
@@ -152,7 +153,7 @@ Position, direction and field of view come straight from the file. From there yo
 zoom and pan as usual, turning around the point that camera looks at rather than the middle
 of the model — so a camera that frames a detail keeps its detail.
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/camera-view.png" width="820" alt="A model shown from a camera the file itself carries, an elevated angle looking down into the roofless house — different from the auto-fitted default">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/camera-view.png" width="820" alt="A model shown from a camera the file itself carries, an elevated angle looking down into the roofless house — different from the auto-fitted default">
 
 **The name is the one in the file**, matched without regard to case: first the names of the
 camera *nodes* (in Blender, the object name in the outliner), then the names of the camera
@@ -181,11 +182,11 @@ no code block to save into.
 The **Controls placement** setting decides where the buttons show up: the sidebar when
 it is open, the hover toolbar otherwise (default), or always just one of the two.
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/hover-toolbar.png" width="820" alt="The hover toolbar over a model: pin, unpin, fit and edit">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/hover-toolbar.png" width="820" alt="The hover toolbar over a model: pin, unpin, fit and edit">
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/sidebar-controls.png" width="820" alt="The 3D view sidebar next to a model: view presets, Save view, Clear view, Fit and Edit model">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/sidebar-controls.png" width="820" alt="The 3D view sidebar next to a model: view presets, Save view, Clear view, Fit and Edit model">
 
-<img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/saved-view.png" width="820" alt="The view: key in the code block on the left, the model turned to that angle on the right">
+<img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/saved-view.png" width="820" alt="The view: key in the code block on the left, the model turned to that angle on the right">
 
 ### Edit mode
 
@@ -227,12 +228,12 @@ name starts with one of the comma-separated prefixes cannot be selected or edite
 
 <table>
 <tr>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/edit-mode.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/edit-mode.png" width="380" alt="Edit mode"></a><br><sub>Edit mode</sub></td>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unapplied-edits.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="Unapplied edits"></a><br><sub>Unapplied edits</sub></td>
+<td><a href="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/edit-mode.png"><img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/thumbs/edit-mode.png" width="380" alt="Edit mode"></a><br><sub>Edit mode</sub></td>
+<td><a href="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/unapplied-edits.png"><img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/thumbs/unapplied-edits.png" width="380" alt="Unapplied edits"></a><br><sub>Unapplied edits</sub></td>
 </tr>
 <tr>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/unknown-key.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/unknown-key.png" width="380" alt="A 3d block reporting an unknown key below the viewport instead of failing silently"></a><br><sub>Unknown key reported</sub></td>
-<td><a href="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/settings.png"><img src="https://git.jkaindl.de/jkaindl/3d-codeblocks/raw/branch/main/docs/images/thumbs/settings.png" width="380" alt="The plugin settings: default height, ground grid, maximum live views, controls placement, locked node prefixes"></a><br><sub>Settings</sub></td>
+<td><a href="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/unknown-key.png"><img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/thumbs/unknown-key.png" width="380" alt="A 3d block reporting an unknown key below the viewport instead of failing silently"></a><br><sub>Unknown key reported</sub></td>
+<td><a href="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/settings.png"><img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/thumbs/settings.png" width="380" alt="The plugin settings: default height, ground grid, maximum live views, controls placement, locked node prefixes"></a><br><sub>Settings</sub></td>
 </tr>
 </table>
 
@@ -285,6 +286,12 @@ The code is split so that each layer can be tested on its own: `src/core/` holds
 logic (config parsing, format detection, camera fitting, context budget) and imports
 neither `obsidian` nor `three` — enforced by `check:pure`. `src/viewer/` wraps three.js
 and knows nothing about Obsidian. `src/obsidian/` connects the two and owns the lifecycle.
+
+## Documentation
+
+- [Documentation index](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/README.md) — all guides in one place.
+- [Getting started](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/getting-started.md) — from the install to your first model in a note.
+- [Troubleshooting](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/troubleshooting.md) — the exact message, its cause and the fix.
 
 ## Development
 
