@@ -593,6 +593,8 @@ async function settingsBild(cdp: Cdp, port: number, opts: ShotOptions): Promise<
   // "toolbar". Das Einstellungsbild zeigte sonst einen Wert, den der Treiber selbst
   // gesetzt hat — eine Doku-Aufnahme, die den eigenen Eingriff dokumentiert.
   await setPluginSetting(cdp, PLUGIN_ID, "panelPlacement", "auto");
+  // Ebenso viewMode: das Klick-Rezept stellt ihn auf "on-click" und liess ihn stehen.
+  await setPluginSetting(cdp, PLUGIN_ID, "viewMode", "immediate");
   await cdp.evaluate(`
     app.setting.open();
     app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
