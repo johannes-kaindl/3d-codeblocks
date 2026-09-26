@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-26
+
 ### Changed
 
 - **The minimum Obsidian version is now 1.6.6** (was 1.5.0). The folder picker uses `Vault.getAllFolders`, which Obsidian introduced in 1.6.6; the declared minimum was too low, so the community store flagged the plugin. Nothing changes for anyone who could run the plugin before without error.
