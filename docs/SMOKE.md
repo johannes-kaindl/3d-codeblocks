@@ -35,7 +35,7 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > | 7. Kein Leck | B9 (achtmal im Block getippt, keine verwaisten Canvas) |
 > | 8. Klick-Modus | **bewusst nicht doppelt** — Abschnitt „aktiver Block" deckt ihn mit 1–3 ab |
 > | 9. Fehlerfälle | B13 (fehlende Datei) · B14 (falsche Endung) · B15 (Tippfehler-Schlüssel: Hinweis, Modell bleibt) · Draco bleibt Handarbeit |
-> | 10. STL | B16 — eine echte `.stl` aus dem Vault hat Vorrang; gibt es keine, legt der Lauf seine eigene an (gemessen wird der **Deckungsgrad**, nicht die Farbzahl: ein einfacher Körper säße sonst genau auf der Schwelle) |
+> | 10. STL | B16 — eine echte `.stl` aus dem Vault hat Vorrang; gibt es keine, legt der Lauf seine eigene an (gemessen wird der **Deckungsgrad**, nicht die Farbzahl: ein einfacher Körper säße sonst genau auf der Schwelle; Schwelle seit 2026-10-01 ≥ 2 % und ≥ 3 Farbtöne, vorher 5 %) |
 > | Zusätzlich: Kontext-Budget | B11 (`Maximum live 3D views` = 2 → nur zwei live) |
 > | Zusätzlich: Poster-Qualität | B12 (das Standbild zeigt das Modell, keine leere Fläche) |
 > | Zusätzlich: Beleuchtung | B17 — die drei `lighting`-Zustände erzeugen drei verschiedene Bildhashes (Gegenprobe 2026-08-30: totgelegtes `applyLighting()` → drei identische) |
@@ -561,6 +561,8 @@ belegt), 1x „nichts gezeichnet". Kein Zusammenhang mit den `viewMode`- oder `c
 erkennbar (B16 läuft in der `basis`-Sektion, deutlich vor `cameras`/`clickrace`). Nicht
 weiterverfolgt — außerhalb des Welle-3-Auftrags. Bei erneutem Auftreten: reproduzierbar machen,
 bevor am Code gesucht wird (CORE-TEST-01).
+
+**Nachtrag 2026-10-01 (Welle 14): Ursache gefunden, und sie war nicht das Plugin.** Die Schwelle `coverage < 5` lag dicht an dem, was das Oktaeder liefert, und der Anteil hängt an der **Canvas-Breite**: das Oktaeder hat eine feste Größe relativ zur Höhe, ein breiteres Fenster verteilt dieselbe Fläche auf mehr Bild. Gemessen mit dem Original-Sampler (32×24) an `models/octahedron.stl`: Fenster 1024 px (Canvas 314 px) 7 %, Canvas 590 px 6 %, Canvas 790 px und mehr 4 %. Ab 4 % war `pollUntil` nie wahr, der Punkt meldete „nichts gezeichnet“, obwohl gezeichnet war (6 bis 8 Farbtöne). Die Hypothese „der Treiber nimmt die falsche von zwei STL-Dateien“ ist widerlegt: beide laden allein (je 6,9 %). Gegenprobe im Fenster 1500×800 mit `--section basis`: vor dem Fix B16 rot (18/19), nach dem Fix grün (19/19, 4 %, 6 Farbtöne). Fix: `coverage < 2 || colors < 3`; ein leeres Canvas liegt bei 0 % und einem Farbton. Die rote Messung aus Welle 9 passt dazu, dort lief die Zweitinstanz in einem breiteren Fenster. Lehre: ein Schwellenwert auf einem Anteil ist eine Annahme über die Fenstergröße, und die meldet sich nur im anderen Fenster.
 
 ### 2026-07-30 · `TransformControls.dispose()` wirft — der Edit-Modus ließ sich nicht verlassen
 

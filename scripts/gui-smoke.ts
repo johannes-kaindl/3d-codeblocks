@@ -1694,7 +1694,11 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
         ${SAMPLER}
         const canvas = document.querySelector(".tdcb-block canvas");
         const stats = canvas ? sample(canvas) : null;
-        if (!stats || stats.coverage < 5) return null;
+        // Schwelle 2 % statt 5 %: das Oktaeder fuellt nur einen Teil des Bildes, und der Anteil
+        // sinkt mit der Canvas-Breite (Fenster 1024 px: 7 %, 1500 px: 4 %). Bei 5 % meldete B16
+        // in einem breiteren Fenster "nichts gezeichnet", obwohl gezeichnet war (Welle 14).
+        // Ein leeres Canvas liegt bei 0 % und einem Farbton.
+        if (!stats || stats.coverage < 2 || stats.colors < 3) return null;
         const box = document.querySelector(".tdcb-message-error");
         return { coverage: stats.coverage, colors: stats.colors, message: box ? box.textContent.trim() : "" };
       `,
