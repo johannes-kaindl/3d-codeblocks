@@ -332,6 +332,7 @@ export function normalizePath(p: string): string {
 
 export class Modal {
   contentEl = makeFakeEl();
+  titleEl = makeFakeEl();
   constructor(public app: any) {}
   open() {
     (this as any).onOpen?.();

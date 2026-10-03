@@ -152,8 +152,8 @@ export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: n
     notice(`Could not find ${path} — nothing was changed.`);
     return false;
   }
-  const fence = listFences(text).find((f) => f.openLine === lineStart);
-  if (!fence || fence.lang !== "shapes" || fence.closeLine !== lineEnd) {
+  const fence = locateShapesFence(text, lineStart, lineEnd);
+  if (!fence) {
     notice("The block moved or sits inside a quote, callout or list — nothing was changed. Place the cursor in it and use the command instead.");
     return false;
   }
@@ -171,6 +171,14 @@ export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: n
     return false;
   }
   return moveFenceToFile(env, file, checked.fence, checked.lines);
+}
+
+/** Der ```shapes-Zaun, der GENAU an `lineStart` oeffnet und an `lineEnd` schliesst (Zeilen aus dem Nachbearbeiter,
+ *  0-basiert, beide inklusive) — sonst `null` (Block gewandert, andere Sprache, andere Laenge). Geteilt mit dem
+ *  Prompt-Panel (`panel-accept.ts`), damit es EINE Auffindungsregel gibt. */
+export function locateShapesFence(text: string, lineStart: number, lineEnd: number): Fence | null {
+  const fence = listFences(text).find((f) => f.openLine === lineStart);
+  return fence && fence.lang === "shapes" && fence.closeLine === lineEnd ? fence : null;
 }
 
 function errorText(error: unknown): string {

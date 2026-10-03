@@ -1,5 +1,5 @@
 import {
-  type App,
+  MarkdownView,
   Notice,
   Plugin,
   TFile,
@@ -29,6 +29,7 @@ import {
   convertFileToBlock,
 } from "./obsidian/shapes-convert";
 import { PromptPanelView, VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel";
+import { AcceptAsModal, acceptPanel, readTargetText, type AcceptEnv } from "./obsidian/panel-accept";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
 import { SourceEditor } from "./obsidian/source-editor";
@@ -238,9 +239,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         new PromptPanelView(leaf, {
           ...hostDeps,
           llm: this.llm,
-          readTargetText: (t) => readTargetText(this.app, t),
-          // Platzhalter bis Task 7 (panel-accept): schreibt nichts.
-          accept: async () => ({ ok: false, message: "Apply is not wired yet." }),
+          readTargetText: (t) => readTargetText(this.acceptEnv(), t),
+          accept: (state) => acceptPanel(this.acceptEnv(), state),
           openSettings: () => {
             const setting = (this.app as unknown as { setting: { open(): void; openTabById(id: string): void } }).setting;
             setting.open();
@@ -411,6 +411,11 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // Sidebar auf/zu (oder sonst ein Layout-Wechsel) aendert `panelVisible()` — ohne
     // dieses Nachziehen bliebe die Hover-Leiste stehen, nachdem die Sidebar geoeffnet
     // wurde, bis der Block aus einem anderen Grund neu zeichnet.
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf?.view instanceof MarkdownView) this.lastMarkdownView = leaf.view;
+      }),
+    );
     this.registerEvent(this.app.workspace.on("layout-change", () => this.syncAllToolbars()));
 
     // `layout-change` allein reicht NICHT: es feuert, wenn Blaetter entstehen oder
@@ -445,6 +450,27 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       view.refreshAutoRotate?.();
       view.refreshLighting?.();
     }
+  }
+
+  // Die zuletzt bediente Markdown-Ansicht: das Panel hat den Fokus, wenn der Nutzer uebernimmt, `getActiveViewOfType`
+  // waere dann null.
+  private lastMarkdownView: MarkdownView | null = null;
+
+  /** Die zuletzt bediente Notiz, solange sie noch in einem Blatt haengt (sonst `null`). */
+  private lastEditor(): MarkdownView | null {
+    const view = this.lastMarkdownView;
+    if (!view?.file) return null;
+    return this.app.workspace.getLeavesOfType("markdown").some((leaf) => leaf.view === view) ? view : null;
+  }
+
+  private acceptEnv(): AcceptEnv {
+    return {
+      app: this.app,
+      ports: obsidianWritePorts(this.app),
+      settings: () => this.settings,
+      lastEditor: () => this.lastEditor(),
+      choose: () => new Promise((resolve) => { new AcceptAsModal(this.app, resolve).open(); }),
+    };
   }
 
   private convertEnv() {
@@ -515,15 +541,4 @@ export function isPanelVisible(workspace: {
   return (
     workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS).length > 0 && !workspace.rightSplit.collapsed
   );
-}
-
-/** Aktueller Text des Ziels fuers Prompt-Panel; `null` = Datei/Block nicht (mehr) lesbar. Platzhalter bis
- *  Task 7 (panel-accept). Der Blockrumpf liegt zwischen den Zaunzeilen (0-basiert, beide inklusive). */
-async function readTargetText(app: App, t: PanelTarget): Promise<string | null> {
-  if (t.kind !== "shapes-file" && t.kind !== "shapes-block") return null;
-  const file = app.vault.getAbstractFileByPath(t.path);
-  if (!(file instanceof TFile)) return null;
-  const text = await app.vault.read(file);
-  if (t.kind === "shapes-file") return text;
-  return text.split("\n").slice(t.lineStart + 1, t.lineEnd).join("\n");
 }
