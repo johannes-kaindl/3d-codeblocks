@@ -36,12 +36,13 @@ function vec3(value: unknown): Vec3 | null {
 }
 
 function cleanName(raw: unknown, kind: ShapeKind, index: number): string {
-  const base = typeof raw === "string" ? raw.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "") : "";
+  const base = typeof raw === "string" ? raw.normalize("NFC").trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "") : "";
   if (base === "") return `${kind}-${index + 1}`;
   return isValidName(base) ? base : `${base}-part`;
 }
 
-export function partsFromLlm(raw: readonly unknown[]): {
+/** `nameOffset`: Startzahl für namenlose Teile (Name `<form>-<index+1+offset>`); Standard 0. */
+export function partsFromLlm(raw: readonly unknown[], nameOffset = 0): {
   parts: ShapeDraft[];
   dropped: { index: number; reason: string }[];
 } {
@@ -87,7 +88,7 @@ export function partsFromLlm(raw: readonly unknown[]): {
       return;
     }
 
-    let name = cleanName(rec.name, kind as ShapeKind, index);
+    let name = cleanName(rec.name, kind as ShapeKind, index + nameOffset);
     if (taken.has(name)) {
       let n = 2;
       while (taken.has(`${name}-${n}`)) n += 1;

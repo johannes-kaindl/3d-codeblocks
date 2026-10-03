@@ -54,6 +54,25 @@ function vec(name: string, field: string, v: number[] | undefined, fallback: Vec
   return printedVec([v[0], v[1], v[2]]);
 }
 
+/** `add` ist so streng wie `change`: ein vorhandener, aber kaputter Wert wird nie zum Standardwert. */
+function addFaults(part: unknown): string[] {
+  if (typeof part !== "object" || part === null || Array.isArray(part)) return [];
+  const rec = part as Record<string, unknown>;
+  const label = typeof rec.name === "string" && rec.name.trim() !== "" ? `\`${rec.name.trim()}\`` : "unnamed part";
+  const out: string[] = [];
+  for (const field of ["position", "rotation_deg"]) {
+    const v = rec[field];
+    if (v === undefined) continue;
+    if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => typeof x === "number" && Number.isFinite(x))) {
+      out.push(`${label}: \`${field}\` needs 3 numbers`);
+    }
+  }
+  if (rec.color !== undefined && (typeof rec.color !== "string" || normalizeColor(rec.color) === null)) {
+    out.push(`${label}: \`color\` needs a hex colour like #8b5a2b`);
+  }
+  return out;
+}
+
 interface Entry {
   text: string;
   /** Zeilenende hinter dieser Zeile, wie im Original ("" = letzte Zeile). */
@@ -95,7 +114,13 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
   changes.forEach((change, ci) => {
     const label = `change ${ci + 1}`;
     if (change.op === "add") {
-      const { parts, dropped } = partsFromLlm([change.part]);
+      const faults = addFaults(change.part);
+      if (faults.length > 0) {
+        problems.push(...faults.map((f) => `${label} (add): ${f}`));
+        return;
+      }
+      // Namenlose Teile nummerieren über die ganze Liste (laufende Teilezahl), nicht je Eintrag ab 1.
+      const { parts, dropped } = partsFromLlm([change.part], state.size);
       const draft = parts[0];
       if (dropped.length > 0 || draft === undefined) {
         problems.push(`${label} (add): ${dropped[0]?.reason ?? "unreadable"}`);
@@ -239,5 +264,8 @@ export function applyChangesAnswer(text: string, answer: ReturnType<typeof readC
       problems: answer.dropped.map((d) => `item ${d.index + 1} was not usable (${d.reason}) — nothing applied`),
     };
   }
-  return applyChanges(text, answer.changes);
+  const r = applyChanges(text, answer.changes);
+  // „ok, aber nichts geändert“ ist kein Erfolg: leere Liste oder ein Diff, der den Bestand nicht berührt.
+  if (r.ok && JSON.stringify(r.before) === JSON.stringify(r.after)) return { ok: false, problems: ["the answer changed nothing"] };
+  return r;
 }

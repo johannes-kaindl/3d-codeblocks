@@ -275,3 +275,68 @@ describe("applyChangesAnswer (all or nothing)", () => {
     expect(text(applyChangesAnswer(TABLE, a))).toContain("box Lade size 0.5 0.1 0.5 at 0 0.6 0.2\n");
   });
 });
+
+describe("unsupported or unknown keys on `change` (I-1)", () => {
+  const refuse = (json: string): string[] => {
+    const a = readChangesAnswer(json);
+    const r = applyChangesAnswer(TABLE, a);
+    expect(r.ok).toBe(false);
+    return r.ok ? [] : r.problems;
+  };
+
+  it("a `change` with `shape` is dropped and the whole answer refused, naming the key", () => {
+    const p = refuse('{"changes":[{"op":"change","name":"Bein-1","shape":"sphere","size":[0.1]}]}');
+    expect(p.join(" ")).toContain("`change` with `shape` is not supported yet");
+    const q = refuse('{"changes":[{"op":"change","name":"Bein-1","shape":"cylinder","position":[-0.55,0.35,-0.3]}]}');
+    expect(q.join(" ")).toContain("`shape`");
+  });
+
+  it("any other unknown key is dropped too, with its name", () => {
+    const a = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","position":[0,0,0],"scale":2}]}');
+    expect(a.ok && a.changes).toHaveLength(0);
+    expect(a.ok && a.dropped[0].reason).toContain("`scale`");
+  });
+
+  it("known keys and add items stay as before", () => {
+    const a = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","position":[0,0,0],"size":[1,1,1],"rotation_deg":[0,0,0],"color":"#fff"},{"op":"add","name":"X","shape":"box","size":[1,1,1],"extra":1}]}');
+    expect(a.ok && a.dropped).toEqual([]);
+  });
+
+  it("an answer that changes nothing is refused explicitly", () => {
+    expect(refuse('{"changes":[]}')).toEqual(["the answer changed nothing"]);
+    expect(refuse('{"changes":[{"op":"change","name":"Platte","position":[0,0.725,0]}]}')).toEqual(["the answer changed nothing"]);
+  });
+});
+
+describe("add is as strict as change (I-3)", () => {
+  const addFault = (extra: string): string => {
+    const r = applyChanges(TABLE, [{ op: "add", part: JSON.parse(`{"op":"add","name":"Lade","shape":"box","size":[1,1,1],${extra}}`) }]);
+    expect(r.ok, extra).toBe(false);
+    return r.ok ? "" : r.problems.join(" ");
+  };
+
+  it("refuses malformed position, rotation_deg and color, naming item and field", () => {
+    expect(addFault('"position":["0","1","0"]')).toMatch(/Lade.*`position`/);
+    expect(addFault('"position":[0,1]')).toMatch(/Lade.*`position`/);
+    expect(addFault('"rotation_deg":[0,1]')).toMatch(/Lade.*`rotation_deg`/);
+    expect(addFault('"color":"black"')).toMatch(/Lade.*`color`/);
+    expect(addFault('"color":5')).toMatch(/Lade.*`color`/);
+  });
+
+  it("absent keys keep their defaults", () => {
+    const r = applyChanges(TABLE, [{ op: "add", part: { op: "add", name: "Lade", shape: "box", size: [1, 1, 1] } }]);
+    expect(text(r)).toContain("box Lade size 1 1 1\n");
+  });
+});
+
+describe("unnamed adds (M-5)", () => {
+  it("two unnamed boxes get different numbers", () => {
+    const r = applyChanges(TABLE, [
+      { op: "add", part: { shape: "box", size: [1, 1, 1] } },
+      { op: "add", part: { shape: "box", size: [2, 2, 2] } },
+    ]);
+    const t = text(r);
+    expect(t).toContain("box box-4 size 1 1 1");
+    expect(t).toContain("box box-5 size 2 2 2");
+  });
+});

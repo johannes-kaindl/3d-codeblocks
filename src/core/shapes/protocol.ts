@@ -12,6 +12,9 @@ export const CREATE_SYSTEM = `Du baust 3D-Modelle aus einfachen Primitiven. Koor
 {"parts":[{"name":"...","shape":"box|cylinder|sphere|cone","position":[x,y,z],"size":[...],"rotation_deg":[rx,ry,rz],"color":"#rrggbb"}]}
 position = Mittelpunkt des Teils. size: box=[Breite X,Höhe Y,Tiefe Z] · cylinder/cone=[Radius,Höhe] (Achse entlang Y) · sphere=[Radius]. rotation_deg ist optional. Stelle das Objekt so, dass es auf y=0 steht. Löcher und Aussparungen baust du aus mehreren Teilen rund um die Lücke.`;
 
+// ACHTUNG: wie CREATE_SYSTEM gemessen (Lab 2026-10-03, docs/LAB.md). Jede Änderung (auch Whitespace) an
+// REFINE_SYSTEM oder an der Nutzer-Nachricht in buildRefineMessages braucht einen neuen Messlauf und eine
+// neue Tabellenzeile; der Test pinnt beides per SHA-256, und `promptSha` der Tabellenzeile muss passen.
 export const REFINE_SYSTEM = `Du änderst ein bestehendes 3D-Modell aus einfachen Primitiven. Koordinaten in Metern, Y zeigt nach oben, X nach rechts, Z zum Betrachter. position = Mittelpunkt des Teils. size: box=[Breite X,Höhe Y,Tiefe Z] · cylinder/cone=[Radius,Höhe] (Achse entlang Y) · sphere=[Radius].
 Du bekommst die Teile als JSON und einen Änderungswunsch. Antworte NUR mit JSON, ohne Erklärung, und nenne NUR die Teile, die sich ändern:
 {"changes":[{"op":"change","name":"<vorhandener Name>","position":[x,y,z],"size":[...],"rotation_deg":[rx,ry,rz],"color":"#rrggbb"},{"op":"add","name":"...","shape":"box|cylinder|sphere|cone","position":[x,y,z],"size":[...],"color":"#rrggbb"},{"op":"remove","name":"<vorhandener Name>"}]}
@@ -24,6 +27,8 @@ export function buildCreateMessages(prompt: string): PromptMessage[] {
   ];
 }
 
+// ACHTUNG: Die Nutzer-Nachricht unten ist Teil des gemessenen Prompts (Vorlage `Teile:\n…\n\nÄnderung: …`).
+// Eine Änderung braucht einen neuen Messlauf und eine neue Tabellenzeile (siehe REFINE_SYSTEM).
 export function buildRefineMessages(currentText: string, instruction: string): PromptMessage[] {
   const parts = parseShapes(currentText).parts.map((p) => ({
     name: p.name,
@@ -126,6 +131,8 @@ export type RawChange =
 const numbers = (v: unknown): number[] | undefined =>
   Array.isArray(v) && v.every((x) => typeof x === "number" && Number.isFinite(x)) ? (v as number[]) : undefined;
 
+const CHANGE_KEYS: ReadonlySet<string> = new Set(["op", "name", "position", "size", "rotation_deg", "color"]);
+
 export function readChangesAnswer(
   text: string,
 ): { ok: true; changes: RawChange[]; dropped: { index: number; reason: string }[] } | { ok: false; reason: string } {
@@ -148,6 +155,12 @@ export function readChangesAnswer(
       if (op === "remove") {
         changes.push({ op: "remove", name });
         return;
+      }
+      // Bis Plan 3b die Form beim `change` kann: jeder Schlüssel außerhalb der bekannten Felder lässt den
+      // Eintrag scheitern, statt still ignoriert zu werden (sonst „gelingt“ eine Formänderung als Größenänderung).
+      const unknownKey = Object.keys(item).find((k) => !CHANGE_KEYS.has(k));
+      if (unknownKey !== undefined) {
+        return drop(unknownKey === "shape" ? "`change` with `shape` is not supported yet" : `\`change\` has an unknown key \`${unknownKey}\``);
       }
       const change: Extract<RawChange, { op: "change" }> = { op: "change", name };
       if (item.position !== undefined) {

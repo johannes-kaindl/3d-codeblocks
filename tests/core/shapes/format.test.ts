@@ -123,3 +123,10 @@ describe("formatShapes title safety", () => {
     expect(parsed.parts.map((p) => p.name)).toEqual(["A"]);
   });
 });
+
+describe("cleanName NFC (M-4)", () => {
+  it("keeps a decomposed ü as ü instead of stripping its combining mark", () => {
+    const { parts } = partsFromLlm([{ name: "Küche", shape: "box", size: [1, 1, 1] }]);
+    expect(parts[0].name).toBe("Küche");
+  });
+});
