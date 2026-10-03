@@ -105,6 +105,28 @@ const clampContexts: FieldCheck<number> = (raw, fallback) => {
 // generische Bauform-Pruefung des Kit gegen ihren Default. Fuer `lockedNodePrefixes`
 // ist das Absicht und keine Luecke: "" ist hier ein gueltiger Wert ("nichts sperren"),
 // `nonEmptyString` wuerde ihn auf `env__` zurueckwerfen.
+const ENDPOINT_STRING_FIELDS = ["url", "apiKey", "model", "id", "secretId"] as const;
+
+/** Vor der Kit-Migration: `toConfig` wirft bei einem Nicht-String-Feld (`.trim`), und ein Nicht-String
+ *  als `id`/`secretId` stuerzt spaeter im Kit ab. Behalten werden Strings und Objekte mit String-`url`;
+ *  Felder ohne String-Wert fallen einzeln weg, der Eintrag (und ein gueltiges `secretId`) bleibt. */
+function sanitizeEndpointEntries(items: unknown[]): (string | EndpointConfig)[] {
+  const out: (string | EndpointConfig)[] = [];
+  for (const item of items) {
+    if (typeof item === "string") {
+      out.push(item);
+    } else if (isPlainObject(item) && typeof item["url"] === "string") {
+      const entry: Record<string, string> = {};
+      for (const field of ENDPOINT_STRING_FIELDS) {
+        const value = item[field];
+        if (typeof value === "string") entry[field] = value;
+      }
+      out.push(entry as unknown as EndpointConfig);
+    }
+  }
+  return out;
+}
+
 const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   viewMode: oneOf(["immediate", "on-click"] as const),
   panelPlacement: oneOf(["auto", "sidebar", "toolbar"] as const),
@@ -121,9 +143,7 @@ const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   // `secretId` durch (sonst ginge der Schluesselbund-Verweis beim Neustart verloren, waehrend der
   // Schluessel schon aus data.json entfernt ist) und laesst einen Klartext-`apiKey` fuer die
   // Migration stehen.
-  endpoints: arrayThen<EndpointConfig>((items) =>
-    migrateEndpointList(undefined, items as (string | EndpointConfig)[]),
-  ),
+  endpoints: arrayThen<EndpointConfig>((items) => migrateEndpointList(undefined, sanitizeEndpointEntries(items))),
   endpointChoice: (raw, fallback) => {
     if (!isPlainObject(raw)) return fallback;
     const out: EndpointChoice = {};

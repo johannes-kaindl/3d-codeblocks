@@ -2,15 +2,15 @@
 //
 // Ab Obsidian 1.13 fragt der Host `getSettingDefinitions()` ab und ruft `display()`
 // nie; nur so erscheinen die Settings in der Settings-Suche. Unser `minAppVersion`
-// ist 1.5.0, dort gibt es die deklarative API nicht — der Host ruft `display()`.
+// ist 1.11.4; unter 1.13 gibt es die deklarative API nicht — der Host ruft `display()`.
 //
 // Deshalb ist `getSettingDefinitions()` die einzige Definition, und `display()`
 // zeichnet DIESELBE Struktur mit der klassischen `Setting`-API nach. Kein zweiter
 // Definitionsbaum, der auseinanderlaufen kann.
 //
 // Muster uebernommen aus `vault-rag/src/settings.ts` + `vim-dojo/src/SettingsTab.ts`
-// (REGISTRY: „Zweigleisige deklarative Settings — eine-Wahrheit-Walker"). Hier in der
-// minimalen Form: alle Zeilen sind reine Controls, keine `render`-Hatches noetig.
+// (REGISTRY: „Zweigleisige deklarative Settings — eine-Wahrheit-Walker"). Fast alle Zeilen
+// sind reine Controls; die Hilfe-Zeile und der LLM-Abschnitt sind `render`-Hatches.
 
 import {
   PluginSettingTab,

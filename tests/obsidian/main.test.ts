@@ -210,20 +210,23 @@ describe("LLM connection wiring", () => {
     spy.mockRestore();
   });
 
-  it("a failing save leaves the settings updated and does not throw out of persist", async () => {
+  it("a failing save keeps the in-memory update and the rejection reaches the caller of persist", async () => {
     const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
     const spy = vi.spyOn(mod, "createLlmConnection");
     const plugin = await load();
     const persist = spy.mock.calls[0]![0].persist;
     plugin.saveData = vi.fn(async () => { throw new Error("disk full"); });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     let result: Promise<void> | undefined;
     expect(() => { result = persist({ model: "m2" }); }).not.toThrow();
-    await expect(result).resolves.toBeUndefined();
+    await expect(result).rejects.toThrow("disk full");
     expect(plugin.settings.llmModel).toBe("m2");
-    expect(warn).toHaveBeenCalled();
-    // Nie ein Schluessel- oder Settings-Dump in der Meldung.
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("http");
+    // persist selbst schreibt nichts in die Konsole (die Meldung ist Sache des Kit).
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 

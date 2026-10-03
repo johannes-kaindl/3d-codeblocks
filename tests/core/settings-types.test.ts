@@ -164,17 +164,21 @@ describe("validateSettings: prompt settings", () => {
     expect(validateSettings({ endpoints: { url: "http://x" } }).endpoints).toEqual([]);
   });
 
+  // Form, die das Kit erzeugt: `<pluginId>-ep-<uuid>` (endpoint-secrets.ts, secretIdFor).
+  const UUID = "2b9c8e4e-5f3a-4c47-9a53-0d6a1c3f7e11";
+  const SECRET = `three-d-codeblocks-ep-${UUID}`;
+
   it("round-trips an endpoint entry with id and secretId (keychain reference survives)", () => {
     const stored = validateSettings({
-      endpoints: [{ url: "http://localhost:1234/v1", id: "ep-1", secretId: "secret-1", model: "m" }],
-      endpointChoice: { endpointId: "ep-1", model: "m" },
+      endpoints: [{ url: "http://localhost:1234/v1", id: UUID, secretId: SECRET, model: "m" }],
+      endpointChoice: { endpointId: UUID, model: "m" },
       llmModel: "m",
     });
     const reloaded = validateSettings(JSON.parse(JSON.stringify(stored)));
     expect(reloaded.endpoints).toEqual([
-      { url: "http://localhost:1234/v1", id: "ep-1", secretId: "secret-1", model: "m" },
+      { url: "http://localhost:1234/v1", id: UUID, secretId: SECRET, model: "m" },
     ]);
-    expect(reloaded.endpointChoice).toEqual({ endpointId: "ep-1", model: "m" });
+    expect(reloaded.endpointChoice).toEqual({ endpointId: UUID, model: "m" });
     expect(reloaded.llmModel).toBe("m");
   });
 
@@ -198,5 +202,36 @@ describe("validateSettings: prompt settings", () => {
   it("keeps a valid request block", () => {
     const s = validateSettings({ request: { levelPickerInChat: true } });
     expect(s.request.levelPickerInChat).toBe(true);
+  });
+});
+
+describe("validateSettings: malformed endpoint entries never throw", () => {
+  const UUID = "2b9c8e4e-5f3a-4c47-9a53-0d6a1c3f7e11";
+  const eps = (e: unknown[]) => validateSettings({ endpoints: e }).endpoints;
+
+  it("drops a non-string url entry", () => {
+    expect(() => eps([{ url: 5 }])).not.toThrow();
+    expect(eps([{ url: 5 }])).toEqual([]);
+  });
+  it("drops a non-string apiKey, keeping the entry", () => {
+    expect(eps([{ url: "x", apiKey: 5 }])).toEqual([{ url: "x" }]);
+  });
+  it("drops a non-string model, keeping the entry", () => {
+    expect(eps([{ url: "x", model: 5 }])).toEqual([{ url: "x" }]);
+  });
+  it("drops non-string id and secretId", () => {
+    expect(eps([{ url: "x", id: 7, secretId: { a: 1 } }])).toEqual([{ url: "x" }]);
+  });
+  it("keeps a valid string id when only secretId is malformed, and vice versa", () => {
+    expect(eps([{ url: "x", id: UUID, secretId: 3 }])).toEqual([{ url: "x", id: UUID }]);
+    expect(eps([{ url: "x", id: 3, secretId: "s" }])).toEqual([{ url: "x", secretId: "s" }]);
+  });
+  it("leaves a valid entry unchanged", () => {
+    const e = { url: "http://a/v1", id: UUID, secretId: `three-d-codeblocks-ep-${UUID}`, model: "m" };
+    expect(eps([e])).toEqual([e]);
+  });
+  it("tolerates null, numbers, arrays and strings among entries", () => {
+    expect(() => eps([null, 5, [1], undefined, true])).not.toThrow();
+    expect(eps([null, 5, [1], "http://s/v1"])).toEqual([{ url: "http://s/v1" }]);
   });
 });

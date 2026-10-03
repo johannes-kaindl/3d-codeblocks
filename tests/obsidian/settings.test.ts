@@ -120,7 +120,7 @@ describe("SettingsTab.getControlValue / setControlValue", () => {
 });
 
 // Fallback-Pfad: Auf Obsidian < 1.13 ruft der Host display(). Bricht der, sehen
-// Nutzer unterhalb 1.13 GAR KEINE Settings — minAppVersion ist 1.5.0.
+// Nutzer unterhalb 1.13 GAR KEINE Settings — minAppVersion ist 1.11.4.
 describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
   it("zeichnet jede Definition als Setting-Zeile", () => {
     const { tab } = makeTab();

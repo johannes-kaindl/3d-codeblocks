@@ -69,11 +69,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         if (patch.choice !== undefined) this.settings.endpointChoice = patch.choice;
         if (patch.model !== undefined) this.settings.llmModel = patch.model;
         if (patch.request !== undefined) this.settings.request = patch.request;
-        // Ein fehlgeschlagenes Speichern darf keine unbehandelte Rejection werden; die Settings
-        // sind schon uebernommen. Nur der Fehlername wird gemeldet, nie Settings-Inhalt.
-        return this.saveSettings().catch((error: unknown) => {
-          console.warn("[three-d-codeblocks] saving the language model settings failed:", error instanceof Error ? error.name : "unknown error");
-        });
+        // Unverpackt zurueckgeben: das Kit macht aus einem abgelehnten Speichern eine Notice
+        // (MIGRATION 0.49.0 Schritt 2); ein Catch hier liesse einen Schreibfehler wie Erfolg aussehen.
+        return this.saveSettings();
       },
     });
     this.addSettingTab(new SettingsTab(this.app, this));
