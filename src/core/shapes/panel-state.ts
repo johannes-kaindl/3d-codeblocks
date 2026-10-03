@@ -51,25 +51,31 @@ export function followTarget(s: PanelState, t: PanelTarget): { state: PanelState
 }
 
 interface Resolved {
-  chain: ShapesRound[];
-  /** Gesetzt, wenn die Kette nicht sauber zur Wurzel führt (außerhalb, Zyklus, nach vorn). */
+  /** Wurzel zuerst; `index` ist der Listenindex (das Panel zeigt `index + 1`). */
+  chain: { round: ShapesRound; index: number }[];
+  /** Gesetzt, wenn die Kette nicht sauber zur Wurzel führt (nicht vorhanden, auf sich selbst, nach vorn). */
   broken: string | null;
 }
 
 function resolveChain(rounds: Rounds<ShapesRound>): Resolved {
-  const chain: ShapesRound[] = [];
+  const chain: Resolved["chain"] = [];
   if (rounds.active < 0) return { chain, broken: null };
-  let index: number | null = rounds.active;
-  const seen = new Set<number>();
-  while (index !== null) {
-    const r: ShapesRound | undefined = Number.isInteger(index) ? rounds.rounds[index] : undefined;
-    if (!r) return { chain, broken: `the round chain is broken (round ${String(index)} does not exist)` };
-    if (seen.has(index)) return { chain, broken: "the round chain is broken (it loops)" };
-    seen.add(index);
-    chain.unshift(r);
+  let index = rounds.active;
+  const first = Number.isInteger(index) ? rounds.rounds[index] : undefined;
+  if (!first) return { chain, broken: `the round chain is broken (round ${String(index + 1)} does not exist)` };
+  // Eine Runde baut nur auf eine FRÜHERE auf (basedOn < eigener Index); damit gibt es keine Zyklen, und die
+  // Schleife endet nach höchstens `active + 1` Schritten.
+  for (;;) {
+    const r: ShapesRound = rounds.rounds[index];
+    chain.unshift({ round: r, index });
     if (r.kind !== "refine" || r.basedOn === null) break;
-    // Eine Runde baut nur auf eine frühere auf; alles andere ist ein Zyklus oder ein Fehlzeiger.
-    if (r.basedOn >= index) return { chain, broken: "the round chain is broken (a round points forward)" };
+    const n = index + 1;
+    const m = r.basedOn + 1;
+    if (!Number.isInteger(r.basedOn) || r.basedOn < 0 || r.basedOn >= rounds.rounds.length) {
+      return { chain, broken: `the round chain is broken (round ${n} refers to round ${String(m)} which does not exist)` };
+    }
+    if (r.basedOn === index) return { chain, broken: `the round chain is broken (round ${n} points to itself)` };
+    if (r.basedOn > index) return { chain, broken: `the round chain is broken (round ${n} points forward to round ${m})` };
     index = r.basedOn;
   }
   return { chain, broken: null };
@@ -78,7 +84,7 @@ function resolveChain(rounds: Rounds<ShapesRound>): Resolved {
 /** Runden von der Wurzel bis zur aktiven, entlang `basedOn`. Ein `refine` mit `basedOn === null` verfeinert
  *  den Ziel-Text und beendet die Kette; bei einer kaputten Kette kommt, was bis dahin gelesen wurde. */
 export function chainOf(rounds: Rounds<ShapesRound>): ShapesRound[] {
-  return resolveChain(rounds).chain;
+  return resolveChain(rounds).chain.map((c) => c.round);
 }
 
 export type AcceptResult = { ok: true; text: string; unchanged: boolean } | { ok: false; problems: string[] };
@@ -95,27 +101,26 @@ export function acceptText(rounds: Rounds<ShapesRound>, currentTargetText: strin
   if (chain.length === 0) return { ok: false, problems: ["nothing to apply"] };
   let text: string;
   let rest = chain;
-  const first = chain[0];
-  if (first.kind === "create") {
-    text = first.text;
+  const root = chain[0].round;
+  if (root.kind === "create") {
+    text = root.text;
     rest = chain.slice(1);
   } else {
     if (currentTargetText === null) return { ok: false, problems: ["the model to change is gone"] };
     text = currentTargetText;
   }
-  for (let i = 0; i < rest.length; i++) {
-    const r = rest[i];
-    if (r.kind !== "refine") return { ok: false, problems: ["the round chain is broken (a create round in the middle)"] };
+  // Nach dem Wurzelschritt kann nur noch `refine` folgen: die Kette endet an der ersten `create`-Runde.
+  for (const { round, index } of rest) {
+    const label = `round ${index + 1}`;
+    const r = round as Extract<ShapesRound, { kind: "refine" }>;
     let applied;
     try {
       applied = applyChanges(text, r.changes);
     } catch {
-      return { ok: false, problems: [`round ${chain.length - rest.length + i + 1}: its stored changes are unreadable`] };
+      return { ok: false, problems: [`${label}: its stored changes are unreadable`] };
     }
-    if (!applied.ok) {
-      const n = chain.length - rest.length + i + 1;
-      return { ok: false, problems: applied.problems.map((p) => (chain.length > 1 ? `round ${n}: ${p}` : p)) };
-    }
+    // Listennummer wie im Panel, nicht die Position in der Kette.
+    if (!applied.ok) return { ok: false, problems: applied.problems.map((p) => `${label}: ${p}`) };
     text = applied.text;
   }
   return { ok: true, text, unchanged: currentTargetText !== null && text === currentTargetText };

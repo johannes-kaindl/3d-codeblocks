@@ -90,19 +90,20 @@ describe("chainOf", () => {
     const r = chainRounds(refine("a", [], null), refine("b", [], null));
     expect(chainOf(r).map((x) => x.instruction)).toEqual(["b"]);
   });
-  it("never loops on a cycle or out-of-range basedOn", () => {
+  it("cycle: terminates with the exact partial chain", () => {
     const cyc = deepFreeze<Rounds<ShapesRound>>({ rounds: [refine("a", [], 1), refine("b", [], 0)], active: 1 });
-    expect(chainOf(cyc).length).toBeLessThanOrEqual(2);
+    expect(chainOf(cyc).map((x) => x.instruction)).toEqual(["a", "b"]);
+  });
+  it("self reference and out-of-range basedOn terminate with the partial chain", () => {
     const self = deepFreeze<Rounds<ShapesRound>>({ rounds: [refine("a", [], 0)], active: 0 });
-    expect(chainOf(self).length).toBeLessThanOrEqual(1);
-    const oor = chainRounds(refine("a", [], 7));
-    expect(chainOf(oor).map((x) => x.instruction)).toEqual(["a"]);
+    expect(chainOf(self).map((x) => x.instruction)).toEqual(["a"]);
+    expect(chainOf(chainRounds(refine("a", [], 7))).map((x) => x.instruction)).toEqual(["a"]);
   });
 });
 
 describe("acceptText", () => {
   it("re-applies the chain to the CURRENT text, keeping hand edits elsewhere", () => {
-    const rounds = chainRounds(refine("higher", [{ op: "change", name: "Platte", at: [0, 0.925, 0] }], null), refine("black", [{ op: "change", name: "Bein-1", color: "#000000" }], 0));
+    const rounds = chainRounds(refine("higher", [{ op: "change", name: "Platte", at: [0, 0.925, 0] }], null, "stale stored text"), refine("black", [{ op: "change", name: "Bein-1", color: "#000000" }], 0, "stale stored text"));
     const handEdited = TABLE.replace("0.05 0.7 0.05", "0.06 0.7 0.06");
     expect(acceptText(deepFreeze(rounds), handEdited)).toEqual({
       ok: true,
@@ -121,9 +122,11 @@ describe("acceptText", () => {
   it("diamond: the active branch is applied, the sibling is not", () => {
     const rounds = chainRounds(refine("a", [up("Platte", 1)], null), refine("b", [{ op: "change", name: "Bein-1", color: "#111111" }], 0), refine("c", [{ op: "change", name: "Bein-1", color: "#222222" }], 0));
     const r = acceptText(rounds, TABLE);
-    expect(r).toMatchObject({ ok: true });
-    expect((r as { text: string }).text).toContain("#222222");
-    expect((r as { text: string }).text).not.toContain("#111111");
+    expect(r).toEqual({
+      ok: true,
+      unchanged: false,
+      text: "box Platte size 1.2 0.05 0.7 at 0 1 0\nbox Bein-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3 color #222222",
+    });
   });
 
   it("selected middle round: later rounds are not applied", () => {
@@ -150,40 +153,62 @@ describe("acceptText", () => {
   it("refuses when a hand edit removed a part the chain touches — lists the problem, returns no text", () => {
     const rounds = chainRounds(refine("x", [{ op: "change", name: "Bein-1", color: "#000000" }], null));
     const r = acceptText(rounds, "box Platte size 1");
-    expect(r.ok).toBe(false);
+    expect(r).toEqual({ ok: false, problems: ["round 1: change 1: no part named `Bein-1` (available: Platte)"] });
     expect(r).not.toHaveProperty("text");
-    expect((r as { problems: string[] }).problems.join("\n")).toContain("no part named `Bein-1`");
   });
 
   it("a failing step aborts the whole chain (no partial application, no skipped round)", () => {
     const rounds = chainRounds(refine("a", [{ op: "change", name: "Weg", color: "#000000" }], null), refine("b", [up("Platte", 1)], 0));
     const r = acceptText(rounds, TABLE);
-    expect(r.ok).toBe(false);
+    expect(r).toEqual({ ok: false, problems: ["round 1: change 1: no part named `Weg` (available: Platte, Bein-1)"] });
     expect(r).not.toHaveProperty("text");
-    expect((r as { problems: string[] }).problems.some((p) => p.includes("`Weg`"))).toBe(true);
   });
 
   it("refuses a step whose values became invalid after a hand edit", () => {
     const rounds = chainRounds(refine("x", [{ op: "change", name: "Platte", color: "red" }], null));
-    expect(acceptText(rounds, TABLE).ok).toBe(false);
+    expect(acceptText(rounds, TABLE)).toEqual({ ok: false, problems: ["round 1: change 1: `Platte`: `color` needs a hex colour like #8b5a2b"] });
   });
 
   it("refuses an ambiguous name after a hand edit", () => {
     const rounds = chainRounds(refine("x", [up("bein 1", 1)], null));
     const text = "box Bein-1 size 1\nbox bein_1 size 1";
-    expect(acceptText(rounds, text).ok).toBe(false);
+    expect(acceptText(rounds, text)).toEqual({ ok: false, problems: ["round 1: change 1: `bein 1` matches more than one part: Bein-1, bein_1"] });
   });
 
   it("refuses a strict add that clashes with a hand-added part", () => {
     const rounds = chainRounds(refine("x", [{ op: "add", part: { op: "add", name: "Neu", shape: "box", size: [1, 1, 1] } }], null));
-    expect(acceptText(rounds, `${TABLE}\nbox Neu size 1`).ok).toBe(false);
+    expect(acceptText(rounds, `${TABLE}\nbox Neu size 1`)).toEqual({
+      ok: false,
+      problems: ["round 1: change 1 (add): a part named `Neu` already exists — remove it first or pick another name"],
+    });
   });
 
-  it("basedOn out of range and cycle give ok:false with a clear problem", () => {
-    const oor = acceptText(chainRounds(refine("a", [up("Platte", 1)], 7)), TABLE);
-    expect(oor).toEqual({ ok: false, problems: [expect.stringContaining("broken")] });
+  it("basedOn out of range: names both list numbers", () => {
+    expect(acceptText(chainRounds(refine("a", [up("Platte", 1)], 9)), TABLE)).toEqual({
+      ok: false,
+      problems: ["the round chain is broken (round 1 refers to round 10 which does not exist)"],
+    });
+  });
+  it("forward and self references are told apart from missing rounds", () => {
     const cyc = deepFreeze<Rounds<ShapesRound>>({ rounds: [refine("a", [], 1), refine("b", [], 0)], active: 1 });
-    expect(acceptText(cyc, TABLE)).toEqual({ ok: false, problems: [expect.stringContaining("broken")] });
+    expect(acceptText(cyc, TABLE)).toEqual({ ok: false, problems: ["the round chain is broken (round 1 points forward to round 2)"] });
+    const self = deepFreeze<Rounds<ShapesRound>>({ rounds: [refine("a", [], 0)], active: 0 });
+    expect(acceptText(self, TABLE)).toEqual({ ok: false, problems: ["the round chain is broken (round 1 points to itself)"] });
+  });
+
+  it("problem numbers are LIST numbers as the panel shows them", () => {
+    const miss = { op: "change", name: "Weg", color: "#000000" } as const;
+    const msg = (n: string): string => `round ${n}: change 1: no part named \`Weg\` (available: Platte, Bein-1)`;
+    // diamond: c (list 3) is active, chain a -> c; the chain position of c is 2
+    const diamond = chainRounds(refine("a", [up("Platte", 1)], null), refine("b", [up("Platte", 2)], 0), refine("c", [miss], 0));
+    expect(acceptText(diamond, TABLE)).toEqual({ ok: false, problems: [msg("3")] });
+    // step back to round 1, refine from it: round 3 builds on 1 while round 2 stays in the list
+    const stepped = chainRounds(refine("a", [up("Platte", 1)], null), refine("b", [up("Platte", 2)], 0));
+    const refined = pushRound(selectRound(stepped, 0), refine("c", [miss], 0));
+    expect(acceptText(refined, TABLE)).toEqual({ ok: false, problems: [msg("3")] });
+    // single round that is the 5th in the list
+    const five = chainRounds(refine("1", [], null), refine("2", [], null), refine("3", [], null), refine("4", [], null), refine("5", [miss], null));
+    expect(acceptText(five, TABLE)).toEqual({ ok: false, problems: [msg("5")] });
   });
 
   it("an active index outside the list is a broken chain, not a crash", () => {
