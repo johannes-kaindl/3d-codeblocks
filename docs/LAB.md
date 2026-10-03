@@ -47,5 +47,9 @@ Refine case R07 depends on the model keeping the part name `Bein-1` when it repl
 
 | Date | Model | Task | Result (good of total) | Duration | Notes |
 |---|---|---|---|---|---|
+| 2026-10-03 | qwen/qwen3.8-27b | refine | 8 of 8 | about 21.5 min | Temperature 0.2, n=1 per case. Case R08 took 542 s. The first attempt of the same run failed at 301 s with `UND_ERR_HEADERS_TIMEOUT` (`fetch` caps the wait for headers); the harness was fixed to use `node:http`. That attempt is not a row, because infrastructure errors make a run incomplete. Fixture: `tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03.jsonl` |
+| 2026-10-03 | google/gemma-4-e4b | refine | 6 of 8 | about 7.5 min | Temperature 0.2, n=1 per case. R01 bad (the answer was applied, the check failed). R07 bad: the model used `change` to switch `Bein-1` to a cylinder, which the change language rejects; `remove` plus `add` is required. Fixture: `tests/fixtures/shapes-lab/gemma-4-e4b-refine-2026-10-03.jsonl` |
+| 2026-10-03 | qwen/qwen3.8-27b | create | 9 of 10 | about 61 min | Temperature 0.2, n=1 per prompt, 150 to 809 s per prompt. Control run through the production code; it reproduces the spike's 9 of 10 (A07 bad again: house dimensions out of range). Same number as the spike row, so it does not replace it. Fixture: `tests/fixtures/shapes-lab/qwen3.8-27b-create-2026-10-03.jsonl` |
+| 2026-10-03 | Apple Foundation Models (via local shim) | create, refine | not measured, no shim running | none | No listener on the known ports and no shim was started. Not a failure count, and no entry in `MEASUREMENTS`, so the panel never shows a number for it. |
 
-No lab runs recorded yet.
+The three fixtures are replayed in the test gate (`tests/core/shapes/quality-refine-replay.test.ts` for refine, `quality.test.ts` for the table): the counts in `MEASUREMENTS` are re-derived from the recorded answers through the production path. Answers are stored truncated to 6000 characters. The lab run itself stays outside the gate.

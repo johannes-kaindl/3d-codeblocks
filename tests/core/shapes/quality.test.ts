@@ -8,7 +8,7 @@ describe("quality", () => {
   it("names a measured model's result", () => {
     expect(qualityLine("qwen/qwen3.8-27b", "create")).toEqual({
       measured: true,
-      text: "Measured: 9 of 10 test prompts gave a plausible 3D model (2026-10-01).",
+      text: "Measured: 9 of 10 test prompts gave a plausible 3D model (qwen/qwen3.8-27b, 2026-10-01, n=1 per prompt).",
     });
     expect(qualityLine("QWEN/QWEN3.8-27B", "create").measured).toBe(true);
     expect(qualityLine("  qwen/qwen3.8-27b ", "create").measured).toBe(true);
@@ -24,9 +24,26 @@ describe("quality", () => {
     }
   });
 
-  it("has no cross-task guess: refine is not measured for a create-only model", () => {
-    expect(findMeasurement("qwen/qwen3.8-27b", "refine")).toBeNull();
-    expect(qualityLine("qwen/qwen3.8-27b", "refine").measured).toBe(false);
+  it("has no cross-task guess: a create row never answers a refine question", () => {
+    expect(findMeasurement("verdigado-pro", "refine")).toBeNull();
+    expect(qualityLine("qwen/qwen3.8-27b", "refine").text).toBe("Measured: 8 of 8 test change requests were applied correctly (qwen/qwen3.8-27b, 2026-10-03, n=1 per request).");
+    expect(qualityLine("google/gemma-4-e4b", "refine").text).toBe("Measured: 6 of 8 test change requests were applied correctly (google/gemma-4-e4b, 2026-10-03, n=1 per request).");
+  });
+
+  it("uses task-aware texts for refine", () => {
+    expect(qualityLine("verdigado-pro", "refine")).toEqual({
+      measured: false,
+      text: "Not measured for this model — the one small model tested (gemma-4-e4b) got 6 of 8 test change requests right.",
+    });
+  });
+
+  it("refine failure hint: best refine model, never the create statistics", () => {
+    expect(failureHint("google/gemma-4-e4b", "refine")).toBe(
+      "The change list could not be applied. A larger model may do better — measured best: qwen/qwen3.8-27b, 8 of 8 test change requests applied correctly.",
+    );
+    expect(failureHint("qwen/qwen3.8-27b", "refine")).toBe(
+      "The change list could not be applied. In the test this model got 8 of 8 test change requests applied correctly — try a simpler wording or a smaller change.",
+    );
   });
 
   it("points to a larger model when another model's answer fails", () => {
@@ -57,13 +74,13 @@ describe("quality", () => {
 
   it("every source names existing fixtures whose model field equals the table's model", async () => {
     for (const m of MEASUREMENTS) {
-      const names = [...m.source.matchAll(/tests\/fixtures\/shapes-spike\/([\w.-]+\.jsonl)/g)].map((x) => x[1]);
+      const names = [...m.source.matchAll(/tests\/fixtures\/(shapes-spike|shapes-lab)\/([\w.-]+\.jsonl)/g)].map((x) => [x[1], x[2]]);
       expect(names.length, m.model).toBeGreaterThan(0);
-      for (const n of names) {
-        const path = fileURLToPath(new URL(`../../fixtures/shapes-spike/${n}`, import.meta.url));
+      for (const [dir, n] of names) {
+        const path = fileURLToPath(new URL(`../../fixtures/${dir}/${n}`, import.meta.url));
         expect(existsSync(path), n).toBe(true);
-        const recs = readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { model: string });
-        for (const r of recs) expect(r.model, n).toBe(m.model);
+        const recs = readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { model?: string });
+        for (const r of recs) if (r.model !== undefined) expect(r.model, n).toBe(m.model);
       }
       if (m.task === "create") {
         const main = [...m.source.matchAll(/shapes-spike\/([\w.-]+\.jsonl)/g)][0][1];
