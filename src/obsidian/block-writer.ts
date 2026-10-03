@@ -210,8 +210,16 @@ export async function writeBlockBody(
   });
 }
 
+const BOM = "\uFEFF";
+
+// Nur der VERGLEICH ist gegenueber einem fuehrenden BOM nachsichtig (Zeile 0 der Notiz
+// und `expected`); geschrieben wird das BOM unveraendert zurueck.
+function stripBom(text: string): string {
+  return text.startsWith(BOM) ? text.slice(1) : text;
+}
+
 function linesAt(content: string, from: number, to: number): string | null {
-  const lines = normalizeLineEndings(content).split("\n");
+  const lines = stripBom(normalizeLineEndings(content)).split("\n");
   if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to >= lines.length)
     return null;
   return lines.slice(from, to + 1).join("\n");
@@ -220,7 +228,9 @@ function linesAt(content: string, from: number, to: number): string | null {
 /** Ganze Zeilen `from..to` (0-basiert, inklusive) ersetzen — fürs Umwandeln Block ↔ Datei,
     wo sich die Sprache des Zauns ändert und `writeBlockBody` deshalb nicht reicht. Dieselbe
     Vorsicht wie dort: stimmt der Bereich nicht mehr, wird nichts geschrieben. Eine leere
-    Ersetzung ergibt EINE leere Zeile (kein Zeilenverlust). */
+    Ersetzung ergibt EINE leere Zeile (kein Zeilenverlust). Zeilen ausserhalb des Bereichs
+    bleiben byte-identisch; die Ersatzzeilen tragen den dominanten Stil der Notiz
+    (`lineEndingSignal`: irgendwo \r\n → CRLF, sonst LF). */
 export async function replaceLines(
   ports: WritePorts,
   path: string,
@@ -229,7 +239,7 @@ export async function replaceLines(
   expected: string,
   replacement: string,
 ): Promise<void> {
-  const want = normalizeLineEndings(expected);
+  const want = stripBom(normalizeLineEndings(expected));
   const editor = ports.editorFor(path);
 
   if (editor) {
@@ -237,9 +247,13 @@ export async function replaceLines(
     if (linesAt(content, from, to) !== want) throw new BlockChangedError();
     const style = lineEndingSignal(content) ?? "lf";
     const lines = content.split("\n");
+    // Offsets stammen aus dem ROHEN Puffer (ein einzelnes \r mitten in der Zeile zaehlt
+    // dort als Zeichen); nur das Zeilenend-\r der letzten Zeile bleibt stehen. Ein BOM
+    // in Zeile 0 wird nicht ueberschrieben.
+    const startCh = from === 0 && lines[0].startsWith(BOM) ? 1 : 0;
     editor.replaceRange(
       applyLineEndingStyle(replacement, style).replace(/\r$/, ""),
-      { line: from, ch: 0 },
+      { line: from, ch: startCh },
       { line: to, ch: lines[to].replace(/\r$/, "").length },
     );
     return;
@@ -249,13 +263,13 @@ export async function replaceLines(
   await ports.vault.process(path, (current) => {
     if (linesAt(current, from, to) !== want) throw new BlockChangedError();
     const style = lineEndingSignal(current) ?? "lf";
-    const eol = style === "crlf" ? "\r\n" : "\n";
-    const lines = normalizeLineEndings(current).split("\n");
-    const next = [
-      ...lines.slice(0, from),
-      ...normalizeLineEndings(replacement).split("\n"),
-      ...lines.slice(to + 1),
-    ];
-    return next.join(eol);
+    const lines = current.split("\n");
+    const next = applyLineEndingStyle(replacement, style).split("\n");
+    // Letzte Zeile der Notiz ohne Zeilenende: kein \r anhaengen, ausser sie hatte eines.
+    if (to === lines.length - 1 && !lines[to].endsWith("\r")) {
+      next[next.length - 1] = next[next.length - 1].replace(/\r$/, "");
+    }
+    if (from === 0 && lines[0].startsWith(BOM)) next[0] = BOM + next[0];
+    return [...lines.slice(0, from), ...next, ...lines.slice(to + 1)].join("\n");
   });
 }

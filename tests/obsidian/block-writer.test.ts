@@ -366,3 +366,47 @@ describe("replaceLines", () => {
     expect(e.state.content).toBe("# T\n\nEnde");
   });
 });
+
+// Fix round 1: replaceLines darf ausserhalb von from..to kein Byte aendern.
+describe("replaceLines: untouched surroundings and BOM", () => {
+  // Stil-Regel: dominanter Stil der Notiz laut lineEndingSignal (enthaelt irgendwo
+  // \r\n -> CRLF, sonst LF); Zeilen ausserhalb des Bereichs bleiben unveraendert.
+  const MIXED = ["l0\r", "l1", "l2\rx", "A\r", "B", "l5\r", "l6", "l7"].join("\n");
+
+  it("leaves every line outside the range byte-identical (middle range)", async () => {
+    const { state, ports } = makePorts(MIXED);
+    await replaceLines(ports, "note.md", 3, 4, "A\nB", "X\nY\nZ");
+    expect(state.content).toBe(["l0\r", "l1", "l2\rx", "X\r", "Y\r", "Z\r", "l5\r", "l6", "l7"].join("\n"));
+  });
+
+  it("leaves the rest identical for the first and the last lines", async () => {
+    const first = makePorts(MIXED);
+    await replaceLines(first.ports, "note.md", 0, 0, "l0", "F");
+    expect(first.state.content).toBe(["F\r", ...MIXED.split("\n").slice(1)].join("\n"));
+    const last = makePorts(MIXED);
+    await replaceLines(last.ports, "note.md", 7, 7, "l7", "L");
+    // last line had no \r and no trailing newline: none is added
+    expect(last.state.content).toBe([...MIXED.split("\n").slice(0, 7), "L"].join("\n"));
+  });
+
+  it("editor path: lone \\r in an unrelated line and inside the range is handled consistently", async () => {
+    const { state, ports } = makePorts(MIXED, true);
+    await replaceLines(ports, "note.md", 2, 3, "l2x\nA", "X");
+    expect(state.content).toBe(["l0\r", "l1", "X\r", "B", "l5\r", "l6", "l7"].join("\n"));
+    const e2 = makePorts(MIXED, true);
+    await replaceLines(e2.ports, "note.md", 3, 4, "A\nB", "X\nY");
+    expect(e2.state.content).toBe(["l0\r", "l1", "l2\rx", "X\r", "Y", "l5\r", "l6", "l7"].join("\n"));
+  });
+
+  it("a block on line 0 of a BOM note converts, expected with or without BOM, BOM kept", async () => {
+    const note = "\uFEFF```shapes\nbox A size 1\n```\nEnde";
+    for (const withEditor of [false, true]) {
+      for (const exp of [FENCE0, "\uFEFF" + FENCE0]) {
+        const { state, ports } = makePorts(note, withEditor);
+        await replaceLines(ports, "note.md", 0, 2, exp, "X");
+        expect(state.content).toBe("\uFEFFX\nEnde");
+      }
+    }
+  });
+});
+const FENCE0 = "```shapes\nbox A size 1\n```";
