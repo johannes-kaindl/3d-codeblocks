@@ -39,6 +39,7 @@ A part line has the form `<shape> <name> size … [at …] [rot …] [color …]
 - **`rot x y z`:** rotation in degrees as Euler angles, applied in X, Y, Z order. Default `0 0 0`.
 - **`color #rrggbb`:** a hex colour, also as `#rgb`. Without it a part is grey (`#a0a0a0`).
 - **Units and axes:** lengths are metres, angles are degrees, **Y is up**. Every shape is centred on its own origin, so a box of height 0.7 at `y = 0.35` stands on the floor.
+- **Tessellation is fixed:** cylinders and cones have 24 segments, spheres 24 × 12 (segments × rings). There is no setting for smoother surfaces.
 - **Numbers** use a decimal point. A decimal comma (`0,5`) is not accepted.
 - **Size values** must be greater than 0.
 - **Case:** shape names and keywords are not case-sensitive; part names are.
@@ -52,11 +53,11 @@ Lines of the form `key: value` before the first part are header lines.
 |---|---|---|
 | `title` | text | Title above the viewer; also names the exported file |
 | `height` | number greater than 0 | Viewer height in pixels (default: the **Default height** setting) |
-| `view` | `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, or three numbers `azimuth,elevation,distance`, or `camera:<name>` | Starting camera |
+| `view` | `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, or three numbers `azimuth,elevation,distance` | Starting camera |
 
 Known limit: `title`, `height` and `view` only take effect in the inline ```` ```shapes ```` block. In a `.shapes` file the viewer ignores them (the title is still used to name an export).
 
-A header line after the first part is an error, as is `file:` (a shapes block holds its parts itself; use a `3d` block to point at a file). An unknown key or an unusable `height` or `view` value is a warning: the line is ignored and the model still renders.
+A header line after the first part is an error, as is `file:` (a shapes block holds its parts itself; use a `3d` block to point at a file). `camera:<name>` is accepted by the `view` parser but has no effect on a shapes model, because shapes produce no glTF cameras. An unknown key or an unusable `height` or `view` value is a warning: the line is ignored and the model still renders.
 
 ## When a line is wrong
 
@@ -65,13 +66,13 @@ Every problem is reported with its line number inside the block or file, as `Lin
 A line with an error drops only its own part. Messages you can run into:
 
 - ``Unknown shape `boxx` — use box, cylinder, sphere or cone``
-- `Every part needs a name after the shape (letters, digits, `-`, `_`)`
+- ``Every part needs a name after the shape (letters, digits, `-`, `_`)``
 - `` `size` is missing ``, `` `size` of a box needs 1 or 3 numbers ``, `` `size` of a sphere needs 1 number (radius) ``, `` `size` of a cylinder needs 2 numbers (radius, height) ``, `` `size` values must be greater than 0 ``
 - `` `at` needs 3 numbers ``, `` `rot` needs 3 numbers ``
 - `` `color` needs a hex colour like #8b5a2b ``
 - `` `size` given twice `` (the same for any keyword)
 - ``Duplicate name `Leg-1` ``
-- `Header lines (`key: value`) must come before the first part`
+- ``Header lines (`key: value`) must come before the first part``
 
 Two things are warnings rather than errors, so the part still renders: ``Unknown word `foo` ignored`` (a stray word after the name, for example a trailing comment) and the unknown or unusable header values above.
 
@@ -98,7 +99,7 @@ Edit the file and the views update. The header keys do not apply to files (see a
 The command **Export shapes model as glTF** turns a model into an ordinary `.gltf` file that other tools can open.
 
 - **Source:** with the cursor inside a ```` ```shapes ```` block in the editor (Source mode or Live Preview), the command exports that block; otherwise it exports the active `.shapes` file. Anywhere else it tells you to place the cursor in a block or open a `.shapes` file.
-- **Target:** the attachment folder of the source note or file. The file name is the `title` from the header, or the note or file name without a title; characters that are not allowed in file names are replaced by `-`.
+- **Target:** the attachment folder of the source note or file. The file name is the `title` from the header, or the note or file name without a title; characters that are not allowed in file names are replaced by `-`, leading dots are stripped, the name is cut at 100 characters, and if nothing usable is left the name is `model`.
 - **Overwriting:** if a file with that name already exists, you are asked `Overwrite <path>?` first. It never creates a numbered copy and never overwrites without asking.
 - **Nothing to export:** if no line produces a part, the command says so and writes nothing.
 - **The export is not a source:** the file records where it came from (`asset.extras.generatedFrom`), but nothing links back. Edit the shapes text and export again; changes made to the `.gltf` do not flow back into the text.

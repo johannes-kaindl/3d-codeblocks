@@ -121,6 +121,11 @@ const SMOKE_NOTE_SPLIT = "_tdcb-gui-smoke-split.md";
 const SMOKE_NOTE_SHAPES = "_tdcb-gui-smoke-shapes.md";
 const SMOKE_MODEL_SHAPES = "_tdcb-smoke-model.shapes";
 const SHAPES_EXPORT_NAME = "Tisch.gltf";
+/** Wahr erst, wenn SH5 per Vorpruefung BEWIESEN hat, dass vor dem Export keine
+    `Tisch.gltf` im Vault lag — dann gehoert jede, die danach auftaucht, diesem Lauf.
+    Wird VOR dem Befehl gesetzt (nicht nach dem Poll), damit `cleanupState` (finally UND
+    SIGINT/SIGTERM) die Datei auch bei Abbruch, Timeout oder spaetem Schreiben entfernt. */
+let shapesExportOwned = false;
 const SHAPES_TABLE = [
   "title: Tisch",
   "box Platte size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b",
@@ -2201,6 +2206,7 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
   if (foreignExport !== null) {
     skipped("SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt", `${foreignExport} liegt schon im Vault — nicht überschrieben, nicht gemessen`);
   } else {
+    shapesExportOwned = true;
     await closeExtraLeaves(cdp);
     await cdp.evaluate(`
       const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_MODEL_SHAPES)});
@@ -2226,7 +2232,6 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
       `,
       15_000,
     );
-    if (exported) createdNotes.add(exported.path);
     record(
       "SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt",
       exported !== null && exported.generatedFrom === SMOKE_MODEL_SHAPES && exported.nodes === 5,
@@ -3373,6 +3378,16 @@ async function main(): Promise<void> {
           if (plugin) {
             Object.assign(plugin.settings, JSON.parse(${JSON.stringify(previousSettings)}));
             await plugin.saveSettings?.();
+          }
+          return true;
+        `)
+        .catch(() => undefined);
+    }
+    if (!keep && shapesExportOwned) {
+      await cdp
+        .evaluate(`
+          for (const f of app.vault.getFiles().filter((f) => f.name === ${JSON.stringify(SHAPES_EXPORT_NAME)})) {
+            await app.vault.delete(f);
           }
           return true;
         `)
