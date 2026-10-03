@@ -17,6 +17,12 @@ import type { TrackedView } from "./obsidian/tracked-view";
 import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
 import { GltfBlock } from "./obsidian/gltf-block";
 import { SettingsTab } from "./obsidian/settings";
+import {
+  canConvertBlockToFile,
+  canConvertFileToBlock,
+  convertBlockToFile,
+  convertFileToBlock,
+} from "./obsidian/shapes-convert";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
 import { SourceEditor } from "./obsidian/source-editor";
@@ -240,6 +246,38 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
           confirmAction(this.app, { message, confirmLabel: "Overwrite", cancelLabel: "Cancel" }),
         ),
     });
+
+    // Umwandeln ```shapes-Block <-> .shapes-Datei. checkCallback/Menue fragen nur billig und ohne
+    // Nebenwirkung; die Ablehnungsgruende meldet der Befehl selbst als Notice.
+    const convertEnv = () => ({ app: this.app, ports: obsidianWritePorts(this.app), notice: (m: string) => { new Notice(m); } });
+    this.addCommand({
+      id: "convert-shapes-block-to-file",
+      name: "Move shapes block into a .shapes file",
+      checkCallback: (checking) => {
+        if (!canConvertBlockToFile(this.app)) return false;
+        if (!checking) void convertBlockToFile(convertEnv());
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "convert-shapes-file-to-block",
+      name: "Move .shapes file into a code block",
+      checkCallback: (checking) => {
+        if (!canConvertFileToBlock(this.app)) return false;
+        if (!checking) void convertFileToBlock(convertEnv());
+        return true;
+      },
+    });
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu) => {
+        if (canConvertBlockToFile(this.app)) {
+          menu.addItem((item) => item.setTitle("Move shapes block into a file").setIcon("file-output").onClick(() => void convertBlockToFile(convertEnv())));
+        }
+        if (canConvertFileToBlock(this.app)) {
+          menu.addItem((item) => item.setTitle("Move .shapes file into a code block").setIcon("file-input").onClick(() => void convertFileToBlock(convertEnv())));
+        }
+      }),
+    );
 
     // Regenerierte Dateien (gleicher Pfad, neuer Inhalt) sollen ohne Neustart neu laden.
     this.registerEvent(
