@@ -260,7 +260,9 @@ function record(name: string, passed: boolean, detail: string): void {
 /** Was der Lauf bewusst NICHT misst. Steht im Protokoll, damit eine Lücke nicht wie
  *  Abdeckung aussieht — ein stillschweigend ausgelassener Punkt liest sich hinterher
  *  wie ein grüner. */
+let skippedCount = 0;
 function skipped(name: string, reason: string): void {
+  skippedCount++;
   console.log(`  – ${name} — übersprungen: ${reason}`);
 }
 
@@ -3272,20 +3274,16 @@ async function sectionClickRace(cdp: Cdp, model: string): Promise<void> {
 }
 
 // --- SH6–SH12. .shapes-Dateiansicht und Umwandeln -----------------------------
-// Eigener Abschnitt (`--section shapesfile`). Alles, was er anlegt, traegt das Praefix `_tdcb-`
-// im NAMEN — ausser dass `Block -> Datei` die neue Datei in den Attachment-Ordner legt, also
-// nicht an einen vorhersagbaren Pfad. Deshalb raeumt der Abschnitt vorher nach Namenspraefix
-// (ueberall im Vault) auf und beweist, dass nichts uebrig ist (CORE-TEST-21); erst dann
-// gehoert jede Datei mit diesem Praefix diesem Lauf (`shapesFileOwned`, wie `shapesExportOwned`).
-// `cleanupState` loescht nach demselben Praefix — auch bei SIGINT/SIGTERM.
+// Eigener Abschnitt (`--section shapesfile`). `Block -> Datei` legt seine Datei in den Attachment-
+// Ordner, also an einen nicht vorhersagbaren Pfad. Geloescht wird deshalb NUR, was auf einer
+// Weissliste steht: die exakten Namen der SMOKE_*-Konstanten unten plus das nummerierte
+// `_tdcb-smoke-moved( N).shapes`. Eine Datei dieses Namens als fremd zu beweisen, ist nicht
+// moeglich; der Besitznachweis ist die Treiber-Konvention, dass der Namensraum `_tdcb-smoke-` /
+// `_tdcb-gui-smoke-` diesem Treiber gehoert (wie bei allen anderen `_tdcb-`-Konstanten). Jede
+// Loeschung vor dem Lauf wird als Infozeile gedruckt; ausserhalb der Weissliste wird nichts angefasst.
+// Die Weissliste gilt gleich in der Vorab-Raeumung, am Abschnittsende und in `cleanupState`
+// (auch bei SIGINT/SIGTERM). `shapesFileOwned` wird erst gesetzt, wenn danach nichts mehr da ist.
 const SHAPES_VIEW_TYPE = "tdcb-shapes-file";
-const SHAPES_FILE_PREFIXES = [
-  "_tdcb-smoke-view",
-  "_tdcb-smoke-moved",
-  "_tdcb-smoke-live",
-  "_tdcb-gui-smoke-move",
-  "_tdcb-gui-smoke-live",
-];
 const SMOKE_VIEW_SHAPES = "_tdcb-smoke-view.shapes";
 const SMOKE_NOTE_MOVE = "_tdcb-gui-smoke-move.md";
 const SMOKE_NOTE_MOVE2 = "_tdcb-gui-smoke-move2.md";
@@ -3296,9 +3294,36 @@ const SMOKE_NOTE_LIVE = "_tdcb-gui-smoke-live.md";
 const MOVED_TITLE = "_tdcb-smoke-moved";
 const CMD_BLOCK_TO_FILE = `${PLUGIN_ID}:convert-shapes-block-to-file`;
 const CMD_FILE_TO_BLOCK = `${PLUGIN_ID}:convert-shapes-file-to-block`;
-/** Wahr erst, wenn der Abschnitt per Vorpruefung BEWIESEN hat, dass vor ihm keine Datei mit
-    diesen Namenspraefixen im Vault lag. Wird VOR dem ersten Anlegen gesetzt. */
+/** Wahr erst, wenn die Vorab-Raeumung gelaufen ist und nichts Weisslistenartiges mehr liegt. */
 let shapesFileOwned = false;
+/** Renderer-Schnipsel: `mine(file)` = steht auf der Weissliste (exakter Name oder nummerierter Umzugsname). */
+const SHAPES_WHITELIST = `
+  const exactNames = ${JSON.stringify([
+    SMOKE_VIEW_SHAPES,
+    SMOKE_NOTE_MOVE,
+    SMOKE_NOTE_MOVE2,
+    SMOKE_NOTE_MENU,
+    SMOKE_LIVE_SHAPES,
+    SMOKE_NOTE_LIVE,
+  ])};
+  const movedRe = new RegExp(${JSON.stringify(`^${MOVED_TITLE}( \\d+)?\\.shapes$`)});
+  const mine = (f) => !!f && (exactNames.includes(f.name) || movedRe.test(f.name));
+`;
+/** Renderer-Schnipsel: schliesst nur Ansichten, deren Datei auf der Weissliste steht, loescht die Dateien
+    und liefert deren Pfade. */
+const SHAPES_WIPE = `
+  ${SHAPES_WHITELIST}
+  for (const leaf of app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)})) {
+    if (mine(leaf.view.file)) leaf.detach();
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const wiped = [];
+  for (const f of app.vault.getFiles().filter(mine)) {
+    wiped.push(f.path);
+    await app.vault.delete(f);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+`;
 
 /** Renderer-Schnipsel: Blatt einer .shapes-Datei und der CodeMirror-View ihres Texteditors. */
 const SHAPES_LEAF = `
@@ -3384,17 +3409,15 @@ async function setCursorLine(cdp: Cdp, line: number): Promise<{ mode: string; li
 }
 
 async function sectionShapesFile(cdp: Cdp): Promise<void> {
-  // Zustand aus Vorlaeufen VOR dem Abschnitt zuruecksetzen: Ansichten schliessen (sonst schreibt ihr
-  // Schlusssichern eine geloeschte Datei neu), dann alles mit unseren Namenspraefixen loeschen und
-  // nachmessen. Bleibt etwas stehen, ist der Besitz nicht bewiesen — dann wird nichts gemessen.
-  const remaining = await cdp.evaluate<string[]>(`
-    const mine = (f) => ${JSON.stringify(SHAPES_FILE_PREFIXES)}.some((p) => f.name.startsWith(p));
-    app.workspace.detachLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)});
-    await new Promise((r) => setTimeout(r, 300));
-    for (const f of app.vault.getFiles().filter(mine)) await app.vault.delete(f);
-    await new Promise((r) => setTimeout(r, 300));
-    return app.vault.getFiles().filter(mine).map((f) => f.path);
+  // Zustand aus Vorlaeufen VOR dem Abschnitt zuruecksetzen: Ansichten der Weisslisten-Dateien schliessen
+  // (sonst schreibt ihr Schlusssichern eine geloeschte Datei neu), die Weisslisten-Dateien loeschen und
+  // nachmessen. Jede Loeschung wird gedruckt. Bleibt etwas stehen, wird nichts gemessen.
+  const reset = await cdp.evaluate<{ wiped: string[]; remaining: string[] }>(`
+    ${SHAPES_WIPE}
+    return { wiped, remaining: app.vault.getFiles().filter(mine).map((f) => f.path) };
   `);
+  for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
+  const remaining = reset.remaining;
   if (remaining.length > 0) {
     for (const name of ["SH6", "SH7", "SH8", "SH9", "SH10", "SH11", "SH12"]) {
       skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
@@ -3598,6 +3621,19 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
         const get = (p) => app.vault.read(app.vault.getAbstractFileByPath(p));
         return { move: await get(${JSON.stringify(SMOKE_NOTE_MOVE)}), second: await get(${JSON.stringify(SMOKE_NOTE_MOVE2)}), file: await get(${JSON.stringify(movedPath)}) };
       `);
+      // Papierkorb: nur messbar, wenn Obsidian lokal in `.trash` ablegt; sonst (System-Papierkorb,
+      // endgueltig) laesst sich der Verbleib von hier nicht pruefen und bleibt ungemessen.
+      const trashProbe = (base: string): string => `
+        const opt = app.vault.getConfig("trashOption");
+        let count = 0;
+        if (await app.vault.adapter.exists(".trash")) {
+          const l = await app.vault.adapter.list(".trash");
+          count = l.files.filter((p) => p.split("/").pop().startsWith(${JSON.stringify(base)})).length;
+        }
+        return { opt, count };
+      `;
+      const movedBase = (movedPath.split("/").pop() ?? "").replace(/\.shapes$/, "");
+      const trashBefore = await cdp.evaluate<{ opt: string; count: number }>(trashProbe(movedBase));
       const cursorRefuse = await setCursorLine(cdp, 3);
       await clearNotices(cdp);
       const ranRefuse = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});`);
@@ -3650,12 +3686,15 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
         (s) => s.note.includes("```shapes") && !s.fileExists,
         10_000,
       );
+      const trashAfter = await cdp.evaluate<{ opt: string; count: number }>(trashProbe(movedBase));
+      const trashMeasurable = trashAfter.opt === "local";
+      const trashOk = !trashMeasurable || trashAfter.count > trashBefore.count;
       const notice10 = await notices(cdp);
       const expectedNote = [noteHead, "", `${fence}shapes`, movedBody, fence, ""].join("\n");
       record(
         "SH10. Datei → Block: abgelehnt bei zwei Verweisen, durchgeführt bei einem",
-        refusalOk && ranDone === true && done10.reached && done10.state?.sameName === 0 && done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, ""),
-        `Ablehnung: Meldung ${JSON.stringify((refused.state?.notice ?? "keine").slice(0, 70))} · Datei blieb: ${afterRefuse.fileExists} · Notizen unverändert: ${afterRefuse.move === baseline.move && afterRefuse.second === baseline.second} · Umzug: Datei weg ${done10.state ? !done10.state.fileExists : "?"} · Dateien gleichen Namens ${done10.state?.sameName ?? "?"} · Notiz wieder mit shapes-Block und Originaltext: ${done10.state ? done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, "") : "?"} · Meldung: ${notice10.slice(0, 60)}`,
+        refusalOk && ranDone === true && done10.reached && done10.state?.sameName === 0 && trashOk && done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, ""),
+        `Ablehnung: Meldung ${JSON.stringify((refused.state?.notice ?? "keine").slice(0, 70))} · Datei blieb: ${afterRefuse.fileExists} · Notizen unverändert: ${afterRefuse.move === baseline.move && afterRefuse.second === baseline.second} · Umzug: Datei weg ${done10.state ? !done10.state.fileExists : "?"} · Dateien gleichen Namens ${done10.state?.sameName ?? "?"} · Papierkorb (${trashAfter.opt}): ${trashMeasurable ? `Kopie in .trash ${trashBefore.count} → ${trashAfter.count}` : "Verbleib von hier nicht messbar, nur „nicht im Vault“ geprüft"} · Notiz wieder mit shapes-Block und Originaltext: ${done10.state ? done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, "") : "?"} · Meldung: ${notice10.slice(0, 60)}`,
       );
     }
 
@@ -3684,53 +3723,69 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     } else {
       await clearNotices(cdp);
       // Tippen, Platte pruefen und Befehl in EINEM Renderer-Aufruf: weit innerhalb der 2 s
-      // Speicherverzoegerung. Steht die Zeile schon auf der Platte, wurde der Fall nicht erzeugt.
-      const fired = await cdp.evaluate<{ method: string; pending: boolean; ran: boolean; ms: number }>(`
-        ${SHAPES_LEAF}
-        const t0 = Date.now();
-        const leaf = leafFor(${JSON.stringify(SMOKE_LIVE_SHAPES)});
-        const method = typeAtEnd(leaf, ${JSON.stringify(`\n${liveLine}`)});
-        const disk = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}));
-        const pending = !disk.includes(${JSON.stringify(liveLine)}) && leaf.view.getViewData().includes(${JSON.stringify(liveLine)});
-        const ran = app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});
-        return { method, pending, ran, ms: Date.now() - t0 };
-      `);
-      const eleven = await pollState<{ note: string; fileExists: boolean; views: number }>(
-        cdp,
-        `
+      // Speicherverzoegerung. Steht die Zeile schon auf der Platte, wurde der Fall nicht erzeugt;
+      // dann laeuft der Befehl NICHT, sondern es wird einmal neu getippt (nach dem Durchschreiben).
+      const typedLines: string[] = [];
+      const attempt = async (line: string): Promise<{ method: string; pending: boolean; ran: boolean; ms: number }> => {
+        typedLines.push(line);
+        return cdp.evaluate(`
+          ${SHAPES_LEAF}
+          const t0 = Date.now();
+          const leaf = leafFor(${JSON.stringify(SMOKE_LIVE_SHAPES)});
+          const method = typeAtEnd(leaf, ${JSON.stringify(`\n${line}`)});
+          const disk = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}));
+          const pending = !disk.includes(${JSON.stringify(line)}) && leaf.view.getViewData().includes(${JSON.stringify(line)});
+          const ran = pending ? app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)}) : false;
+          return { method, pending, ran, ms: Date.now() - t0 };
+        `);
+      };
+      let fired = await attempt(liveLine);
+      if (!fired.pending) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        fired = await attempt(`${liveLine.replace("Frisch", "Frisch2")}`);
+      }
+      if (!fired.pending) {
+        const text = `der Ausgangsfall (getippt, noch nicht gespeichert) entstand auch im zweiten Versuch nicht: Eingabe per ${fired.method}, nach ${fired.ms} ms schon auf der Platte oder nicht im Ansichtspuffer`;
+        if (fired.method === "dispatch") {
+          record("SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts", false, `${text} — der Editor nahm die Eingabe an (CM-View erreichbar), der Zustand ließ sich trotzdem nicht erzeugen`);
+        } else {
+          skipped("SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts", `${text} (Rückfall-Eingabe per ${fired.method}, nicht über die CM-View)`);
+        }
+      } else {
+        const fileState = `
           const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_LIVE)}));
           return {
             note,
             fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}),
+            onFs: await app.vault.adapter.exists(${JSON.stringify(SMOKE_LIVE_SHAPES)}),
             views: app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).length,
           };
-        `,
-        (s) => s.note.includes("```shapes") && !s.fileExists,
-        10_000,
-      );
-      // Wiederauferstehung: ein veralteter Puffer koennte die Datei nach dem Papierkorb neu anlegen.
-      // Ueber 3,5 s alle 250 ms messen; EIN Auftauchen genuegt fuer Rot.
-      let reappeared = false;
-      for (let i = 0; i < 14 && eleven.reached; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        const back = await cdp.evaluate<boolean>(`
-          return !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}) ||
-            app.vault.getFiles().some((f) => f.name === ${JSON.stringify(SMOKE_LIVE_SHAPES)});
-        `);
-        if (back) reappeared = true;
-      }
-      const notice11 = await notices(cdp);
-      if (!fired.pending) {
-        skipped(
-          "SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts",
-          `der Ausgangsfall (getippt, noch nicht gespeichert) entstand nicht: Eingabe per ${fired.method}, nach ${fired.ms} ms schon auf der Platte oder nicht im Ansichtspuffer`,
+        `;
+        const eleven = await pollState<{ note: string; fileExists: boolean; onFs: boolean; views: number }>(
+          cdp,
+          fileState,
+          (st) => st.note.includes("```shapes") && !st.fileExists && !st.onFs,
+          10_000,
         );
-      } else {
-        const block = eleven.state?.note.includes(`${fence}shapes\n${SHAPES_TABLE}\n${liveLine}\n${fence}`) ?? false;
+        // Wiederauferstehung: ein veralteter Puffer koennte die Datei nach dem Papierkorb neu anlegen.
+        // Ueber 3,5 s alle 250 ms messen, Index UND Dateisystem; EIN Auftauchen genuegt fuer Rot.
+        // Der Poll beginnt erst nach dem Befehl (und nach dem erreichten Endzustand).
+        let reappeared = false;
+        for (let i = 0; i < 14 && eleven.reached; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const back = await cdp.evaluate<boolean>(`
+            return !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}) ||
+              app.vault.getFiles().some((f) => f.name === ${JSON.stringify(SMOKE_LIVE_SHAPES)}) ||
+              (await app.vault.adapter.exists(${JSON.stringify(SMOKE_LIVE_SHAPES)}));
+          `);
+          if (back) reappeared = true;
+        }
+        const notice11 = await notices(cdp);
+        const block = eleven.state?.note.includes(`${fence}shapes\n${[SHAPES_TABLE, ...typedLines].join("\n")}\n${fence}`) ?? false;
         record(
           "SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts",
-          fired.ran === true && eleven.reached && block && eleven.state?.fileExists === false && eleven.state.views === 0 && !reappeared,
-          `Eingabe per ${fired.method}, Befehl ${fired.ms} ms nach dem Tippen (Zeile noch nicht auf der Platte) · Befehl lief: ${fired.ran} · Notiz trägt Block samt frischer Zeile: ${block} · Datei weg: ${eleven.state ? !eleven.state.fileExists : "?"} · offene Ansichten danach: ${eleven.state?.views ?? "?"} · Datei binnen 3,5 s wieder aufgetaucht: ${reappeared} · Meldung: ${notice11.slice(0, 70)}`,
+          fired.ran === true && eleven.reached && block && eleven.state?.fileExists === false && eleven.state.onFs === false && eleven.state.views === 0 && !reappeared,
+          `${typedLines.length} Versuch(e) bis zum ausstehenden Speichern · Eingabe per ${fired.method}, Befehl ${fired.ms} ms nach dem Tippen (Zeile noch nicht auf der Platte) · Befehl lief: ${fired.ran} · Notiz trägt Block samt frischer Zeile(n): ${block} · Datei weg (Index/Dateisystem): ${eleven.state ? `${!eleven.state.fileExists}/${!eleven.state.onFs}` : "?"} · offene Ansichten danach: ${eleven.state?.views ?? "?"} · Datei binnen 3,5 s wieder aufgetaucht (Index oder Dateisystem): ${reappeared} · Meldung: ${notice11.slice(0, 70)}`,
         );
       }
     }
@@ -3745,27 +3800,51 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       "source",
     );
     await closeExtraLeaves(cdp);
-    // Zeile 0 = Ueberschrift, 3 = im Block, 7 = Embed-Zeile.
-    const probe = async (line: number): Promise<{ block: boolean; file: boolean; items: { title: string; icon: string }[] } | null> => {
+    // Zeile 0 = Ueberschrift, 3 = im Block, 7 = Embed-Zeile. Je Ort: Verfuegbarkeit laut
+    // checkCallback UND das echte Kontextmenue — ein `contextmenu`-Ereignis an der Cursorposition,
+    // gelesen wird das DOM (`.menu .menu-item`, Titel, Icon-<svg>). Ein Menue, das gar nicht
+    // aufgeht (kein einziger Eintrag), ist KEINE Messung von „kein Eintrag“.
+    interface MenuProbe {
+      block: boolean;
+      file: boolean;
+      opened: boolean;
+      titles: string[];
+      iconOf: Record<string, boolean>;
+    }
+    const probe = async (line: number): Promise<MenuProbe | null> => {
       const placed = await setCursorLine(cdp, line);
       if (!placed) return null;
-      return cdp.evaluate(`
+      const result = await cdp.evaluate<MenuProbe>(`
         const check = (id) => app.commands.commands[id].checkCallback(true) === true;
-        const items = [];
-        const chain = (target) => new Proxy(target, { get: (t, k) => (k in t ? t[k] : () => chain(t)) });
-        const menu = chain({
-          addItem(cb) {
-            const item = { title: "", icon: "" };
-            cb(chain({ setTitle(x) { item.title = x; return this; }, setIcon(x) { item.icon = x; return this; }, onClick() { return this; } }));
-            items.push(item);
-            return this;
-          },
-        });
         const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit).view;
-        app.workspace.trigger("editor-menu", menu, view.editor, view);
-        const ours = items.filter((i) => i.title.startsWith("Move "));
-        return { block: check(${JSON.stringify(CMD_BLOCK_TO_FILE)}), file: check(${JSON.stringify(CMD_FILE_TO_BLOCK)}), items: ours };
+        const cm = view.editor.cm;
+        const out = { block: check(${JSON.stringify(CMD_BLOCK_TO_FILE)}), file: check(${JSON.stringify(CMD_FILE_TO_BLOCK)}), opened: false, titles: [], iconOf: {} };
+        const pos = view.editor.posToOffset(view.editor.getCursor());
+        const rect = cm.coordsAtPos(pos);
+        if (!rect) return out;
+        const x = rect.left + 4, y = (rect.top + rect.bottom) / 2;
+        const target = document.elementFromPoint(x, y) ?? cm.contentDOM;
+        target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline && document.querySelectorAll(".menu .menu-item").length === 0) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        await new Promise((r) => setTimeout(r, 200));
+        const items = [...document.querySelectorAll(".menu .menu-item")];
+        out.opened = items.length > 0;
+        for (const item of items) {
+          const title = item.querySelector(".menu-item-title")?.textContent?.trim() ?? "";
+          out.titles.push(title);
+          out.iconOf[title] = !!item.querySelector(".menu-item-icon svg");
+        }
+        // Menue schliessen: Escape, und zur Sicherheit wegklicken.
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await new Promise((r) => setTimeout(r, 200));
+        if (document.querySelector(".menu")) document.body.click();
+        await new Promise((r) => setTimeout(r, 200));
+        return out;
       `);
+      return result;
     };
     const registered = await cdp.evaluate<{ block: string; file: string }>(`
       return {
@@ -3778,39 +3857,49 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     const onEmbed = await probe(7);
     const titleBlock = "Move shapes block into a file";
     const titleFile = "Move .shapes file into a code block";
-    const only = (s: typeof inBlock, title: string, icon: string): boolean =>
-      s !== null && s.items.length === 1 && s.items[0]?.title === title && s.items[0]?.icon === icon;
-    const none = (s: typeof inBlock): boolean => s !== null && s.items.length === 0;
+    const count = (s: MenuProbe | null, t: string): number => s?.titles.filter((x) => x === t).length ?? -1;
     const gatingOk =
       onHeading !== null && inBlock !== null && onEmbed !== null &&
       !onHeading.block && !onHeading.file &&
       inBlock.block && !inBlock.file &&
       !onEmbed.block && onEmbed.file;
-    const menuOk = none(onHeading) && only(inBlock, titleBlock, "file-output") && only(onEmbed, titleFile, "file-input");
+    const probes = [onHeading, inBlock, onEmbed];
+    const menuMeasured = probes.every((p) => p !== null && p.opened);
+    const menuOk =
+      menuMeasured &&
+      count(onHeading, titleBlock) === 0 && count(onHeading, titleFile) === 0 &&
+      count(inBlock, titleBlock) === 1 && inBlock?.iconOf[titleBlock] === true && count(inBlock, titleFile) === 0 &&
+      count(onEmbed, titleFile) === 1 && onEmbed?.iconOf[titleFile] === true && count(onEmbed, titleBlock) === 0;
     const namesOk =
       registered.block.endsWith("Move shapes block into a .shapes file") && registered.file.endsWith("Move .shapes file into a code block");
-
-    // Icons: dieselbe Obsidian-API, die das Menue nutzt. Negativprobe mit erfundenem Namen — liefert
-    // auch der ein <svg>, misst die Probe nichts.
-    const icons = await cdp.evaluate<{ available: boolean; out?: boolean; inn?: boolean; bogus?: boolean; error?: string }>(`
-      try {
-        const ob = require("obsidian");
-        if (typeof ob.setIcon !== "function") return { available: false, error: "obsidian.setIcon fehlt" };
-        const has = (name) => { const el = document.createElement("div"); ob.setIcon(el, name); return !!el.querySelector("svg"); };
-        return { available: true, out: has("file-output"), inn: has("file-input"), bogus: has("tdcb-no-such-icon") };
-      } catch (e) {
-        return { available: false, error: String(e) };
-      }
-    `);
-    record(
-      "SH12. Befehle sind registriert, nur am richtigen Ort verfügbar, Menüeinträge tragen Icons",
-      namesOk && gatingOk && menuOk && (!icons.available || (icons.out === true && icons.inn === true && icons.bogus === false)),
-      `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file} · Menüeinträge ${onHeading?.items.length ?? "?"}|${JSON.stringify(inBlock?.items ?? [])}|${JSON.stringify(onEmbed?.items ?? [])} · Icons: ${icons.available ? `file-output ${icons.out}, file-input ${icons.inn}, erfundener Name ${icons.bogus} (erwartet true/true/false)` : "nicht geprüft"}`,
-    );
-    if (!icons.available) {
-      skipped("SH12b. Icons file-output/file-input existieren", `require("obsidian") im Renderer nicht verfügbar (${icons.error ?? "?"}) — nur der Menü-Teil ist gemessen`);
+    const describe = (s: MenuProbe | null): string =>
+      s ? `${s.opened ? "Menü offen" : "Menü NICHT offen"}: Block-Eintrag ${count(s, titleBlock)}${s.iconOf[titleBlock] ? " mit svg" : ""}, Datei-Eintrag ${count(s, titleFile)}${s.iconOf[titleFile] ? " mit svg" : ""}` : "Cursor nicht setzbar";
+    if (menuMeasured) {
+      record(
+        "SH12. Befehle sind registriert, nur am richtigen Ort verfügbar, das echte Kontextmenü trägt die Einträge mit Icon",
+        namesOk && gatingOk && menuOk,
+        `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file} · Kontextmenü Überschrift [${describe(onHeading)}] · im Block [${describe(inBlock)}] · auf Embed [${describe(onEmbed)}]`,
+      );
+    } else {
+      record(
+        "SH12. Befehle sind registriert und nur am richtigen Ort verfügbar",
+        namesOk && gatingOk,
+        `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file}`,
+      );
+      skipped(
+        "SH12b. Kontextmenü-Einträge mit Icon",
+        `das Kontextmenü ging per contextmenu-Ereignis nicht auf (Überschrift [${describe(onHeading)}], im Block [${describe(inBlock)}], auf Embed [${describe(onEmbed)}]) — nur Befehle und Verfügbarkeit gemessen`,
+      );
     }
   } finally {
+    // Eigene Dateien am Abschnittsende wegraeumen (cleanupState bleibt das Netz): sie sollen nicht
+    // durch `edit`, `cameras` und `clickrace` leben.
+    await cdp
+      .evaluate(`
+        ${SHAPES_WIPE}
+        return true;
+      `)
+      .catch(() => undefined);
     await cdp
       .evaluate(`
         if (${sidebars.left}) app.workspace.leftSplit.expand();
@@ -3935,15 +4024,11 @@ async function main(): Promise<void> {
         .catch(() => undefined);
     }
     if (!keep && shapesFileOwned) {
-      // Ansichten zuerst schliessen: ihr Schlusssichern wuerde eine geloeschte Datei neu anlegen.
+      // Nur Weissliste (siehe sectionShapesFile); Ansichten zuerst schliessen, sonst legt ihr
+      // Schlusssichern eine geloeschte Datei neu an.
       await cdp
         .evaluate(`
-          app.workspace.detachLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)});
-          await new Promise((r) => setTimeout(r, 300));
-          const prefixes = ${JSON.stringify(SHAPES_FILE_PREFIXES)};
-          for (const f of app.vault.getFiles().filter((f) => prefixes.some((p) => f.name.startsWith(p)))) {
-            await app.vault.delete(f);
-          }
+          ${SHAPES_WIPE}
           return true;
         `)
         .catch(() => undefined);
@@ -4173,6 +4258,7 @@ async function main(): Promise<void> {
 
   const failed = results.filter((check) => !check.passed);
   console.log(`${results.length - failed.length}/${results.length} grün`);
+  console.log(`Bilanz: ${results.length - failed.length} grün · ${failed.length} rot · ${skippedCount} übersprungen`);
   if (failed.length > 0) {
     console.log("Rot:");
     for (const check of failed) console.log(`  - ${check.name}: ${check.detail}`);
