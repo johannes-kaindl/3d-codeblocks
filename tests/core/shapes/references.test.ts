@@ -356,3 +356,39 @@ describe("unaccountedMentions", () => {
     expect(un("Ein Tisch.\n![[anderes.glb]]\ntisch")).toEqual([]);
   });
 });
+
+describe("unaccountedMentions: fix round 4", () => {
+  const net = (text: string, target = TARGET, res: (l: string) => string | null = resolve) => {
+    const notes = [{ path: "a.md", text }];
+    return unaccountedMentions(notes, target, findModelReferences(notes, target, res));
+  };
+
+  it("matches NFC against NFD names in both directions", () => {
+    const nfc = "M\u00fcller.shapes";
+    const nfd = "Mu\u0308ller.shapes";
+    expect(net(`siehe ${nfd}`, `Ordner/${nfc}`)).toHaveLength(1);
+    expect(net(`siehe ${nfc}`, `Ordner/${nfd}`)).toHaveLength(1);
+  });
+  it("never throws on a lone surrogate and still finds a literal mention", () => {
+    expect(() => net("x", "Ordner/\ud800.shapes")).not.toThrow();
+    expect(net("siehe \ud800.shapes", "Ordner/\ud800.shapes")).toHaveLength(1);
+  });
+  it("catches a fully percent-encoded dot, any case", () => {
+    expect(net("![](tisch%2Eshapes)", TARGET, () => null)).toHaveLength(1);
+    expect(net("![](TISCH%2eSHAPES)", TARGET, () => null)).toHaveLength(1);
+  });
+  it("reports a covered line with more mentions than references", () => {
+    expect(net('![[tisch.shapes]] <img src="tisch.shapes">')).toHaveLength(1);
+    expect(net("![[tisch.shapes]] [x](tisch.shapes)")).toHaveLength(1);
+    expect(net("![[tisch.shapes]]")).toEqual([]);
+    expect(net("![[tisch.shapes]] ![[tisch.shapes]]")).toEqual([]);
+  });
+  it("counts one mention once even when two needle variants overlap", () => {
+    const target = "Ordner/my table.shapes";
+    expect(net("![](my%20table.shapes)", target, () => target)).toEqual([]);
+    expect(net("![[my table.shapes]]", target, () => target)).toEqual([]);
+  });
+  it("regression: a note with exactly one embed yields an empty net", () => {
+    expect(net("Text\n\n![[tisch.shapes]]\n\nMehr Text")).toEqual([]);
+  });
+});

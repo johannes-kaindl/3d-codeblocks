@@ -239,16 +239,56 @@ export function unaccountedMentions(
   targetPath: string,
   refs: readonly ModelReference[],
 ): { notePath: string; line: number; text: string }[] {
-  const base = targetPath.slice(targetPath.lastIndexOf("/") + 1).toLowerCase();
+  const fold = (t: string) => t.normalize("NFC").toLowerCase();
+  const base = fold(targetPath.slice(targetPath.lastIndexOf("/") + 1));
   if (base === "") return [];
-  const needles = [...new Set([base, encodeURIComponent(base).toLowerCase(), base.replace(/ /g, "%20")])];
+  const needleSet = new Set<string>();
+  const addEncoded = (name: string) => {
+    needleSet.add(name);
+    needleSet.add(name.replace(/\./g, "%2e"));
+    try {
+      const enc = encodeURIComponent(name).toLowerCase();
+      needleSet.add(enc);
+      needleSet.add(enc.replace(/\./g, "%2e"));
+    } catch {
+      // einzelnes Surrogat: URIError — diese Variante entfällt, das Netz darf nie werfen
+    }
+    needleSet.add(name.replace(/ /g, "%20"));
+  };
+  addEncoded(base);
+  addEncoded(fold(targetPath.slice(targetPath.lastIndexOf("/") + 1).normalize("NFD")));
+  const needles = [...needleSet].filter((n) => n !== "");
+  /** Anzahl der Erwähnungen: Treffer aller Varianten, überlappende Treffer (z. B. zwei Schreibweisen
+   *  derselben Erwähnung) werden zu einem Intervall verschmolzen und nur einmal gezählt. Die Indizes
+   *  stammen aus der gefalteten Kopie und werden nur zum Zählen benutzt, nie zum Schneiden des Originals. */
+  const countMentions = (lower: string): number => {
+    const spans: [number, number][] = [];
+    for (const n of needles) {
+      for (let at = lower.indexOf(n); at !== -1; at = lower.indexOf(n, at + 1)) spans.push([at, at + n.length]);
+    }
+    spans.sort((x, y) => x[0] - y[0]);
+    let count = 0;
+    let end = -1;
+    for (const [from, to] of spans) {
+      if (from >= end) count += 1;
+      end = Math.max(end, to);
+    }
+    return count;
+  };
   const out: { notePath: string; line: number; text: string }[] = [];
   for (const note of notes) {
+    const mine = refs.filter((r) => r.notePath === note.path);
     note.text.split(/\r?\n/).forEach((text, line) => {
-      const lower = text.toLowerCase();
-      if (!needles.some((n) => lower.includes(n))) return;
-      if (refs.some((r) => r.notePath === note.path && line >= r.from && line <= r.to)) return;
-      out.push({ notePath: note.path, line, text });
+      const mentions = countMentions(fold(text));
+      if (mentions === 0) return;
+      // Erlaubt: je Embed/Link dieser Zeile eine Erwähnung, je Block, der die Zeile überdeckt, eine.
+      let allowed = 0;
+      for (const r of mine) {
+        if (r.kind === "block") {
+          if (line >= r.from && line <= r.to) allowed += 1;
+        } else if (r.from === line) allowed += 1;
+      }
+      if (mentions > allowed) out.push({ notePath: note.path, line, text });
     });
   }
   return out;
