@@ -21,7 +21,9 @@ export function formatPartLine(part: ShapeDraft): string {
 
 export function formatShapes(header: { title?: string; height?: number }, parts: readonly ShapeDraft[]): string {
   const lines: string[] = [];
-  if (header.title !== undefined && header.title !== "") lines.push(`title: ${header.title}`);
+  // Ein Titel darf nie Zeilen einschleusen: CR/LF raus, dann trimmen.
+  const title = header.title?.replace(/[\r\n]+/g, " ").trim();
+  if (title !== undefined && title !== "") lines.push(`title: ${title}`);
   if (header.height !== undefined) lines.push(`height: ${formatNumber(header.height)}`);
   for (const part of parts) lines.push(formatPartLine(part));
   return lines.join("\n");

@@ -3,6 +3,7 @@
 // wird nur nach Rückfrage überschrieben — nie still, und nie als "Tisch 1.gltf"-Kette.
 import { MarkdownView, Notice, TFile, type App } from "obsidian";
 import { buildGltfExport, exportBaseName } from "../core/shapes/export";
+import { capList } from "../core/shapes/convert";
 import { findFenceAt } from "../core/shapes/fence";
 
 interface Source {
@@ -32,6 +33,13 @@ async function findSource(app: App): Promise<Source | null> {
   return null;
 }
 
+// Zeilen, die der Export weggelassen oder nur teilweise uebernommen hat, gehoeren in die
+// Erfolgsmeldung — sonst haelt man ein unvollstaendiges Modell fuer das ganze.
+function exportedNotice(path: string, notes: string[]): string {
+  if (notes.length === 0) return `Exported to ${path}`;
+  return `Exported to ${path} \u2014 ${notes.length} problem(s) ignored: ${capList(notes, 3).join("; ")}`;
+}
+
 export async function exportShapesAsGltf(app: App, confirm: (message: string) => Promise<boolean>): Promise<void> {
   try {
     await runExport(app, confirm);
@@ -48,7 +56,7 @@ async function runExport(app: App, confirm: (message: string) => Promise<boolean
   }
   const built = buildGltfExport(source.text, source.generatedFrom);
   if (!built.ok) {
-    new Notice(`Nothing to export: ${built.messages.join(" ")}`);
+    new Notice(`Nothing to export: ${capList(built.messages, 5).join(" ")}`);
     return;
   }
 
@@ -76,9 +84,9 @@ async function runExport(app: App, confirm: (message: string) => Promise<boolean
   if (target instanceof TFile) {
     if (!(await confirm(`Overwrite ${target.path}?`))) return;
     await app.vault.modify(target, built.json);
-    new Notice(`Exported to ${target.path}`);
+    new Notice(exportedNotice(target.path, built.notes));
     return;
   }
   await app.vault.create(wanted, built.json);
-  new Notice(`Exported to ${wanted}`);
+  new Notice(exportedNotice(wanted, built.notes));
 }

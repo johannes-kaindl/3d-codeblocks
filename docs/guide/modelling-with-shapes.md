@@ -57,7 +57,7 @@ Lines of the form `key: value` before the first part are header lines.
 
 Known limit: `title`, `height` and `view` only take effect in the inline ```` ```shapes ```` block. In a `.shapes` file the viewer ignores them (the title is still used to name an export).
 
-A header line after the first part is an error, as is `file:` (a shapes block holds its parts itself; use a `3d` block to point at a file). `camera:<name>` is accepted by the `view` parser but has no effect on a shapes model, because shapes produce no glTF cameras. An unknown key or an unusable `height` or `view` value is a warning: the line is ignored and the model still renders.
+A header line after the first part is an error, as is `file:` (a shapes block holds its parts itself; use a `3d` block to point at a file). `camera:<name>` is accepted by the `view` parser, but a shapes model has no glTF cameras, so the viewer keeps its default view and shows a note under the model: ``unknown camera `<name>` — this file has no cameras``. An unknown key or an unusable `height` or `view` value is a warning: the line is ignored and the model still renders.
 
 ## When a line is wrong
 
@@ -101,5 +101,6 @@ The command **Export shapes model as glTF** turns a model into an ordinary `.glt
 - **Source:** with the cursor inside a ```` ```shapes ```` block in the editor (Source mode or Live Preview), the command exports that block; otherwise it exports the active `.shapes` file. Anywhere else it tells you to place the cursor in a block or open a `.shapes` file.
 - **Target:** the attachment folder of the source note or file. The file name is the `title` from the header, or the note or file name without a title; characters that are not allowed in file names are replaced by `-`, leading dots are stripped, the name is cut at 100 characters, and if nothing usable is left the name is `model`.
 - **Overwriting:** if a file with that name already exists, you are asked `Overwrite <path>?` first. It never creates a numbered copy and never overwrites without asking.
+- **Lines that were left out:** a line with a problem is not exported, just as it is not drawn. The confirmation says so, for example `Exported to Attachments/Tisch.gltf — 1 problem(s) ignored: Line 7: …`; at most three are listed, followed by `… and N more`.
 - **Nothing to export:** if no line produces a part, the command says so and writes nothing.
 - **The export is not a source:** the file records where it came from (`asset.extras.generatedFrom`), but nothing links back. Edit the shapes text and export again; changes made to the `.gltf` do not flow back into the text.

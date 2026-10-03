@@ -166,7 +166,7 @@ export class ViewerHost {
     try {
       bytes = await source.provideBytes();
     } catch (error) {
-      this.show({ kind: "load-failed", detail: describeError(error) });
+      this.failBeforeMount({ kind: "load-failed", detail: describeError(error) });
       return;
     }
     if (this.disposed) return;
@@ -179,7 +179,11 @@ export class ViewerHost {
     if (source.format === "shapes") {
       const converted = convertShapesBytes(bytes);
       if (!converted.ok) {
-        this.show({ kind: "invalid-shapes", messages: converted.messages });
+        this.failBeforeMount(
+          converted.empty
+            ? { kind: "empty-shapes", hint: converted.messages.join(" ") }
+            : { kind: "invalid-shapes", messages: converted.messages },
+        );
         return;
       }
       bytes = converted.bytes;
@@ -190,12 +194,12 @@ export class ViewerHost {
     if (mountSource.inspectContainer) {
       const inspection = inspectGlb(bytes);
       if (!inspection.valid) {
-        this.show({ kind: "invalid-file" });
+        this.failBeforeMount({ kind: "invalid-file" });
         return;
       }
       const blocked = unsupportedRequired(inspection);
       if (blocked.length > 0) {
-        this.show({ kind: "compressed-gltf", extensions: blocked });
+        this.failBeforeMount({ kind: "compressed-gltf", extensions: blocked });
         return;
       }
     }
@@ -350,6 +354,16 @@ export class ViewerHost {
     // Erst NACH `render`, weil `touch` auf einer noch nicht registrierten id ein No-op
     // ist; ohne lebenden Viewport (Ladefehler) wird nichts gemeldet.
     if (!this.disposed && this.viewport) this.deps.budget.touch(this.id);
+  }
+
+  /** Fehler VOR dem Mounten: ein noch lebender Viewport des Vorgaengers gehoert nicht
+      mehr zur Anzeige. Ohne Freigabe haelt er versteckt seinen WebGL-Kontext, bleibt im
+      Budget registriert, und eine spaetere Eviction ersetzt die Fehlermeldung durch ein
+      Standbild des ALTEN Modells. */
+  private failBeforeMount(state: ViewerState): void {
+    this.releaseViewport();
+    this.deps.budget.unregister(this.id);
+    this.show(state);
   }
 
   private releaseViewport(): void {

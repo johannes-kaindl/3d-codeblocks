@@ -27,8 +27,8 @@ export function exportBaseName(header: { title?: string }, fallback: string): st
 export function buildGltfExport(
   text: string,
   generatedFrom: string,
-): { ok: true; json: string; title?: string } | { ok: false; messages: string[] } {
+): { ok: true; json: string; title?: string; notes: string[] } | { ok: false; messages: string[] } {
   const result = convertShapesText(text, { generatedFrom });
   if (!result.ok) return { ok: false, messages: result.messages };
-  return { ok: true, json: JSON.stringify(result.gltf), title: result.parsed.header.title };
+  return { ok: true, json: JSON.stringify(result.gltf), title: result.parsed.header.title, notes: result.notes };
 }

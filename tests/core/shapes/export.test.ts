@@ -36,6 +36,13 @@ describe("buildGltfExport", () => {
     expect(doc.asset.extras.generatedFrom).toBe("Möbel.md (shapes code block)");
     expect(r.title).toBe("Tisch");
   });
+  it("returns the notes of lines that were dropped", () => {
+    const r = buildGltfExport("box A size 1\nbox B size 1 2", "x");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.notes).toEqual(["Line 2: `size` of a box needs 1 or 3 numbers"]);
+    expect(buildGltfExport("box A size 1", "x")).toMatchObject({ ok: true, notes: [] });
+  });
   it("refuses text without a valid part", () => {
     expect(buildGltfExport("nothing", "x")).toMatchObject({ ok: false });
   });

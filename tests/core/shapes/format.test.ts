@@ -111,3 +111,15 @@ describe("partsFromLlm", () => {
     expect(reparsed.parts.length).toBe(parts.length);
   });
 });
+
+describe("formatShapes title safety", () => {
+  it("never lets a title inject extra lines", () => {
+    const text = formatShapes({ title: "X\nbox Evil size 1\r\n" }, [
+      { kind: "box", name: "A", size: [1, 1, 1], at: [0, 0, 0], rot: [0, 0, 0], color: null },
+    ]);
+    expect(text.split("\n")).toHaveLength(2);
+    expect(text.split("\n")[0]).toMatch(/^title: X/);
+    const parsed = parseShapes(text);
+    expect(parsed.parts.map((p) => p.name)).toEqual(["A"]);
+  });
+});

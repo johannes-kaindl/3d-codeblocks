@@ -83,6 +83,19 @@ describe("toViewModel", () => {
     expect(vm.tone).toBe("error");
     expect(vm.message).toBe("The shapes code has no valid part. Line 1: Unknown shape `boxx`");
   });
+
+  it("caps a long error list at 5 lines and counts the rest", () => {
+    const messages = Array.from({ length: 12 }, (_, i) => `Line ${i + 1}: Unknown shape \`x${i}\``);
+    const vm = toViewModel({ kind: "invalid-shapes", messages });
+    expect(vm.message).toContain("Line 5:");
+    expect(vm.message).not.toContain("Line 6:");
+    expect(vm.message).toContain("… and 7 more");
+  });
+
+  it("shows an empty shapes text as an info empty-state, not an error", () => {
+    const vm = toViewModel({ kind: "empty-shapes", hint: "Write one part per line." });
+    expect(vm).toMatchObject({ tone: "info", empty: true, message: "Write one part per line." });
+  });
 });
 
 describe("toViewModel: ready with notes", () => {

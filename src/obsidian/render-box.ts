@@ -49,6 +49,11 @@ export function renderMessage(host: HTMLElement, vm: ViewModel, onReload?: () =>
   host.empty();
   if (vm.message === null && !vm.showSpinner) return;
 
+  if (vm.empty && vm.message !== null) {
+    host.createDiv({ cls: "tdcb-empty", text: vm.message });
+    return;
+  }
+
   const box = host.createDiv({
     cls: vm.tone === "error" ? "tdcb-message tdcb-message-error" : "tdcb-message tdcb-message-info",
   });

@@ -76,6 +76,37 @@ describe("exportShapesAsGltf", () => {
     return { notices, spy };
   }
 
+  it("says which lines were left out of the export", async () => {
+    const { app, created } = fakeApp({ activeShapes: true });
+    app.vault.read = vi.fn(async () => "title: Tisch\nbox A size 1\nbox B size 1 2");
+    const { notices, spy } = captureNotices();
+    await exportShapesAsGltf(app as never, async () => true);
+    spy.mockRestore();
+    expect(created).toHaveLength(1);
+    expect(notices).toEqual(["Exported to Anhänge/Tisch.gltf — 1 problem(s) ignored: Line 3: `size` of a box needs 1 or 3 numbers"]);
+  });
+
+  it("caps the listed problems at 3", async () => {
+    const { app } = fakeApp({ activeShapes: true });
+    const bad = Array.from({ length: 6 }, (_, i) => `box B${i} size 1 2`).join("\n");
+    app.vault.read = vi.fn(async () => `box A size 1\n${bad}`);
+    const { notices, spy } = captureNotices();
+    await exportShapesAsGltf(app as never, async () => true);
+    spy.mockRestore();
+    expect(notices[0]).toContain("6 problem(s) ignored");
+    expect(notices[0]).toContain("Line 4:");
+    expect(notices[0]).not.toContain("Line 5:");
+    expect(notices[0]).toContain("… and 3 more");
+  });
+
+  it("keeps the plain notice when nothing was left out", async () => {
+    const { app } = fakeApp({ activeShapes: true });
+    const { notices, spy } = captureNotices();
+    await exportShapesAsGltf(app as never, async () => true);
+    spy.mockRestore();
+    expect(notices).toEqual(["Exported to Anhänge/Tisch.gltf"]);
+  });
+
   it("never creates a numbered file when a folder sits at the target name", async () => {
     const { app, created, modified } = fakeApp({ activeShapes: true, folderAtWanted: true });
     const { notices, spy } = captureNotices();

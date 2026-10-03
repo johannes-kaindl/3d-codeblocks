@@ -406,6 +406,59 @@ describe("ViewerHost with shapes source", () => {
     expect(JSON.stringify(message.children)).toContain("The shapes code has no valid part.");
   });
 
+  it("releases the old viewport and the budget slot when shapes turn invalid, and recovers on a fix", async () => {
+    const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
+    const { host, created, budget, message } = makeHost({ loadModel });
+    await host.render(shapes("box A size 1"));
+    expect(created).toHaveLength(1);
+    const evict = budget.register.mock.calls[0]![1] as () => void;
+
+    await host.render(shapes("boxx A size 1"));
+    expect(created[0].disposed).toBe(1);
+    expect(loadModel).toHaveBeenCalledTimes(1);
+    expect(budget.unregister).toHaveBeenCalled();
+    expect(textOf(message)).toContain("The shapes code has no valid part.");
+
+    evict();
+    expect(textOf(message)).toContain("The shapes code has no valid part.");
+    expect(created[0].disposed).toBe(1);
+
+    await host.render(shapes("box A size 1"));
+    expect(created).toHaveLength(2);
+    expect(textOf(message)).not.toContain("no valid part");
+  });
+
+  it("releases the old viewport when the bytes can no longer be provided", async () => {
+    const { host, created, budget, message } = makeHost();
+    await host.render(shapes("box A size 1"));
+    const evict = budget.register.mock.calls[0]![1] as () => void;
+    await host.render({ provideBytes: () => Promise.reject(new Error("gone")), format: "shapes", inspectContainer: false, label: "t" });
+    expect(created[0].disposed).toBe(1);
+    evict();
+    expect(textOf(message)).toContain("gone");
+  });
+
+  it("releases the old viewport when a GLB turns out damaged", async () => {
+    const { host, created, budget, message } = makeHost();
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: false, label: "x" });
+    const evict = budget.register.mock.calls[0]![1] as () => void;
+    await host.render({ provideBytes: bytes, format: "gltf", inspectContainer: true, label: "x" });
+    expect(created[0].disposed).toBe(1);
+    evict();
+    expect(textOf(message)).toContain("damaged");
+  });
+
+  it("shows the empty-state, not the error box, for text without any part or error", async () => {
+    const { host, created, message } = makeHost();
+    await host.render(shapes("# nothing yet\n"));
+    expect(created).toHaveLength(0);
+    const dump = JSON.stringify(message.children);
+    expect(dump).toContain("tdcb-empty");
+    expect(dump).toContain("Write one part per line");
+    expect(dump).not.toContain("tdcb-message-error");
+    expect(dump).not.toContain("no valid part");
+  });
+
   it("re-renders from the original text on reload (source stays shapes)", async () => {
     const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
     const { host } = makeHost({ loadModel });

@@ -152,6 +152,19 @@ describe("GltfBlock in shapes mode", () => {
     expect(dump).toContain("321");
   });
 
+  it("renders an EMPTY shapes block as the empty-state, never blank and never the error box", async () => {
+    const { deps, created } = makeDeps();
+    const el = makeFakeEl();
+    const block = new GltfBlock(el, "", deps, "shapes");
+    block.onload();
+    await block.rendering;
+    const dump = JSON.stringify(el.children);
+    expect(created).toHaveLength(0);
+    expect(dump).toContain("tdcb-empty");
+    expect(dump).toContain("Write one part per line");
+    expect(dump).not.toContain("tdcb-message-error");
+  });
+
   it("labels itself as a shapes block", () => {
     const { deps } = makeDeps();
     const block = new GltfBlock(makeFakeEl(), "box A size 1", deps, "shapes");
