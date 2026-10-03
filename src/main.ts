@@ -17,6 +17,7 @@ import type { TrackedView } from "./obsidian/tracked-view";
 import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
 import { GltfBlock } from "./obsidian/gltf-block";
 import { SettingsTab } from "./obsidian/settings";
+import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { readSceneColors } from "./obsidian/theme";
 import { isWebGLAvailable } from "./obsidian/webgl";
 import { obsidianWritePorts } from "./obsidian/write-ports";
@@ -218,6 +219,15 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       id: "fit-view",
       name: "Fit camera to model",
       callback: withActive((controller) => controller.applyView(null)),
+    });
+
+    this.addCommand({
+      id: "export-shapes-gltf",
+      name: "Export shapes model as glTF",
+      callback: () =>
+        void exportShapesAsGltf(this.app, (message) =>
+          confirmAction(this.app, { message, confirmLabel: "Overwrite", cancelLabel: "Cancel" }),
+        ),
     });
 
     // Regenerierte Dateien (gleicher Pfad, neuer Inhalt) sollen ohne Neustart neu laden.
