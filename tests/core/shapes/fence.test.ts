@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findFenceAt } from "../../../src/core/shapes/fence";
+import { fenceFor, findFenceAt, listFences } from "../../../src/core/shapes/fence";
 
 const NOTE = ["# Möbel", "", "```shapes", "box A size 1", "```", "", "~~~js", "x", "~~~", "````shapes", "```", "box B size 1", "````"].join("\n");
 
@@ -23,5 +23,22 @@ describe("findFenceAt", () => {
   it("does not see fences nested in a callout or list item", () => {
     expect(findFenceAt("> ```shapes\n> box A size 1\n> ```", 1)).toBeNull();
     expect(findFenceAt("- item\n    ```shapes\n    box A size 1\n    ```", 2)).toBeNull();
+  });
+});
+
+describe("listFences / fenceFor", () => {
+  it("lists every fence in order", () => {
+    expect(listFences("a\n```3d\nfile: x\n```\n~~~\ny\n~~~").map((f) => [f.lang, f.openLine, f.closeLine])).toEqual([
+      ["3d", 1, 3],
+      ["", 4, 6],
+    ]);
+  });
+  it("does not list fences nested in callouts or deep indents", () => {
+    expect(listFences("> ```shapes\n> a\n> ```\n- i\n    ```x\n    a\n    ```")).toEqual([]);
+  });
+  it("builds a fence longer than any backtick run inside", () => {
+    expect(fenceFor("box A size 1")).toBe("```");
+    expect(fenceFor("# ``` im Kommentar\nbox A size 1")).toBe("````");
+    expect(fenceFor("x\n`````")).toBe("``````");
   });
 });
