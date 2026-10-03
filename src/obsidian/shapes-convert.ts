@@ -162,6 +162,31 @@ const REASON_TEXT: Record<AloneReason, string> = {
   continuation: "continues a paragraph",
 };
 
+const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:/;
+
+/** Schluessel (oder Zeilentext) jeder Zeile des ```3d-Blocks ausser der EINEN Datei-Zeile. Leerzeilen und
+ *  `#`-Kommentare zaehlen nicht, eine unbekannte Schluesselzeile schon. */
+function extraBlockKeys(blockText: string): string[] {
+  const lines = blockText.split(/\r?\n/);
+  const body = lines.slice(1, /^\s*(`{3,}|~{3,})\s*$/.test(lines[lines.length - 1] ?? "") ? -1 : undefined);
+  const extras: string[] = [];
+  let fileSeen = false;
+  for (const raw of body) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const key = KEY_LINE.exec(line)?.[1].toLowerCase();
+    if (key === "file" || key === undefined) {
+      // `key === undefined` ist die Pfad-Kurzform; die erste Datei-Zeile ist der Verweis selbst.
+      if (!fileSeen) {
+        fileSeen = true;
+        continue;
+      }
+      extras.push(key ?? line);
+    } else extras.push(key);
+  }
+  return [...new Set(extras)];
+}
+
 function refusal(file: TFile, refs: ModelReference[]): string | null {
   const name = file.name;
   const where = (list: ModelReference[]) => [...new Set(list.map((r) => r.notePath))].join(", ");
@@ -176,6 +201,12 @@ function refusal(file: TFile, refs: ModelReference[]): string | null {
   }
   if (ref.kind === "block" && ref.nested) {
     return `The \`\`\`3d block that uses ${name} (${at}) sits inside a quote, callout or list. Replacing it would break that structure — nothing was changed.`;
+  }
+  if (ref.kind === "block") {
+    const extras = extraBlockKeys(ref.text);
+    if (extras.length > 0) {
+      return `The \`\`\`3d block that uses ${name} (${at}) has other settings (${extras.join(", ")}) that a code block of the shapes language cannot keep — remove them or move the file by hand — nothing was changed.`;
+    }
   }
   if (ref.kind === "embed" && !ref.alone) {
     const reason = ref.aloneReason ? REASON_TEXT[ref.aloneReason] : "is not on its own line";

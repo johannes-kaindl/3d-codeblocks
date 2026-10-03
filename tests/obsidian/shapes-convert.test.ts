@@ -285,6 +285,29 @@ describe("convertFileToBlock", () => {
     expect(notices[0]).toMatch(pattern);
   });
 
+  it.each([
+    ["height", "```3d\nfile: Anhänge/Tisch.shapes\nheight: 300\n```", /\(height\)/],
+    ["view", "```3d\nfile: Anhänge/Tisch.shapes\n# Kommentar\n\nview: top\n```", /\(view\)/],
+    ["unknown key", "```3d\nfile: Anhänge/Tisch.shapes\ncolor: red\n```", /\(color\)/],
+    ["two keys, CRLF", "```3d\r\nfile: Anhänge/Tisch.shapes\r\nheight: 300\r\nview: top\r\n```", /\(height, view\)/],
+  ])("refuses a 3d block with other settings (%s): nothing written, file kept", async (_n, note, pattern) => {
+    const files = { "n.md": note, "Anhänge/Tisch.shapes": SHAPES };
+    const { env, store, trashed, notices } = setup(files, { cursorLine: 1 });
+    expect(await convertFileToBlock(env)).toBe(false);
+    expect(store).toEqual(files);
+    expect(trashed).toEqual([]);
+    expect(notices[0]).toMatch(pattern);
+    expect(notices[0]).toMatch(/other settings/);
+  });
+
+  it("still converts a 3d block with only the file line, comments and blank lines (CRLF too)", async () => {
+    const note = "```3d\r\n# Hinweis\r\n\r\nfile: Anhänge/Tisch.shapes\r\n```";
+    const { env, store, trashed } = setup({ "n.md": note, "Anhänge/Tisch.shapes": SHAPES }, { cursorLine: 1 });
+    expect(await convertFileToBlock(env)).toBe(true);
+    expect(trashed).toEqual(["Anhänge/Tisch.shapes"]);
+    expect(store["n.md"]).toContain("```shapes");
+  });
+
   it("refuses a plain [[link]] and a nested 3d block", async () => {
     const link = setup({ "n.md": "siehe [[Tisch.shapes]]", "Anhänge/Tisch.shapes": SHAPES }, { activeFile: "Anhänge/Tisch.shapes" });
     expect(await convertFileToBlock(link.env)).toBe(false);
