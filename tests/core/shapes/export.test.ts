@@ -7,6 +7,24 @@ describe("exportBaseName", () => {
     expect(exportBaseName({}, "Möbel")).toBe("Möbel");
     expect(exportBaseName({ title: "  " }, "Möbel")).toBe("Möbel");
   });
+  it("never yields a hidden or empty name", () => {
+    for (const title of [".", "..", "  ", "---", "???", "\n"]) {
+      expect(exportBaseName({ title }, "Möbel")).toBe("Möbel");
+    }
+    expect(exportBaseName({ title: ".foo" }, "x")).toBe("foo");
+    expect(exportBaseName({ title: "foo. " }, "x")).toBe("foo");
+    expect(exportBaseName({}, "..")).toBe("model");
+    expect(exportBaseName({ title: "?" }, "")).toBe("model");
+  });
+  it("drops control characters and newlines", () => {
+    expect(exportBaseName({ title: "Ti\nsch\u0007" }, "x")).toBe("Tisch");
+  });
+  it("replaces path separators", () => {
+    expect(exportBaseName({ title: "a/b\\c" }, "x")).toBe("a-b-c");
+  });
+  it("caps the name at 100 characters", () => {
+    expect(exportBaseName({ title: "a".repeat(300) }, "x")).toBe("a".repeat(100));
+  });
 });
 
 describe("buildGltfExport", () => {

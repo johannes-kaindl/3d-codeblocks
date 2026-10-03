@@ -33,6 +33,14 @@ async function findSource(app: App): Promise<Source | null> {
 }
 
 export async function exportShapesAsGltf(app: App, confirm: (message: string) => Promise<boolean>): Promise<void> {
+  try {
+    await runExport(app, confirm);
+  } catch (error) {
+    new Notice(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function runExport(app: App, confirm: (message: string) => Promise<boolean>): Promise<void> {
   const source = await findSource(app);
   if (!source) {
     new Notice("Place the cursor in a ```shapes block or open a .shapes file to export it.");
@@ -48,14 +56,29 @@ export async function exportShapesAsGltf(app: App, confirm: (message: string) =>
   const freePath = await app.fileManager.getAvailablePathForAttachment(fileName, source.sourcePath);
   const slash = freePath.lastIndexOf("/");
   const wanted = slash >= 0 ? `${freePath.slice(0, slash)}/${fileName}` : fileName;
-  const existing = app.vault.getAbstractFileByPath(wanted);
+  let target = app.vault.getAbstractFileByPath(wanted);
 
-  if (existing instanceof TFile) {
-    if (!(await confirm(`Overwrite ${wanted}?`))) return;
-    await app.vault.modify(existing, built.json);
-    new Notice(`Exported to ${wanted}`);
+  if (target && !(target instanceof TFile)) {
+    new Notice(`Cannot export: ${wanted} is a folder.`);
     return;
   }
-  await app.vault.create(freePath, built.json);
-  new Notice(`Exported to ${freePath}`);
+  // freePath ist nummeriert, wenn der Name belegt ist. Findet der exakte Pfad nichts (Groß-/
+  // Kleinschreibung auf macOS), wird der Treffer ohne Rücksicht auf die Schreibweise gesucht.
+  if (!target && freePath !== wanted) {
+    const lower = wanted.toLowerCase();
+    target = app.vault.getFiles().find((f) => f.path.toLowerCase() === lower) ?? null;
+    if (!target) {
+      new Notice(`Cannot export: ${wanted} is taken but could not be found.`);
+      return;
+    }
+  }
+
+  if (target instanceof TFile) {
+    if (!(await confirm(`Overwrite ${target.path}?`))) return;
+    await app.vault.modify(target, built.json);
+    new Notice(`Exported to ${target.path}`);
+    return;
+  }
+  await app.vault.create(wanted, built.json);
+  new Notice(`Exported to ${wanted}`);
 }
