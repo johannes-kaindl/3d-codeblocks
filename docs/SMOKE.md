@@ -613,7 +613,15 @@ Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurüc
 
 Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprungen · nichts gemessen); der Nenner ist die Zahl aller Punkte des Laufs, auch der übersprungenen und nicht gemessenen.
 
-**Balance: to be filled after the run** — die Bilanz und die Gegenprobe trägt der Master nach dem Lauf ein.
+**Bilanz (2026-10-04, Zweitinstanz Port 9362, Obsidian 1.14.4, frischer Prozess, zwei Gesamtläufe nacheinander): 92 grün · 0 rot · 8 übersprungen · 0 nichts gemessen von 100 Punkten.** Die Baseline ohne diesen Abschnitt (`--skip promptpanel`) war 83 grün · 0 rot · 8 übersprungen; die neun Punkte PP1–PP9 kommen dazu, die acht übersprungenen sind dieselben wie vorher. Der Ersatz-Endpunkt prüft die Verdrahtung, nicht das LLM.
+
+**Gegenprobe:** Mit abgeschaltetem Fingerabdruck-Vergleich in `locateBlock` (`src/obsidian/panel-accept.ts`) lief der Abschnitt 9 grün · 1 rot — PP8 meldet „Applied to Tisch.“ statt der Ablehnung und die Notiz weicht von der Handfassung ab. Vor den Korrekturen am Panel (`lastEditor`) war PP4 rot („Open a note to insert a code block.“), und vor dem Warten auf die einblendende Seitenleiste waren PP3 und PP6 rot, weil der Klick außerhalb des Fensters landete.
+
+**Vier gemessene Fallen des Abschnitts (für jeden Treiber, der Panel und Notiz zugleich bedient):**
+- Die Seitenleiste gleitet beim Einblenden herein (x = Fensterbreite → Sollbreite, etwa eine Sekunde); ein echter Klick vorher trifft außerhalb des Fensters und tut nichts, der Punkt sieht aus wie „Senden reagiert nicht“.
+- Das Schließen des Einstellungen-Fensters (in der Zweitinstanz ein Pop-out) mitten im Lauf ließ den Lesemodus des Hauptfensters danach nichts mehr rendern (Sizer ohne Abschnitte, 0 Blöcke, auch in neuen Tabs; in zwei von drei Läufen). PP1 lässt die Einstellungen deshalb offen, `ppCleanup` schließt sie am Ende. Ursache nicht geklärt, gemessen ist die Wirkung; ein manueller Nachbau mit Öffnen und Schließen reproduzierte es nicht.
+- Die Aktionsleiste eines Blocks entsteht erst mit dem lebenden Viewport; ein Block im Standbild (`.tdcb-play`) hat keine, der Treiber aktiviert ihn zuerst.
+- Das Schließen des Panels klappt die Seitenleiste ein und verbreitert die Hauptfläche; ein Block, der dabei neu rendert, verliert Aktivierung und Leiste — das Panel wird deshalb vor dem Öffnen der Block-Notiz geschlossen.
 
 ## Befunde
 

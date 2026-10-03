@@ -4135,6 +4135,10 @@ async function ppCleanup(cdp: Cdp): Promise<void> {
   const sub = ppSubstitute;
   ppSubstitute = null;
   if (sub) await sub.close().catch(() => undefined);
+  if (ppSettingsOpened) {
+    ppSettingsOpened = false;
+    await cdp.evaluate(`app.setting.close(); return true;`).catch(() => undefined);
+  }
   await cdp.evaluate(PP_RESET).catch(() => undefined);
   if (ppOriginalAcceptAs !== null) {
     const value = ppOriginalAcceptAs;
@@ -4155,6 +4159,7 @@ interface PpState {
   colors: number;
   stopVisible: boolean;
   applyDisabled: boolean;
+  sendDisabled: boolean;
 }
 
 /** Renderer-Schnipsel: der sichtbare Stand des Panels (oder `null`, wenn keines offen ist). */
@@ -4172,24 +4177,44 @@ const PP_READ = `
     tail: root.querySelector(".okit-stream-tail")?.textContent ?? "",
     target: root.querySelector(".tdcb-prompt-target")?.textContent ?? "",
     send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
-    rounds: root.querySelectorAll(".okit-vlist-row").length,
+    rounds: app.workspace.getLeavesOfType("tdcb-prompt-panel")[0]?.view?.state?.()?.rounds?.rounds?.length ?? 0,
     diff: [...root.querySelectorAll(".tdcb-prompt-diff li")].map((l) => l.textContent ?? ""),
     previewVisible: !!wrap && !wrap.classList.contains("is-hidden"),
     colors: canvas ? (sample(canvas)?.colors ?? 0) : 0,
     stopVisible: !!root.querySelector(".tdcb-prompt-stop:not(.is-hidden)"),
     applyDisabled: root.querySelector(".tdcb-prompt-apply")?.disabled ?? true,
+    sendDisabled: root.querySelector(".tdcb-prompt-send")?.disabled ?? true,
   };
 `;
 
+
+/** PP1 lässt die Einstellungen offen (siehe dort); `ppCleanup` schließt sie am Ende des Laufs. */
+let ppSettingsOpened = false;
+
 const ppRead = (cdp: Cdp): Promise<PpState | null> => cdp.evaluate<PpState | null>(PP_READ);
 const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Die Seitenleiste gleitet beim Einblenden herein (gemessen: ~1 s, x = Fensterbreite → Sollbreite); ein echter Klick
+ *  vorher trifft ausserhalb des Fensters und tut nichts. Warten, bis das Panel ganz im Fenster steht. */
+async function ppWaitPanelInside(cdp: Cdp): Promise<boolean> {
+  const settled = await pollState<{ inside: boolean }>(
+    cdp,
+    `const r = document.querySelector(".tdcb-prompt")?.getBoundingClientRect(); return r ? { inside: r.width > 0 && r.left >= 0 && r.right <= innerWidth } : null;`,
+    (s) => s.inside,
+    10_000,
+    200,
+  );
+  return settled.reached;
+}
+
 
 /** Das Panel frisch öffnen (Blatt zu, Befehl `open-prompt-panel`, Ziel „new“) und warten, bis es steht. */
 async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
   await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
   await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
   const up = await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "", 10_000, 250);
-  return up.reached;
+  if (!up.reached) return false;
+  return ppWaitPanelInside(cdp);
 }
 
 /** Text ins Eingabefeld des Panels schreiben (das Panel liest `value` beim Senden). */
@@ -4211,7 +4236,7 @@ const ppClick = (cdp: Cdp, selector: string): Promise<boolean> =>
 const ppClickActionButton = (cdp: Cdp, label: string): Promise<boolean> =>
   clickReal(
     cdp,
-    `([...document.querySelectorAll(".markdown-preview-view .tdcb-block .tdcb-toolbar-button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(label)}))`,
+    `([...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(label)}))`,
   );
 
 /** Notiztext von der Platte lesen. */
@@ -4222,16 +4247,51 @@ const ppReadNote = (cdp: Cdp, path: string): Promise<string> =>
   `);
 
 /** Eine Notiz mit Tisch-Block im Lesemodus öffnen und warten, bis der Block samt Aktionsleiste steht.
- *  `null` = der Block rendert nicht (Umgebung, nicht Befund). */
+ *  `null` = der Block rendert nicht (Umgebung, nicht Befund).
+ *
+ *  Der Lesemodus rendert nach dem Öffnen gelegentlich GAR NICHTS (gemessen 2026-10-04: Sizer ohne Abschnitte, 0 Blöcke,
+ *  0 Standbilder, 0 roher Codeblock — nach dem Schließen der Seitenleiste in 1 von 3 Läufen). Erst neu rendern lassen
+ *  (`previewMode.rerender(true)`), dann die Notiz neu öffnen; erst danach heißt es „rendert nicht“. */
 async function ppOpenBlockNote(
   cdp: Cdp,
   path: string,
   body: string,
 ): Promise<{ buttons: { label: string; svg: boolean; children: number }[] } | null> {
-  await openNote(cdp, path, body, "preview");
+  createdNotes.add(path);
+  const open = async (): Promise<void> => {
+    const diag = await cdp.evaluate<string>(`
+      try {
+        const path = ${JSON.stringify(path)};
+        const body = ${JSON.stringify(body)};
+        const existing = app.vault.getAbstractFileByPath(path);
+        if (existing) await app.vault.modify(existing, body);
+        else await app.vault.create(path, body);
+        const file = app.vault.getAbstractFileByPath(path);
+        const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit) ?? app.workspace.getLeaf(true);
+        await leaf.openFile(file, { state: { mode: "preview" } });
+        app.workspace.setActiveLeaf(leaf, { focus: true });
+        await new Promise((r) => setTimeout(r, 200));
+        return "ok";
+      } catch (e) { return "FEHLER " + (e && e.stack ? e.stack : String(e)); }
+    `);
+    if (diag !== "ok") console.log(`  (openNote ${path}: ${diag.slice(0, 600)})`);
+  };
+  const anyBlock = `const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); return { n: root ? root.querySelectorAll(".tdcb-block, .tdcb-play").length : 0 };`;
+  let rendered = false;
+  for (let attempt = 0; attempt < 2 && !rendered; attempt++) {
+    await open();
+    rendered = (await pollState<{ n: number }>(cdp, anyBlock, (s) => s.n > 0, 6_000, 300)).reached;
+    if (!rendered) {
+      await cdp.evaluate(`app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view?.previewMode?.rerender?.(true); return true;`);
+      rendered = (await pollState<{ n: number }>(cdp, anyBlock, (s) => s.n > 0, 5_000, 300)).reached;
+    }
+  }
+  // Ein Block steht zuerst als Standbild (`.tdcb-play`); die Aktionsleiste gehört zum lebenden Viewport und
+  // entsteht erst mit der Aktivierung (gemessen 2026-10-04: ohne Klick auf das Standbild keine Leiste).
+  if (rendered) await activateBlock(cdp, 0);
   const probe = `
-    const bar = document.querySelector(".markdown-preview-view .tdcb-block .tdcb-toolbar");
-    if (!bar) return document.querySelector(".markdown-preview-view .tdcb-block") ? { buttons: [] } : null;
+    const bar = document.querySelector(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar");
+    if (!bar) return document.querySelector(".workspace-leaf-content[data-type='markdown'] .tdcb-block") ? { buttons: [] } : null;
     return {
       buttons: [...bar.querySelectorAll("button")].map((b) => ({
         label: b.getAttribute("aria-label") ?? "",
@@ -4240,7 +4300,20 @@ async function ppOpenBlockNote(
       })),
     };
   `;
-  const up = await pollState<{ buttons: { label: string; svg: boolean; children: number }[] }>(cdp, probe, (s) => s.buttons.length > 0, 20_000, 400);
+  const up = await pollState<{ buttons: { label: string; svg: boolean; children: number }[] }>(cdp, probe, (s) => s.buttons.length > 0, rendered ? 15_000 : 1_000, 400);
+  if (!up.state) {
+    console.log(`  (Block-Notiz ${path}: ${await describeScene(cdp)})`);
+    console.log(`  (Lesemodus-Diagnose: ${await cdp.evaluate<string>(`
+      const leaves = app.workspace.getLeavesOfType("markdown").map((l) => ({ mode: l.view.getMode?.(), file: l.view.file?.path, sizer: l.view.containerEl.querySelector(".markdown-preview-sizer")?.children.length ?? null, visible: l.view.containerEl.isShown?.(), active: app.workspace.activeLeaf === l }));
+      const probeLeaf = app.workspace.getLeaf("tab");
+      const f = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+      await probeLeaf.openFile(f, { state: { mode: "preview" } });
+      await new Promise((r) => setTimeout(r, 2500));
+      const fresh = probeLeaf.view.containerEl.querySelector(".markdown-preview-sizer")?.children.length ?? null;
+      probeLeaf.detach();
+      return JSON.stringify({ leaves, freshTabSizer: fresh, settingsOpen: !!document.querySelector(".modal-container"), popouts: app.workspace.floatingSplit?.children?.length ?? 0, rightCollapsed: app.workspace.rightSplit.collapsed });
+    `)})`);
+  }
   return up.state;
 }
 
@@ -4253,16 +4326,46 @@ const nonBlank = (text: string): string[] => text.split("\n").filter((l) => l.tr
 
 /** Panel für eine Notiz mit Block öffnen, Wunsch senden und auf das Ende der Runde warten (PP5, PP8, PP9). */
 async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ ready: boolean; reason: string; round: PpState | null; buttons: { label: string; svg: boolean; children: number }[] }> {
-  const note = await ppOpenBlockNote(cdp, path, body);
-  if (note === null) return { ready: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
-  await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
-  if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar`, round: null, buttons: note.buttons };
-  const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
-  if (!up.reached) return { ready: false, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons: note.buttons };
-  await ppType(cdp, PP_REFINE_PROMPT);
-  await ppClick(cdp, ".tdcb-prompt-send");
-  const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
-  return { ready: done.reached && done.state?.phase === "ok", reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons: note.buttons };
+  let step = "Notiz öffnen";
+  let buttons: { label: string; svg: boolean; children: number }[] = [];
+  try {
+    // Panel ZUERST schließen: das Einklappen der Seitenleiste ändert die Breite der Hauptfläche, und ein Block, der
+    // dabei neu rendert, verliert Aktivierung und Aktionsleiste (gemessen 2026-10-04: Knopf danach Breite 0).
+    step = "Panel schließen";
+    await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 1200)); return true;`);
+    step = "Notiz öffnen";
+    const note = await ppOpenBlockNote(cdp, path, body);
+    if (note === null) return { ready: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
+    buttons = note.buttons;
+    step = "Aktionsknopf klicken";
+    // Das Schließen des Panels klappt die Seitenleiste ein, die Hauptfläche wird breiter, der Block rendert neu
+    // (Standbild → Aktivierung) — erst warten, bis der Knopf wieder eine Größe hat.
+    const barBack = await pollState<{ w: number; poster: number }>(
+      cdp,
+      `const b = [...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].find((x) => x.getAttribute("aria-label") === ${JSON.stringify(PP_EDIT_LABEL)}); return { w: b ? b.getBoundingClientRect().width : 0, poster: document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-play").length };`,
+      (s) => s.w > 0,
+      6_000,
+      300,
+    );
+    if (!barBack.reached) {
+      await activateBlock(cdp, 0);
+      await sleepMs(500);
+    }
+    if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"})`, round: null, buttons };
+    step = "Panel mit Ziel abwarten";
+    const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
+    if (!up.reached) return { ready: false, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons };
+    step = "Panel stehen lassen";
+    await ppWaitPanelInside(cdp);
+    step = "Wunsch senden";
+    await ppType(cdp, PP_REFINE_PROMPT);
+    await ppClick(cdp, ".tdcb-prompt-send");
+    step = "Ende der Runde abwarten";
+    const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
+    return { ready: done.reached && done.state?.phase === "ok", reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons };
+  } catch (error) {
+    return { ready: false, reason: `Renderer-Fehler im Schritt „${step}“: ${error instanceof Error ? error.message : String(error)}`, round: null, buttons };
+  }
 }
 
 async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
@@ -4316,6 +4419,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     // --- PP1. Settings --------------------------------------------------------
     // Erster GUI-Beleg für `renderSettings`. Der Anfrage-Titel stammt aus dem vendorten Kit-Modul, nicht aus dem Gedächtnis.
     const requestTitle = LLM_CONNECTION_STRINGS_EN.request.title;
+    ppSettingsOpened = true;
     const settings = await cdp.evaluate<{ rows: number; endpointRow: boolean; endpointValues: string[]; titles: string[]; group: boolean }>(`
       app.setting.open();
       app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
@@ -4336,8 +4440,9 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         await new Promise((r) => setTimeout(r, 300));
         state = read();
       }
-      app.setting.close();
-      await new Promise((r) => setTimeout(r, 300));
+      // NICHT schließen: in der Zweitinstanz ist das Einstellungen-Fenster ein Pop-out, und sein Schließen mitten im Lauf
+      // lässt den Lesemodus des Hauptfensters danach nichts mehr rendern (gemessen 2026-10-04: mit Schließen 4 von 10
+      // Punkten „nichts gemessen“ in zwei von drei Läufen, ohne Schließen 10/10 grün). Das Schließen folgt in ppCleanup.
       return state;
     `);
     if (settings.rows === 0) {
@@ -4353,7 +4458,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
 
     // --- PP2. Panel öffnet ----------------------------------------------------
     const opened = await ppOpenFresh(cdp);
-    const two = await cdp.evaluate<{ tabs: string[]; quality: string; qualityWarning: boolean; placeholder: string; send: string } | null>(`
+    const two = await cdp.evaluate<{ tabs: string[]; quality: string; qualityWarning: boolean; placeholder: string; send: string; examples: string } | null>(`
       const root = document.querySelector(".tdcb-prompt");
       if (!root) return null;
       const q = root.querySelector(".tdcb-prompt-quality");
@@ -4363,6 +4468,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         qualityWarning: !!q && q.classList.contains("is-warning"),
         placeholder: root.querySelector(".tdcb-prompt-input")?.getAttribute("placeholder") ?? "",
         send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
+        examples: root.querySelector(".tdcb-prompt-examples:not(.is-hidden)")?.textContent ?? "",
       };
     `);
     if (!opened || two === null) {
@@ -4371,8 +4477,8 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       ppRecord(
         "PP2",
         T.PP2,
-        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create",
-        `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“`,
+        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
+        `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
       );
     }
 
@@ -4407,7 +4513,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         "PP3",
         T.PP3,
         armed && clicked && run.reached && intermediate >= 2 && shown.reached && createSeen,
-        `Tail-Stände ${lens.join("→") || "keine"} (${intermediate} Zwischenstände, erwartet ≥ 2) · Status ${final?.phase ?? "?"}: „${final?.status ?? ""}“ · Vorschau ${final?.previewVisible ? "sichtbar" : "nicht sichtbar"}, ${final?.colors ?? 0} Farbtöne (erwartet ≥ 3) · Ersatz sah Erzeugen als Stream: ${createSeen}`,
+        `Tail-Stände ${lens.join("→") || "keine"} (${intermediate} Zwischenstände, erwartet ≥ 2) · Status ${final?.phase ?? "?"}: „${final?.status ?? ""}“ · Vorschau ${final?.previewVisible ? "sichtbar" : "nicht sichtbar"}, ${final?.colors ?? 0} Farbtöne (erwartet ≥ 3) · Ersatz sah Erzeugen als Stream: ${createSeen} · Ziel „${final?.target ?? "?"}“ · Senden gesperrt: ${final?.sendDisabled ?? "?"} · Ersatz-Anfragen: ${sub.requests.map((r) => r.kind).join(",") || "keine"}`,
       );
     }
 
@@ -4428,12 +4534,17 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         return true;
       `);
       const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
-      const written = await pollState<{ text: string }>(
+      const written = await pollState<{ text: string; buffer: string; bufferPath: string }>(
         cdp,
         `
+          // Die Einfügung steht zuerst im Editor-Puffer; die Platte folgt mit dem Autospeichern. Wir speichern
+          // selbst, damit das Prüfen nicht von dessen Takt abhängt (der Einfüge-Weg ist der Editor, nicht die Datei).
+          const leafView = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+          if (leafView?.editor?.getValue?.().includes(${JSON.stringify(`${fence}shapes`)})) await leafView.save?.();
           const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_NEW)});
           const text = file ? await app.vault.read(file) : "";
-          return { text };
+          const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+          return { text, buffer: view?.editor?.getValue?.() ?? "", bufferPath: view?.file?.path ?? "" };
         `,
         (s) => s.text.includes(`${fence}shapes`),
         12_000,
@@ -4446,7 +4557,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         "PP4",
         T.PP4,
         clicked && written.reached && /^box Platte /m.test(block) && after !== null && after.rounds === 0,
-        `Block in der Notiz: ${written.reached ? "ja" : "nein"} (${block.split("\n").length} Zeilen, Platte ${/^box Platte /m.test(block) ? "ja" : "nein"}) · Runden danach ${after?.rounds ?? "?"} (erwartet 0) · Status ${after?.phase ?? "?"}: „${after?.status ?? ""}“`,
+        `Block auf der Platte: ${written.reached ? "ja" : "nein"} (${block.split("\n").length} Zeilen, Platte ${/^box Platte /m.test(block) ? "ja" : "nein"}) · Editor-Puffer ${written.state?.bufferPath ?? "?"} ${written.state?.buffer.includes(`${fence}shapes`) ? "trägt den Block" : "ohne Block"} (${written.state?.buffer.length ?? 0} Zeichen; Platte ${text.length}) · Runden danach ${after?.rounds ?? "?"} (erwartet 0) · Status ${after?.phase ?? "?"}: „${after?.status ?? ""}“`,
       );
     }
     await setSetting(cdp, "acceptAs", ppOriginalAcceptAs ?? "block");
@@ -4681,9 +4792,9 @@ async function main(): Promise<void> {
   const vault = flag("vault");
   const sectionArg = flag("section");
 
-  const sections = sectionArg
-    ? SECTIONS.filter((s) => s.key === sectionArg)
-    : SECTIONS;
+  // `--skip a,b` lässt Abschnitte weg (Gegenprobe: misst ein Abschnitt den Rest des Laufs mit?).
+  const skipped = new Set((flag("skip") ?? "").split(",").filter((k) => k !== ""));
+  const sections = (sectionArg ? SECTIONS.filter((s) => s.key === sectionArg) : SECTIONS).filter((s) => !skipped.has(s.key));
   if (sections.length === 0) {
     throw new Error(`Unbekannter --section ${sectionArg}. Bekannt: ${SECTIONS.map((s) => s.key).join(", ")}`);
   }
