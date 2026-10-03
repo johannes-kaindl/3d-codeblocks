@@ -50,15 +50,18 @@ describe("quality", () => {
     });
   });
 
-  it("with no refine row in the shipped table, refine falls back to the create sentence and never claims a measurement", () => {
-    const shipped = MEASUREMENTS.filter((m) => m.task === "refine");
-    for (const m of shipped) expect(m.promptSha, `${m.model} refine`).toBe(promptSha("refine"));
-    if (shipped.length === 0) {
-      expect(qualityLine("qwen/qwen3.8-27b", "refine")).toEqual({
-        measured: false,
-        text: "Not measured for this model — the one small model tested (gemma-4-e4b) got 4 of 10 test prompts plausible.",
-      });
-    }
+  it("refine never shows a create statistic: no refine row, or no small refine row, gives the plain sentence", () => {
+    const plain = { measured: false, text: "Not measured for this model." };
+    const createOnly = MEASUREMENTS.filter((m) => m.task === "create");
+    expect(qualityLine("qwen/qwen3.8-27b", "refine", [])).toEqual(plain);
+    expect(qualityLine("qwen/qwen3.8-27b", "refine", createOnly)).toEqual(plain);
+    expect(qualityLine("x", "refine", [refineRow("qwen/qwen3.8-27b", 8)])).toEqual(plain);
+    // create keeps its reference sentence
+    expect(qualityLine("x", "create", createOnly).text).toContain("4 of 10 test prompts plausible");
+  });
+
+  it("every shipped refine row (if any) carries the current refine promptSha", () => {
+    for (const m of MEASUREMENTS.filter((x) => x.task === "refine")) expect(m.promptSha, m.model).toBe(promptSha("refine"));
   });
 
   it("refine failure hint: best refine model, never the create statistics", () => {
@@ -73,7 +76,7 @@ describe("quality", () => {
   it("refine failure hint with no refine row does not throw and gives the bare sentence", () => {
     const createOnly = MEASUREMENTS.filter((m) => m.task === "create");
     expect(failureHint("google/gemma-4-e4b", "refine", createOnly)).toBe("The change list could not be applied.");
-    if (!MEASUREMENTS.some((m) => m.task === "refine")) expect(failureHint("x", "refine")).toBe("The change list could not be applied.");
+    expect(failureHint("x", "refine", [])).toBe("The change list could not be applied.");
   });
 
   it("points to a larger model when another model's answer fails", () => {
@@ -137,9 +140,9 @@ describe("quality", () => {
     expect(qualityLine("x", "create", [])).toEqual({ measured: false, text: "Not measured for this model." });
   });
 
-  it("falls back to the create sentence when there is no small refine row", () => {
+  it("with refine rows but no small refine row, refine gives the plain sentence (no create number)", () => {
     const table = REFINE_TABLE.filter((m) => !(m.task === "refine" && m.model === "google/gemma-4-e4b"));
-    expect(qualityLine("x", "refine", table).text).toContain("4 of 10 test prompts plausible");
+    expect(qualityLine("x", "refine", table)).toEqual({ measured: false, text: "Not measured for this model." });
   });
 
   it("replays the create control run through the production path: 9 of 10, A07 bad (M-1)", async () => {

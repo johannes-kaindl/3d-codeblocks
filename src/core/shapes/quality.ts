@@ -61,14 +61,13 @@ const NOUN: Record<QualityTask, { measured: string; plural: string }> = {
 export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS): { measured: boolean; text: string } {
   const m = findMeasurement(model, task, table);
   if (m) return { measured: true, text: `Measured: ${m.good} of ${m.of} ${NOUN[task].measured} (${m.model}, ${m.measuredAt}, n=1 per ${task === "refine" ? "request" : "prompt"}).` };
-  // Kein kleiner Verfeinern-Eintrag: auf den Erstellen-Satz zurückfallen.
-  const refTask: QualityTask = smallReference(task, table) ? task : "create";
-  const ref = smallReference(refTask, table);
+  // Bezugszahl nur aus derselben Aufgabe: eine Erstellen-Zahl sagt nichts über das Verfeinern.
+  const ref = smallReference(task, table);
   if (!ref) return { measured: false, text: "Not measured for this model." };
   const shortName = ref.model.slice(ref.model.lastIndexOf("/") + 1);
   return {
     measured: false,
-    text: `Not measured for this model — the one small model tested (${shortName}) got ${ref.good} of ${ref.of} ${NOUN[refTask].plural}.`,
+    text: `Not measured for this model — the one small model tested (${shortName}) got ${ref.good} of ${ref.of} ${NOUN[task].plural}.`,
   };
 }
 

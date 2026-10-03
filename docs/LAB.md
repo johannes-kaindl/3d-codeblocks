@@ -68,9 +68,9 @@ Rows whose prompt was changed after the measurement move here, with the `promptS
 
 | Retired | Model | Task | Result | `promptSha` | Date | Reason |
 |---|---|---|---|---|---|---|
-| 2026-10-03 | qwen/qwen3.8-27b | refine | 8 of 8 | `8bd865943b3454d1` | 2026-10-03 | retired 2026-10-03: REFINE_SYSTEM changed (shape on change); re-measured under the new prompt |
-| 2026-10-03 | google/gemma-4-e4b | refine | 6 of 8 | `8bd865943b3454d1` | 2026-10-03 | retired 2026-10-03: REFINE_SYSTEM changed (shape on change); re-measured under the new prompt |
+| 2026-10-03 | qwen/qwen3.8-27b | refine | 8 of 8 | `8bd865943b3454d1` | 2026-10-03 | retired 2026-10-03: REFINE_SYSTEM changed (shape on change); to be re-measured under the new prompt |
+| 2026-10-03 | google/gemma-4-e4b | refine | 6 of 8 | `8bd865943b3454d1` | 2026-10-03 | retired 2026-10-03: REFINE_SYSTEM changed (shape on change); to be re-measured under the new prompt |
 
 The fixtures of the retired rows stay in the repository. Replaying them documents the behaviour of the OLD prompt (the reader and applier regression test in `tests/core/shapes/quality-refine-replay.test.ts` still expects 8 and 6, because those answers contain no `shape` key on `change`); it is no longer tied to the table. The old prompt told the model to replace a part with `remove` plus `add`; the new one lets `change` carry `shape` (with a `size` for the new form), which case R07 needs.
 
-Current prompts: create `6d29c7c76d4532f2`, refine `71051822eb114cf6`. The table has no refine rows until the lab is run with the new prompt (`SHAPES_LAB_TASK=refine`); until then the panel text for refine falls back to the create reference sentence and never shows a refine number.
+Current prompts: create `6d29c7c76d4532f2`, refine `71051822eb114cf6`. The table has no refine rows until the lab is run with the new prompt (`SHAPES_LAB_TASK=refine`); until then the panel text for refine is the plain "Not measured for this model." (no number, no model name, never a create statistic). The create reference sentence is used for create only.

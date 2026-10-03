@@ -382,6 +382,14 @@ describe("shape change (Plan 3b)", () => {
     expect(text(r)).toBe(TABLE.replace(LEG, `${LEG} color #ff0000`));
     const q = applyChanges(TABLE, [{ op: "change", name: "Bein-1", shape: "box" }]);
     expect(q.ok).toBe(true);
+    // end to end the no-op is refused explicitly
+    const a = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","shape":"box"}]}');
+    expect(applyChangesAnswer(TABLE, a)).toEqual({ ok: false, problems: ["the answer changed nothing"] });
+  });
+
+  it("an `add` without a shape says so instead of `unknown shape undefined`", () => {
+    const p = refused([{ op: "add", part: { op: "add", name: "Lade", size: [1, 1, 1] } }]);
+    expect(p).toEqual(["change 1 (add): `Lade`: `add` needs a `shape`"]);
   });
 
   it("accepts shape in other case / with whitespace, like the parser does for kinds", () => {

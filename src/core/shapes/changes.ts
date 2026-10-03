@@ -60,6 +60,7 @@ function addFaults(part: unknown): string[] {
   const rec = part as Record<string, unknown>;
   const label = typeof rec.name === "string" && rec.name.trim() !== "" ? `\`${rec.name.trim()}\`` : "unnamed part";
   const out: string[] = [];
+  if (rec.shape === undefined) out.push(`${label}: \`add\` needs a \`shape\``);
   for (const field of ["position", "rotation_deg"]) {
     const v = rec[field];
     if (v === undefined) continue;
