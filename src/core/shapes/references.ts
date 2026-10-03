@@ -15,13 +15,13 @@ export interface NoteText {
 export type AloneReason = "list" | "quote" | "indent" | "inline" | "table" | "continuation";
 
 /**
- * `nested` (nur gesetzt, wenn wahr): der Block steht in einem Zitat/Callout oder einer Liste. Obsidian
+ * `nested`: der Block steht in einem Zitat/Callout oder einer Liste. Obsidian
  * rendert ihn, aber ein Ersatz an Spalte 0 würde die Struktur zerreißen — der Aufrufer lehnt ab.
  * `aloneReason` (nur gesetzt, wenn `alone` falsch ist): warum der Embed nicht ersetzbar ist.
  * `link`: einfacher Wikilink ohne `!` — nie ersetzbar, aber nach dem Löschen der Datei tot.
  */
 export type ModelReference =
-  | { notePath: string; kind: "block"; from: number; to: number; text: string; nested?: true }
+  | { notePath: string; kind: "block"; from: number; to: number; text: string; nested: boolean }
   | { notePath: string; kind: "embed"; from: number; to: number; text: string; alone: boolean; aloneReason?: AloneReason }
   | { notePath: string; kind: "link"; from: number; to: number; text: string };
 
@@ -39,6 +39,8 @@ interface ScannedFence {
   from: number;
   to: number;
   nested: boolean;
+  /** true, wenn eine echte Schlusszeile gefunden wurde (nicht implizit/EOF geschlossen). */
+  closed: boolean;
   body: string;
 }
 
@@ -52,7 +54,12 @@ function stripQuotes(line: string): { rest: string; quoted: boolean } {
   return { rest, quoted };
 }
 
-/** Zaunsuche, die Zitat- und Listen-Präfixe kennt (Obsidian rendert solche Zäune; fence.ts bewusst nicht). */
+/**
+ * Zaunsuche, die Zitat- und Listen-Präfixe kennt (Obsidian rendert solche Zäune; fence.ts bewusst nicht).
+ * Ein Zaun in einem Zitat endet spätestens an der ersten Zeile ohne `>`; ein Zaun in einem Listenpunkt
+ * an der ersten nicht leeren Zeile, die unter die Einrückung des Zaunbeginns fällt. Nur ein Zaun auf
+ * oberster Ebene läuft (wie bei listFences) bis zum Dateiende.
+ */
 function scanFences(lines: string[]): ScannedFence[] {
   const out: ScannedFence[] = [];
   let i = 0;
@@ -65,24 +72,34 @@ function scanFences(lines: string[]): ScannedFence[] {
       marked = true;
     }
     const indent = /^[ \t]*/.exec(rest)?.[0] ?? "";
-    const open = FENCE_OPEN.exec(rest.slice(indent.length));
-    if (!open) {
+    const fenceText = rest.slice(indent.length);
+    const open = FENCE_OPEN.exec(fenceText);
+    // CommonMark: der Info-String eines Backtick-Zauns darf keinen Backtick enthalten ("```x``` text" ist kein Zaun).
+    if (!open || (open[1][0] === "`" && fenceText.slice(open[1].length).includes("`"))) {
       i += 1;
       continue;
     }
-    const nested = quoted || marked || indent.includes("\t") || indent.length > 3;
+    const nested = quoted || marked || indent.includes("\t") || indent.length > 3 || (indent.length > 0 && containersBefore(lines, i).list);
     const marker = open[1];
     const closeRe = new RegExp(`^\\s*${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
+    const col = lines[i].length - fenceText.length;
     let j = i + 1;
+    let closed = false;
     const body: string[] = [];
     while (j < lines.length) {
-      const content = stripQuotes(lines[j]).rest;
-      if (closeRe.test(content) && (nested || /^ {0,3}\S/.test(content))) break;
-      body.push(content.trim());
+      const stripped = stripQuotes(lines[j]);
+      if (quoted && !stripped.quoted) break;
+      if (!quoted && nested && lines[j].trim() !== "" && /^[ \t]*/.exec(lines[j])![0].length < col) break;
+      if (closeRe.test(stripped.rest) && (nested || /^ {0,3}\S/.test(stripped.rest))) {
+        closed = true;
+        break;
+      }
+      body.push(stripped.rest.trim());
       j += 1;
     }
-    const to = j < lines.length ? j : lines.length - 1;
-    out.push({ lang: open[2].toLowerCase(), from: i, to, nested, body: body.join("\n") });
+    let to = closed ? j : j - 1;
+    while (!closed && to > i && stripQuotes(lines[to]).rest.trim() === "") to -= 1;
+    out.push({ lang: open[2].toLowerCase(), from: i, to, nested, closed, body: body.join("\n") });
     i = to + 1;
   }
   return out;
@@ -90,14 +107,35 @@ function scanFences(lines: string[]): ScannedFence[] {
 
 const LIST_LINE = /^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+/;
 const ALONE_LINE = /^ {0,3}!\[\[[^\]]*\]\]\s*$/;
+const HEADING = /^ {0,3}#{1,6}(\s|$)/;
+const THEMATIC = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
+
+/** Zustand der Container (offener Listenpunkt / offenes Zitat) NACH den Zeilen vor `index`. */
+function containersBefore(lines: string[], index: number): { list: boolean; quote: boolean } {
+  let list = false;
+  let quote = false;
+  for (let k = 0; k < index; k++) {
+    const l = lines[k];
+    if (l.trim() === "") {
+      quote = false;
+      continue;
+    }
+    quote = /^\s*>/.test(l);
+    if (LIST_LINE.test(l)) list = true;
+    else if (!/^\s/.test(l) && !quote) list = false;
+  }
+  return { list, quote };
+}
 
 /**
- * Konservativ: ein Embed ist nur dann "alone" (durch einen Zaun ersetzbar), wenn die Zeile nur aus ihm
- * besteht (höchstens drei Leerzeichen davor, kein Tab) UND er keine Fortsetzungszeile eines Listenpunkts,
- * Zitats oder einer Tabelle ist (davor Leerzeile bzw. Absatz/Überschrift/Zaun, oder selbst ein Embed).
- * Im Zweifel: nicht alone.
+ * Konservative WHITELIST: ein Embed ist nur dann "alone" (durch einen Zaun ersetzbar), wenn die Zeile nur
+ * aus ihm besteht (Spalte 0..3, kein Tab) UND die Zeile davor ein sicherer Absatzbruch ist: Dateianfang,
+ * Leerzeile, ATX-Überschrift, Trennlinie, Schlusszeile eines Zauns auf oberster Ebene, schließendes `$$`
+ * oder ein selbst alleinstehender Embed. Zusätzlich: ist ein Listenpunkt offen (offen ab Markerzeile bis zu
+ * einer nicht leeren Zeile in Spalte 0, die kein Marker ist), ist nur Spalte 0 nach einer Leerzeile sicher
+ * (sie beendet die Liste); ein Zitat endet an Leerzeile bzw. Zeile ohne `>`. Alles andere: "continuation".
  */
-function aloneReason(lines: string[], index: number, match: string, inFence: Set<number>): AloneReason | undefined {
+function aloneReason(lines: string[], index: number, match: string, fences: ScannedFence[]): AloneReason | undefined {
   const line = lines[index];
   const at = line.indexOf(match);
   const before = line.slice(0, at);
@@ -107,16 +145,16 @@ function aloneReason(lines: string[], index: number, match: string, inFence: Set
   if (LIST_LINE.test(line)) return "list";
   if (before.includes("\t") || /^ {4,}/.test(line)) return "indent";
   if (line.trim() !== match) return "inline";
-  const indented = /^\s+\S/.test(line);
-  let p = index - 1;
-  const directlyAfter = p >= 0 && lines[p].trim() !== "";
-  while (p >= 0 && lines[p].trim() === "") p -= 1;
-  if (p < 0 || inFence.has(p)) return undefined;
+  const { list } = containersBefore(lines, index);
+  if (list && /^\s/.test(line)) return "continuation";
+  const p = index - 1;
+  if (p < 0 || lines[p].trim() === "") return undefined;
   const prev = lines[p];
-  const prevBad = /^\s*>/.test(prev) || LIST_LINE.test(prev) || prev.trim().startsWith("|") || /^(\t| {2,})\S/.test(prev);
-  if (!prevBad) return undefined;
-  if (directlyAfter) return ALONE_LINE.test(prev) ? undefined : "continuation";
-  return indented ? "continuation" : undefined;
+  if (HEADING.test(prev) || THEMATIC.test(prev)) return undefined;
+  if (fences.some((f) => f.to === p && f.closed && !f.nested)) return undefined;
+  if (prev.trim() === "$$" && lines.slice(0, p + 1).filter((l) => l.trim() === "$$").length % 2 === 0) return undefined;
+  if (ALONE_LINE.test(prev) && aloneReason(lines, p, prev.trim(), fences) === undefined) return undefined;
+  return "continuation";
 }
 
 export function findModelReferences(
@@ -128,7 +166,8 @@ export function findModelReferences(
   for (const note of notes) {
     const lines = note.text.split(/\r?\n/);
     const inFence = new Set<number>();
-    for (const fence of scanFences(lines)) {
+    const fences = scanFences(lines);
+    for (const fence of fences) {
       for (let l = fence.from; l <= fence.to; l++) inFence.add(l);
       if (fence.lang !== "3d") continue;
       const file = parseBlockConfig(fence.body).config?.file;
@@ -139,7 +178,7 @@ export function findModelReferences(
           from: fence.from,
           to: fence.to,
           text: lines.slice(fence.from, fence.to + 1).join("\n"),
-          ...(fence.nested ? { nested: true as const } : {}),
+          nested: fence.nested,
         });
       }
     }
@@ -152,7 +191,7 @@ export function findModelReferences(
           refs.push({ notePath: note.path, kind: "link", from: index, to: index, text: line });
           continue;
         }
-        const reason = aloneReason(lines, index, match[0], inFence);
+        const reason = aloneReason(lines, index, match[0], fences);
         refs.push({
           notePath: note.path,
           kind: "embed",

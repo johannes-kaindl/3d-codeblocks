@@ -10,7 +10,7 @@ describe("findModelReferences", () => {
   it("finds 3d blocks and embeds, and says whether an embed stands alone", () => {
     const refs = findModelReferences(
       [
-        { path: "a.md", text: "# A\n```3d\nfile: tisch.shapes\ntitle: T\n```" },
+        { path: "a.md", text: "# A\n```3d\nfile: tisch.shapes\ntitle: T\n```", nested: false },
         { path: "b.md", text: "![[tisch.shapes]]\nSiehe ![[tisch.shapes|200]] oben." },
         { path: "c.md", text: "```3d\nfile: anderes.glb\n```\n```shapes\n![[tisch.shapes]]\n```" },
       ],
@@ -18,7 +18,7 @@ describe("findModelReferences", () => {
       resolve,
     );
     expect(refs).toEqual([
-      { notePath: "a.md", kind: "block", from: 1, to: 4, text: "```3d\nfile: tisch.shapes\ntitle: T\n```" },
+      { notePath: "a.md", kind: "block", from: 1, to: 4, text: "```3d\nfile: tisch.shapes\ntitle: T\n```", nested: false },
       { notePath: "b.md", kind: "embed", from: 0, to: 0, text: "![[tisch.shapes]]", alone: true },
       { notePath: "b.md", kind: "embed", from: 1, to: 1, text: "Siehe ![[tisch.shapes|200]] oben.", alone: false, aloneReason: "inline" },
     ]);
@@ -114,13 +114,13 @@ describe("findModelReferences", () => {
 
   it("a 3d block covers exactly its fence lines", () => {
     const [r] = findModelReferences([{ path: "a.md", text: "x\ny\n```3d\nfile: tisch.shapes\n```\nz" }], TARGET, resolve);
-    expect(r).toEqual({ notePath: "a.md", kind: "block", from: 2, to: 4, text: "```3d\nfile: tisch.shapes\n```" });
+    expect(r).toEqual({ notePath: "a.md", kind: "block", from: 2, to: 4, text: "```3d\nfile: tisch.shapes\n```", nested: false });
   });
 
   it("copes with CRLF notes", () => {
     const refs = findModelReferences([{ path: "a.md", text: "```3d\r\nfile: tisch.shapes\r\n```\r\n![[tisch.shapes]]\r\n" }], TARGET, resolve);
     expect(refs).toEqual([
-      { notePath: "a.md", kind: "block", from: 0, to: 2, text: "```3d\nfile: tisch.shapes\n```" },
+      { notePath: "a.md", kind: "block", from: 0, to: 2, text: "```3d\nfile: tisch.shapes\n```", nested: false },
       { notePath: "a.md", kind: "embed", from: 3, to: 3, text: "![[tisch.shapes]]", alone: true },
     ]);
   });
@@ -174,10 +174,10 @@ describe("findModelReferences: fix round 1", () => {
     expect(only("- ```3d\n  file: tisch.shapes\n  ```")).toMatchObject({ kind: "block", from: 0, to: 2, nested: true });
   });
   it("plain, tilde, uppercase 3D and quote-less blocks are not nested", () => {
-    expect(only("```3d\nfile: tisch.shapes\n```")).not.toHaveProperty("nested");
+    expect(only("```3d\nfile: tisch.shapes\n```")).toMatchObject({ nested: false });
     expect(only("~~~3d\nfile: tisch.shapes\n~~~")).toMatchObject({ kind: "block", from: 0, to: 2 });
     expect(only("```3D\nfile: tisch.shapes\n```")).toMatchObject({ kind: "block" });
-    expect(only("   ```3d\n   file: tisch.shapes\n   ```")).not.toHaveProperty("nested");
+    expect(only("   ```3d\n   file: tisch.shapes\n   ```")).toMatchObject({ nested: false });
   });
   it("ignores an embed shown inside a nested fence of another language", () => {
     expect(run("> ```md\n> ![[tisch.shapes]]\n> ```")).toEqual([]);
@@ -208,7 +208,7 @@ describe("findModelReferences: fix round 1", () => {
     expect(only("- item\n\n![[tisch.shapes]]")).toMatchObject({ alone: true });
     expect(only("> quote\n\n![[tisch.shapes]]")).toMatchObject({ alone: true });
     expect(only("# Kopf\n![[tisch.shapes]]")).toMatchObject({ alone: true });
-    expect(only("Text\n![[tisch.shapes]]")).toMatchObject({ alone: true });
+    expect(only("Text\n![[tisch.shapes]]")).toMatchObject({ alone: false, aloneReason: "continuation" });
     expect(only("```js\nx\n```\n![[tisch.shapes]]")).toMatchObject({ alone: true });
   });
 
@@ -241,5 +241,73 @@ describe("findModelReferences: fix round 1", () => {
     expect(run("![[TISCH.SHAPES]]", upper)[0]).toMatchObject({ kind: "embed", alone: true });
     expect(only("![[tisch.shapes]]   ")).toMatchObject({ alone: true });
     expect(only("![[Modelle/tisch.shapes|300]]")).toMatchObject({ alone: true });
+  });
+});
+
+describe("findModelReferences: fix round 2", () => {
+  const run = (text: string) => findModelReferences([{ path: "a.md", text }], TARGET, resolve);
+  const alone = (text: string) => {
+    const r = run(text).find((x) => x.kind === "embed");
+    return r && r.kind === "embed" ? [r.alone, r.aloneReason] : "none";
+  };
+
+  it("A: an unclosed quoted fence ends where the quote ends — block AND following embed are found", () => {
+    const refs = run("> ```3d\n> file: tisch.shapes\n\ntext ![[tisch.shapes]]");
+    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([
+      ["block", 0, 1],
+      ["embed", 3, 3],
+    ]);
+    expect(refs[0]).toMatchObject({ nested: true });
+  });
+  it("A: an unclosed quoted fence of another language does not swallow what follows", () => {
+    expect(run("> ```md\n> a\nplain ![[tisch.shapes]]").map((r) => r.kind)).toEqual(["embed"]);
+  });
+  it("A: an unclosed list fence ends at the dedent", () => {
+    const refs = run("- x\n  ```3d\n  file: tisch.shapes\n\n![[tisch.shapes]]");
+    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([
+      ["block", 1, 2],
+      ["embed", 4, 4],
+    ]);
+  });
+  it("A: a top-level unclosed fence still runs to the end", () => {
+    expect(run("```3d\nfile: tisch.shapes\n\n![[tisch.shapes]]").map((r) => [r.kind, r.from, r.to])).toEqual([["block", 0, 3]]);
+  });
+  it("A: an opener with a backtick in the info string is no fence", () => {
+    expect(run("```x``` text\n![[tisch.shapes]]").map((r) => r.kind)).toEqual(["embed"]);
+  });
+  it("A: a properly closed quoted fence followed by a column-0 embed after a blank line", () => {
+    const refs = run("> ```3d\n> file: tisch.shapes\n> ```\n\n![[tisch.shapes]]");
+    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([
+      ["block", 0, 2],
+      ["embed", 4, 4],
+    ]);
+    expect(refs[1]).toMatchObject({ alone: true });
+  });
+
+  it("B: an indented embed after a fence close inside a list item is not alone", () => {
+    expect(alone("- x\n  ```js\n  a\n  ```\n  ![[tisch.shapes]]")).toEqual([false, "continuation"]);
+    expect(alone("- x\n  ```js\n  a\n  ```\n\n  ![[tisch.shapes]]")).toEqual([false, "continuation"]);
+  });
+
+  it("C: whitelist — only safe paragraph breaks give alone", () => {
+    expect(alone("<div>\n![[tisch.shapes]]")).toEqual([false, "continuation"]);
+    expect(alone("[^1]: foo\n![[tisch.shapes]]")).toEqual([false, "continuation"]);
+    expect(alone("| a |\n|---|\n| b |\n![[tisch.shapes]]")).toEqual([false, "continuation"]);
+    expect(alone("    code\n![[tisch.shapes]]")).toEqual([false, "continuation"]);
+    expect(alone("<!-- c -->\n![[tisch.shapes]]")).toEqual([false, "continuation"]);
+    expect(alone("---\n![[tisch.shapes]]")[0]).toBe(true);
+    expect(alone("# H\n![[tisch.shapes]]")[0]).toBe(true);
+    expect(alone("$$\nx\n$$\n![[tisch.shapes]]")[0]).toBe(true);
+    expect(alone("$$\n![[tisch.shapes]]")[0]).toBe(false);
+    expect(run("![[tisch.shapes]]\n![[tisch.shapes]]").every((r) => r.kind === "embed" && r.alone)).toBe(true);
+    expect(alone("```\nx\n```\n![[tisch.shapes]]")[0]).toBe(true);
+    expect(alone("> ```\n> x\n> ```\n![[tisch.shapes]]")[0]).toBe(false);
+  });
+
+  it("D: nested is a required boolean on blocks", () => {
+    for (const r of run("```3d\nfile: tisch.shapes\n```\n\n> ```3d\n> file: tisch.shapes\n> ```")) {
+      if (r.kind === "block") expect(typeof r.nested).toBe("boolean");
+    }
+    expect(run("```3d\nfile: tisch.shapes\n```")[0]).toMatchObject({ nested: false });
   });
 });
