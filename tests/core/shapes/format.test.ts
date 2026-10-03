@@ -66,4 +66,48 @@ describe("partsFromLlm", () => {
     const { parts } = partsFromLlm([{ name: "A", shape: "box", size: [1], position: [1, 2], color: "brown" }]);
     expect(parts[0]).toMatchObject({ at: [0, 0, 0], color: null });
   });
+
+  it("drops parts with size values that round to zero", () => {
+    const { parts, dropped } = partsFromLlm([
+      { name: "Tiny1", shape: "sphere", size: [0.00004] },
+      { name: "Tiny2", shape: "box", size: [1, 0.00001, 1] },
+      { name: "Tiny3", shape: "sphere", size: [1e-7] },
+    ]);
+    expect(parts).toEqual([]);
+    expect(dropped).toEqual([
+      { index: 0, reason: "`size` values must be at least 0.0001" },
+      { index: 1, reason: "`size` values must be at least 0.0001" },
+      { index: 2, reason: "`size` values must be at least 0.0001" },
+    ]);
+  });
+
+  it("drops parts with Infinity size values", () => {
+    const { parts, dropped } = partsFromLlm([{ name: "Huge", shape: "sphere", size: [1e999] }]);
+    expect(parts).toEqual([]);
+    expect(dropped.length).toBe(1);
+    expect(dropped[0].reason).toMatch(/size.*finite|infinite/i);
+  });
+
+  it("coerces size strictly (only accepts numbers)", () => {
+    const { parts, dropped } = partsFromLlm([
+      { name: "StringSize", shape: "box", size: ["2", 1, 1] },
+      { name: "BoolSize", shape: "sphere", size: [true] },
+    ]);
+    expect(parts).toEqual([]);
+    expect(dropped.length).toBe(2);
+  });
+
+  it("round-trips all accepted parts through format -> parse with zero errors", () => {
+    const inputs = [
+      { name: "Box1", shape: "box", size: [1, 2, 3], position: [0.1, 0.2, 0.3], rotation_deg: [45, 90, 0], color: "#ff0000" },
+      { name: "Sphere1", shape: "sphere", size: [0.5], position: [-1, 0, 1], color: "#00ff00" },
+      { shape: "cone", size: [0.1, 0.2] }, // no name
+      { name: "PosBreak", shape: "box", size: [1], position: [1, 2], color: "notacolor" }, // broken position and color
+    ];
+    const { parts } = partsFromLlm(inputs);
+    const formatted = formatShapes({}, parts);
+    const reparsed = parseShapes(formatted);
+    expect(reparsed.errors).toEqual([]);
+    expect(reparsed.parts.length).toBe(parts.length);
+  });
 });

@@ -58,14 +58,30 @@ export function partsFromLlm(raw: readonly unknown[]): {
       dropped.push({ index, reason: `unknown shape \`${String(rec.shape)}\`` });
       return;
     }
-    const sizeValues = Array.isArray(rec.size) ? rec.size.map(Number) : null;
-    if (sizeValues === null) {
+    // Coerce size strictly: only accept typeof v === "number"
+    const sizeRaw = Array.isArray(rec.size) ? rec.size : null;
+    if (sizeRaw === null) {
       dropped.push({ index, reason: "`size` is missing" });
+      return;
+    }
+    const sizeValues = sizeRaw.filter((v) => typeof v === "number");
+    if (sizeValues.length !== sizeRaw.length) {
+      dropped.push({ index, reason: "`size` must contain only numbers" });
+      return;
+    }
+    // Check that all size values are finite
+    if (!sizeValues.every(Number.isFinite)) {
+      dropped.push({ index, reason: "`size` values must be finite" });
       return;
     }
     const size = normalizeSize(kind as ShapeKind, sizeValues);
     if (typeof size === "string") {
       dropped.push({ index, reason: size });
+      return;
+    }
+    // Check that no size value rounds to zero
+    if (size.some((v) => formatNumber(v) === "0")) {
+      dropped.push({ index, reason: "`size` values must be at least 0.0001" });
       return;
     }
 
