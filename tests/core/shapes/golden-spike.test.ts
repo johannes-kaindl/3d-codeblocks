@@ -2,6 +2,11 @@
 // durch den Produktionsweg readPartsAnswer → partsFromLlm → formatShapes → convertShapesText
 // → loadModel. Die Grenzen je Prompt sind die VORAB festgelegten des Spikes; A01 ist um die
 // Lochprüfung verschärft (mindestens vier Teile um die Lücke), die im Spike fehlte.
+//
+// Drei Fixtures statt der zwei, die der Bauauftrag nannte: a-q27-dsl.jsonl enthält für A04 einen
+// Netzwerkfehler-Satz ohne Antwort („fetch failed“); der Spike hat genau diesen Eintrag selbst wiederholt
+// (a-q27-dsl-rerun.jsonl). Die Rerun-Datei liegt deshalb unverändert daneben, und `readRecords` ersetzt nur
+// Fehlersätze ohne Antwort durch den Satz derselben id — und wirft, wenn keiner da ist (Ruling des Masters, 2026-10-03).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Box3, Mesh, Vector3 } from "three";
