@@ -549,6 +549,24 @@ Die fünf Kameras im Prüfmodell und wofür jede steht:
 > auf `clickReal` oder ein `await` zwischen Suchen und Klicken umgestellt, würde R2 das
 > fangen. Kein Fix nötig, weder hier noch in der Bruecke (`tools/obsidian-cdp/cdp.ts`).
 
+## shapes-DSL (2026-10-03)
+
+> [!success] Automatisiert seit 2026-10-03 — `npm run smoke:gui -- --section files` (Punkte SH1–SH5 am Ende des Abschnitts)
+
+Die Textsprache `shapes` (Teile aus Quader, Zylinder, Kugel, Kegel) wird als ```shapes-Block, als `.shapes`-Datei über ```3d file: und als Embed angezeigt und lässt sich als glTF exportieren. Der Abschnitt bringt sein Prüfmaterial selbst mit (eine Tisch-DSL mit einer absichtlich kaputten Zeile) und räumt es weg.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| SH1 | Ein ```shapes-Block rendert seine Teile (Farbtöne im Canvas), obwohl eine Zeile kaputt ist |
+| SH2 | Die kaputte Zeile kostet nur sich selbst und wird mit Zeilennummer gemeldet (`Line 7: …`) |
+| SH3 | Ein Block ohne gültiges Teil sagt das („The shapes code has no valid part. Line 1: …") und zeichnet nichts |
+| SH4 | Dieselbe DSL rendert als Datei über ```3d file: und als Embed (vier Blöcke, Farbtöne beider 15/15) |
+| SH5 | Der Befehl „Export shapes model as glTF" schreibt `Tisch.gltf` mit `generatedFrom` = Quelle und fünf Knoten; liegt dort schon eine `Tisch.gltf`, wird der Punkt als übersprungen gemeldet statt gemessen |
+
+**Ergebnis (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess):** Baseline vor den shapes-Tasks 71 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen (+5 = SH1–SH5, die sieben Skips sind unverändert bewusste Handarbeit).
+
+**Gegenprobe (CORE-TEST-01):** derselbe Treiber gegen den Plugin-Stand von `main` ohne shapes (Build davor, `59a5734`) meldet 71 grün und genau SH1–SH5 rot — die Punkte können also fehlschlagen und messen das Feature, nicht ihren eigenen Aufbau.
+
 ## Befunde
 
 _Hier notieren, was auffällt._
