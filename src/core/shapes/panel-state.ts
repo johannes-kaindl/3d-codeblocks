@@ -28,7 +28,7 @@ export const INITIAL_PANEL: PanelState = { target: { kind: "new" }, rounds: EMPT
  *  sich verschoben haben, ist bei offenen Runden ein ANDERES Ziel: das Panel bekommt bei jedem Klick ein
  *  frisches Ziel, und der Schreiber (Task 7) findet den Zaun über die Zeilennummer wieder und verweigert,
  *  wenn der Block gewandert ist. */
-function sameTarget(a: PanelTarget, b: PanelTarget): boolean {
+export function sameTarget(a: PanelTarget, b: PanelTarget): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case "new":

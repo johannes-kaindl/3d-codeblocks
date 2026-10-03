@@ -11,6 +11,7 @@ import {
   baseTextForRefine,
   followTarget,
   INITIAL_PANEL,
+  sameTarget,
   type PanelState,
   type PanelTarget,
   type ShapesRound,
@@ -47,6 +48,8 @@ const PHASE_ICON: Record<Exclude<Phase, "idle">, string> = {
   warning: "alert-triangle",
 };
 const PHASES: Phase[] = ["checking", "ok", "error", "warning"];
+
+let selectSeq = 0;
 
 const encode = (text: string): ArrayBuffer => {
   const bytes = new TextEncoder().encode(text);
@@ -131,10 +134,16 @@ export class PromptPanelView extends ItemView {
   }
 
   setTarget(t: PanelTarget): void {
-    const r = followTarget(this.panel, t);
-    this.panel = r.state;
-    this.kept = r.kept;
-    this.offered = r.kept ? t : null;
+    // Waehrend einer Anfrage gilt das Ziel wie bei offenen Runden: es bleibt, das neue wird nur angeboten.
+    if (this.controller !== null) {
+      this.kept = !sameTarget(this.panel.target, t);
+      this.offered = this.kept ? t : null;
+    } else {
+      const r = followTarget(this.panel, t);
+      this.panel = r.state;
+      this.kept = r.kept;
+      this.offered = r.kept ? t : null;
+    }
     this.renderHeader();
     this.renderVersions();
   }
@@ -190,7 +199,7 @@ export class PromptPanelView extends ItemView {
 
     // Modellzeile: Beschriftung, Auswahl, Aktualisieren.
     const modelRow = c.createDiv({ cls: "tdcb-prompt-model" });
-    const selectId = "tdcb-prompt-model-select";
+    const selectId = `tdcb-prompt-model-select-${++selectSeq}`;
     modelRow.createEl("label", { text: PANEL_TEXTS.model, attr: { for: selectId } });
     this.modelSelect = modelRow.createEl("select", { cls: "dropdown", attr: { id: selectId } });
     this.modelSelect.addEventListener("change", () => void this.chooseModel(this.modelSelect.value));
@@ -260,7 +269,9 @@ export class PromptPanelView extends ItemView {
   }
 
   private canSend(): boolean {
-    return this.controller === null && !this.noEndpoint && this.panel.target.kind !== "other";
+    // `noEndpoint` sperrt NICHT: der Zustand wird vor jedem Senden neu bewertet, sonst waere der Empty-State
+    // eine Sackgasse (nach „Open settings“ und Konfiguration muss Senden wieder gehen).
+    return this.controller === null && this.panel.target.kind !== "other";
   }
 
   /** Ein Lauf: Senden → Anfrage → Ergebnis. Muster aus lingotuner `run`: Vergleich `controller !== ctrl`
@@ -274,9 +285,35 @@ export class PromptPanelView extends ItemView {
   }
 
   private async runInner(instruction: string): Promise<void> {
-    const kind = this.kind();
     const ctrl = new AbortController();
     this.controller = ctrl;
+    this.noEndpoint = false;
+    try {
+      await this.runBody(instruction, ctrl);
+    } catch (e) {
+      // Panel darf nie haengen: jede Ausnahme (readTargetText, complete, Rendern) wird Status.
+      if (this.controller === ctrl) this.setStatus("error", e instanceof Error ? e.message : String(e));
+    } finally {
+      if (this.controller === ctrl) {
+        this.controller = null;
+        this.settleTarget();
+        this.renderAll();
+        this.inputEl.focus();
+      }
+    }
+  }
+
+  /** Ein angebotenes Ziel, das waehrend des Laufs zurueckgehalten wurde, gilt jetzt, wenn keine Runde offen ist. */
+  private settleTarget(): void {
+    if (this.panel.rounds.rounds.length === 0 && this.offered !== null) {
+      this.panel = { ...this.panel, target: this.offered };
+      this.offered = null;
+      this.kept = false;
+    }
+  }
+
+  private async runBody(instruction: string, ctrl: AbortController): Promise<void> {
+    const kind = this.kind();
     const target = this.panel.target;
     // Vor dem Lauf gelesen: die Auswahl der Runde, auf der aufgebaut wird, gilt für die ganze Anfrage.
     const basedOn = this.panel.rounds.active >= 0 ? this.panel.rounds.active : null;
@@ -288,9 +325,7 @@ export class PromptPanelView extends ItemView {
       base = baseTextForRefine(this.panel, await this.deps.readTargetText(target));
       if (this.controller !== ctrl) return;
       if (base === null) {
-        this.controller = null;
         this.setStatus("error", PANEL_TEXTS.modelGone);
-        this.renderControls();
         return;
       }
       messages = buildRefineMessages(base, instruction);
@@ -315,18 +350,13 @@ export class PromptPanelView extends ItemView {
       this.area.appendReasoning(t);
     };
 
-    let r;
-    try {
-      r = await this.deps.llm.complete({ messages }, { onToken, onReasoning, signal: ctrl.signal });
-    } catch (e) {
-      if (this.controller !== ctrl) return;
-      this.controller = null;
-      this.setStatus("error", e instanceof Error ? e.message : String(e));
-      this.renderControls();
+    const r = await this.deps.llm.complete({ messages }, { onToken, onReasoning, signal: ctrl.signal });
+    if (this.controller !== ctrl) return;
+    // Abgebrochen heisst abgebrochen, auch wenn das Ergebnis noch „ok“ ankam.
+    if (ctrl.signal.aborted) {
+      this.setStatus("idle", PANEL_TEXTS.aborted);
       return;
     }
-    if (this.controller !== ctrl) return;
-    this.controller = null;
 
     if (!r.ok) {
       if (r.kind === "aborted") {
@@ -338,16 +368,23 @@ export class PromptPanelView extends ItemView {
       } else {
         this.setStatus("error", r.detail);
       }
-      this.renderControls();
       return;
     }
 
+    if (r.truncated) {
+      this.setStatus("error", `${PANEL_TEXTS.cutOff} ${failureHint(model, kind)}`);
+      return;
+    }
     const content = r.content !== "" ? r.content : raw;
     const made = kind === "create" ? this.readCreate(content) : this.readRefine(content, base ?? "");
     if (!made.ok) {
       // Der Rohtext bleibt im Tail stehen; keine Runde.
       this.setStatus("error", `${made.reason} ${failureHint(model, kind)}`);
-      this.renderControls();
+      return;
+    }
+    // Eine Runde gehoert zu dem Ziel, fuer das gefragt wurde.
+    if (!sameTarget(this.panel.target, target)) {
+      this.setStatus("error", PANEL_TEXTS.targetChanged);
       return;
     }
     const at = Date.now();
@@ -359,7 +396,6 @@ export class PromptPanelView extends ItemView {
     this.setStatus("ok", PANEL_TEXTS.done);
     this.renderAll();
     await this.renderPreview();
-    if (this.controller === null) this.inputEl.focus();
   }
 
   private readCreate(content: string): { ok: true; kind: "create"; text: string } | { ok: false; reason: string } {
@@ -388,7 +424,12 @@ export class PromptPanelView extends ItemView {
   private async apply(): Promise<void> {
     if (this.panel.rounds.rounds.length === 0) return;
     this.pending = (async () => {
-      const r = await this.deps.accept(this.panel);
+      let r: { ok: boolean; message: string };
+      try {
+        r = await this.deps.accept(this.panel);
+      } catch (e) {
+        r = { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
       if (r.ok) {
         this.panel = { ...this.panel, rounds: clearRounds() };
         this.kept = false;
@@ -409,6 +450,7 @@ export class PromptPanelView extends ItemView {
 
   /** Verwerfen: Runden weg; ein angebotenes (verweigertes) Ziel wird jetzt übernommen — „discard to switch“. */
   private async discard(): Promise<void> {
+    if (this.controller !== null) return;
     if (!(await this.confirmDiscard())) return;
     const next = this.offered ?? this.panel.target;
     this.panel = { target: next, rounds: clearRounds() };
@@ -430,13 +472,26 @@ export class PromptPanelView extends ItemView {
 
   private async chooseModel(value: string): Promise<void> {
     if (value === "") return;
-    await this.deps.persistModel(value);
-    this.deps.llm.invalidate();
+    try {
+      await this.deps.persistModel(value);
+      this.deps.llm.invalidate();
+    } catch (e) {
+      if (this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e));
+    }
     this.renderHeader();
   }
 
   private async loadModels(force: boolean): Promise<void> {
-    const r = await this.deps.llm.models({ force });
+    // Neu bewerten: ein frueher gemeldeter „kein Endpunkt“ gilt nicht fuer immer (Einstellungen koennen sich geaendert haben).
+    this.noEndpoint = false;
+    this.renderControls();
+    let r;
+    try {
+      r = await this.deps.llm.models({ force });
+    } catch (e) {
+      if (this.hub !== null && this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e));
+      return;
+    }
     if (this.hub === null) return;
     const current = this.model();
     const names = r.models.includes(current) || current === "" ? r.models : [current, ...r.models];

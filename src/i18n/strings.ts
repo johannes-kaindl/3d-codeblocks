@@ -45,6 +45,8 @@ export const PANEL_TEXTS = {
   diffHeading: "Changes in this round",
   modelGone: "The model to change is gone.",
   answerChangesNothing: "The answer changes nothing.",
+  cutOff: "The answer was cut off (length limit).",
+  targetChanged: "The target changed while the model was answering — nothing was added.",
   noUsableParts: "the answer holds no usable part",
   noEndpointDetail: (detail: string) => `Reason: ${detail}`,
 } as const;

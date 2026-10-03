@@ -497,10 +497,9 @@
 .tdcb-prompt-versions-empty { color: var(--text-muted); font-size: var(--font-ui-small); }
 /* Status-Indikator (UI-STANDARD §8): Form UND Farbe UND Klasse; is-checking dreht sich. */
 .tdcb-status { display: flex; gap: var(--size-2-2); align-items: center; }
-.tdcb-status-icon svg { width: 14px; height: 14px; }
+.tdcb-status-icon svg { width: var(--icon-xs); height: var(--icon-xs); }
 .tdcb-status.is-ok .tdcb-status-icon { color: var(--text-success); }
 .tdcb-status.is-error .tdcb-status-icon { color: var(--text-error); }
 .tdcb-status.is-warning .tdcb-status-icon { color: var(--text-warning); }
 .tdcb-status.is-checking .tdcb-status-icon svg { animation: tdcb-spin 1.2s linear infinite; }
-@keyframes tdcb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tdcb-status.is-checking .tdcb-status-icon svg { animation: none; } }

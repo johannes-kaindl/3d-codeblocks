@@ -114,14 +114,25 @@ describe("PromptPanelView", () => {
     expect(round.diff[0].startsWith("Platte: at")).toBe(true);
   });
 
-  it("shows the no-endpoint empty state and disables sending", async () => {
-    const { view } = makeView(async () => ({ ok: false, kind: "no-endpoint", detail: "disabled", partial: "", reasoning: "", timing: TIMING, facts: null, deviations: [], source: {} }));
+  it("shows the no-endpoint empty state, and sending works again once an endpoint exists", async () => {
+    let configured = false;
+    const good = answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}');
+    const { view } = makeView(async (req, h) =>
+      configured
+        ? good(req, h)
+        : { ok: false, kind: "no-endpoint", detail: "disabled", partial: "", reasoning: "", timing: TIMING, facts: null, deviations: [], source: {} },
+    );
     await view.onOpen();
     expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(true);
     await send(view, "a box");
     expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(false);
-    expect(one(view, "tdcb-prompt-send").disabled).toBe(true);
     expect(view.state().rounds.rounds).toHaveLength(0);
+    // Kein Sackgasse: nach der Konfiguration geht Senden wieder, der Empty-State verschwindet.
+    expect(one(view, "tdcb-prompt-send").disabled).toBe(false);
+    configured = true;
+    await send(view, "a box");
+    expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(true);
+    expect(view.state().rounds.rounds).toHaveLength(1);
   });
 
   it("aborts a running request on close and writes nothing afterwards", async () => {
@@ -166,5 +177,113 @@ describe("PromptPanelView", () => {
     expect(accept).toHaveBeenCalledTimes(1);
     expect(view.state().rounds.rounds).toHaveLength(0);
     expect(statusText(view)).toBe("Applied to n.md.");
+  });
+
+  // Eine Anfrage, die haengt, bis der Test sie freigibt.
+  function held(content: string) {
+    let release: () => void = () => {};
+    const good = answer(content);
+    const complete: Complete = (req, h) => new Promise((resolve) => { release = () => void good(req, h).then(resolve); });
+    return { complete, release: () => release(), started: () => release !== undefined };
+  }
+
+  it("keeps target new while a create request runs, and the round belongs to new", async () => {
+    const h = held('{"parts":[{"name":"A","shape":"box","size":[1]}]}');
+    const { view } = makeView(h.complete);
+    await view.onOpen();
+    one(view, "tdcb-prompt-input").value = "a box";
+    one(view, "tdcb-prompt-send").click();
+    expect(view.running()).toBe(true);
+    view.setTarget(BLOCK);
+    expect(view.state().target).toEqual({ kind: "new" });
+    expect(one(view, "tdcb-prompt-target").textContent).toContain("Target kept");
+    h.release();
+    await view.settled();
+    expect(view.state().rounds.rounds).toHaveLength(1);
+    expect(view.state().target).toEqual({ kind: "new" });
+  });
+
+  it("keeps target A while a refine request runs and B is offered", async () => {
+    const A: PanelTarget = { kind: "shapes-block", path: "a.md", lineStart: 0, lineEnd: 2, label: "A" };
+    const B: PanelTarget = { kind: "shapes-block", path: "b.md", lineStart: 0, lineEnd: 2, label: "B" };
+    const h = held('{"changes":[{"op":"change","name":"Platte","position":[0,0.925,0]}]}');
+    const { view } = makeView(h.complete, { readTargetText: vi.fn(async () => TABLE) });
+    await view.onOpen();
+    view.setTarget(A);
+    one(view, "tdcb-prompt-input").value = "raise";
+    one(view, "tdcb-prompt-send").click();
+    await vi.waitFor(() => expect(view.running()).toBe(true));
+    await new Promise((r) => setTimeout(r, 0));
+    view.setTarget(B);
+    expect(view.state().target).toEqual(A);
+    h.release();
+    await view.settled();
+    expect(view.state().target).toEqual(A);
+    expect(view.state().rounds.rounds).toHaveLength(1);
+  });
+
+  it("adds no round when the target changed under the request by other means", async () => {
+    const h = held('{"parts":[{"name":"A","shape":"box","size":[1]}]}');
+    const { view } = makeView(h.complete);
+    await view.onOpen();
+    one(view, "tdcb-prompt-input").value = "a box";
+    one(view, "tdcb-prompt-send").click();
+    (view as any).panel = { ...view.state(), target: BLOCK };
+    h.release();
+    await view.settled();
+    expect(view.state().rounds.rounds).toHaveLength(0);
+    expect(statusText(view)).toContain("target changed");
+  });
+
+  it("recovers when readTargetText rejects", async () => {
+    const readTargetText = vi.fn(async () => { throw new Error("disk gone"); });
+    const { view } = makeView(answer("{}"), { readTargetText });
+    await view.onOpen();
+    view.setTarget(BLOCK);
+    await send(view, "raise");
+    expect(view.running()).toBe(false);
+    expect(statusText(view)).toContain("disk gone");
+    expect(one(view, "tdcb-prompt-send").disabled).toBe(false);
+  });
+
+  it("shows an error and keeps the rounds when accept rejects", async () => {
+    const accept = vi.fn(async () => { throw new Error("write failed"); });
+    const { view } = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'), { accept });
+    await view.onOpen();
+    await send(view, "a box");
+    one(view, "tdcb-prompt-apply").click();
+    await view.settled();
+    expect(statusText(view)).toContain("write failed");
+    expect(view.state().rounds.rounds).toHaveLength(1);
+  });
+
+  it("writes no round when the request was aborted, even if the result arrives ok", async () => {
+    const h = held('{"parts":[{"name":"A","shape":"box","size":[1]}]}');
+    const { view } = makeView(h.complete);
+    await view.onOpen();
+    one(view, "tdcb-prompt-input").value = "a box";
+    one(view, "tdcb-prompt-send").click();
+    one(view, "tdcb-prompt-stop").click();
+    h.release();
+    await view.settled();
+    expect(view.state().rounds.rounds).toHaveLength(0);
+    expect(statusText(view)).toBe("Stopped.");
+  });
+
+  it("reports a truncated answer as cut off", async () => {
+    const { view } = makeView(async () => ({ ok: true, content: '{"parts":[', reasoning: "", toolCalls: [], truncated: true, streamed: true, timing: TIMING, facts: null, deviations: [], source: {} }));
+    await view.onOpen();
+    await send(view, "a box");
+    expect(statusText(view)).toContain("cut off");
+    expect(view.state().rounds.rounds).toHaveLength(0);
+  });
+
+  it("survives a rejecting model list and a rejecting persistModel", async () => {
+    const { view, llm } = makeView(answer("{}"), { persistModel: vi.fn(async () => { throw new Error("save failed"); }) });
+    llm.models.mockRejectedValue(new Error("offline"));
+    await view.onOpen();
+    await vi.waitFor(() => expect(statusText(view)).toContain("offline"));
+    await (view as any).chooseModel("x");
+    expect(statusText(view)).toContain("save failed");
   });
 });
