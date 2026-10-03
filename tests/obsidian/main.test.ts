@@ -101,3 +101,41 @@ describe("modify watcher wiring", () => {
     expect(view.refreshAutoRotate).toHaveBeenCalled();
   });
 });
+
+describe("shapes registration", () => {
+  function freshPlugin() {
+    const app = makeFakeApp();
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any) as any;
+    plugin.registerView = vi.fn();
+    plugin.registerExtensions = vi.fn();
+    plugin.registerMarkdownCodeBlockProcessor = vi.fn();
+    plugin.addCommand = vi.fn();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    return plugin;
+  }
+
+  it("registers the shapes language and extension", async () => {
+    const plugin = freshPlugin();
+    await plugin.onload();
+    const languages = plugin.registerMarkdownCodeBlockProcessor.mock.calls.map((c: unknown[]) => c[0]);
+    expect(languages).toEqual(expect.arrayContaining(["3d", "gltf", "shapes"]));
+    const extensions = plugin.registerExtensions.mock.calls.flatMap((c: unknown[]) => c[0] as string[]);
+    expect(extensions).toEqual(expect.arrayContaining(["gltf", "glb", "stl", "shapes"]));
+  });
+
+  it("keeps loading when another plugin already owns the shapes language", async () => {
+    const plugin = freshPlugin();
+    plugin.registerMarkdownCodeBlockProcessor = vi.fn((lang: string) => {
+      if (lang === "shapes") throw new Error("taken");
+    });
+    await expect(plugin.onload()).resolves.toBeUndefined();
+  });
+
+  it("keeps loading when another plugin already owns the shapes extension", async () => {
+    const plugin = freshPlugin();
+    plugin.registerExtensions = vi.fn((exts: string[]) => {
+      if (exts.includes("shapes") && exts.length === 1) throw new Error("taken");
+    });
+    await expect(plugin.onload()).resolves.toBeUndefined();
+  });
+});

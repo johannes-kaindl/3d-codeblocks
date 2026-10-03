@@ -120,3 +120,41 @@ describe("GltfBlock", () => {
     });
   });
 });
+
+describe("GltfBlock in shapes mode", () => {
+  it("renders shapes text through the glTF path", async () => {
+    const { deps, loadModel } = makeDeps();
+    const el = makeFakeEl();
+    const block = new GltfBlock(el, "box A size 1", deps, "shapes");
+    block.onload();
+    await block.rendering;
+    expect(loadModel).toHaveBeenCalledTimes(1);
+    expect(loadModel.mock.calls[0][1]).toBe("gltf");
+  });
+
+  it("does not run the JSON check on shapes text", async () => {
+    const { deps } = makeDeps();
+    const el = makeFakeEl();
+    const block = new GltfBlock(el, "sphere K size 1", deps, "shapes");
+    block.onload();
+    await block.rendering;
+    expect(JSON.stringify(el.children)).not.toContain("not valid JSON");
+  });
+
+  it("applies title and height from the header", async () => {
+    const { deps } = makeDeps();
+    const el = makeFakeEl();
+    const block = new GltfBlock(el, "title: Tisch\nheight: 321\nbox A size 1", deps, "shapes");
+    block.onload();
+    await block.rendering;
+    const dump = JSON.stringify(el.children);
+    expect(dump).toContain("Tisch");
+    expect(dump).toContain("321");
+  });
+
+  it("labels itself as a shapes block", () => {
+    const { deps } = makeDeps();
+    const block = new GltfBlock(makeFakeEl(), "box A size 1", deps, "shapes");
+    expect(block.controller.label()).toBe("shapes code block");
+  });
+});

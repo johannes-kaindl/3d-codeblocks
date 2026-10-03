@@ -9,8 +9,15 @@
 // Block komplett ausserhalb der Aktiv-Verdrahtung: Interaktion hier liess Sidebar,
 // Highlight-Rahmen und die drei Befehle weiter auf das zuletzt aktive ANDERE Modell
 // zeigen.
+//
+// Zweiter Modus `shapes` (Spec Modell per Prompt § 3): derselbe Block, nur ist der Text
+// shapes-DSL statt glTF-JSON. Die Umwandlung macht der ViewerHost (format "shapes");
+// hier kommen nur Kopfzeilen (title, height, view) hinzu, die ein gltf-Block nicht hat.
 import { MarkdownRenderChild } from "obsidian";
 import type { ActiveViewport } from "../core/active-viewport";
+import { parseShapes } from "../core/shapes/parse";
+import type { ShapesHeader } from "../core/shapes/types";
+import type { ViewRef } from "../core/view-spec";
 import { buildBox, type BoxParts } from "./render-box";
 import { readOnlyController } from "./read-only-controller";
 import { ViewerHost, wrapBudgetWithActive, type HostBaseDeps } from "./viewer-host";
@@ -18,6 +25,8 @@ import { ViewerHost, wrapBudgetWithActive, type HostBaseDeps } from "./viewer-ho
 export interface GltfBlockDeps extends HostBaseDeps {
   active: ActiveViewport;
 }
+
+export type InlineBlockKind = "gltf" | "shapes";
 
 export class GltfBlock extends MarkdownRenderChild {
   private parts: BoxParts | null = null;
@@ -28,19 +37,24 @@ export class GltfBlock extends MarkdownRenderChild {
 
   readonly controller = readOnlyController(
     () => this.host,
-    () => "glTF code block",
+    () => (this.kind === "shapes" ? "shapes code block" : "glTF code block"),
   );
 
   constructor(
     containerEl: HTMLElement,
     private readonly source: string,
     private readonly deps: GltfBlockDeps,
+    private readonly kind: InlineBlockKind = "gltf",
   ) {
     super(containerEl);
   }
 
   onload(): void {
-    this.parts = buildBox(this.containerEl, { height: this.deps.settings().defaultHeight });
+    const header: ShapesHeader = this.kind === "shapes" ? parseShapes(this.source).header : {};
+    this.parts = buildBox(this.containerEl, {
+      height: header.height ?? this.deps.settings().defaultHeight,
+      title: header.title,
+    });
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: true,
@@ -48,7 +62,7 @@ export class GltfBlock extends MarkdownRenderChild {
     });
     // Kein IntersectionObserver: der Blocktext ist schon da, es gibt keine Datei-I/O
     // zu sparen. Direkt rendern.
-    this.rendering = this.loadNow();
+    this.rendering = this.loadNow(header.view);
   }
 
   onunload(): void {
@@ -72,23 +86,26 @@ export class GltfBlock extends MarkdownRenderChild {
   onFileModified(): void {}
 
   /** Oeffentlich fuer Tests. */
-  async loadNow(): Promise<void> {
+  async loadNow(view?: ViewRef): Promise<void> {
     if (this.unloaded || !this.host) return;
 
-    // JSON vor dem Loader pruefen, damit der Nutzer den echten Grund sieht statt eines
-    // three.js-internen Parserfehlers.
-    try {
-      JSON.parse(this.source);
-    } catch {
-      this.host.showError({ kind: "invalid-gltf-json" });
-      return;
+    if (this.kind === "gltf") {
+      // JSON vor dem Loader pruefen, damit der Nutzer den echten Grund sieht statt eines
+      // three.js-internen Parserfehlers.
+      try {
+        JSON.parse(this.source);
+      } catch {
+        this.host.showError({ kind: "invalid-gltf-json" });
+        return;
+      }
     }
 
     await this.host.render({
       provideBytes: () => Promise.resolve(new TextEncoder().encode(this.source).buffer),
-      format: "gltf",
+      format: this.kind === "shapes" ? "shapes" : "gltf",
       inspectContainer: false,
-      label: "glTF code block",
+      label: this.kind === "shapes" ? "shapes code block" : "glTF code block",
+      ...(view ? { view } : {}),
     });
   }
 }

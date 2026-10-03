@@ -64,7 +64,7 @@ interface EmbedRegistry {
   unregisterExtension?(extension: string): void;
 }
 
-const MODEL_EXTENSIONS = ["gltf", "glb", "stl"] as const;
+const MODEL_EXTENSIONS = ["gltf", "glb", "stl", "shapes"] as const;
 
 export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   private parts: BoxParts | null = null;

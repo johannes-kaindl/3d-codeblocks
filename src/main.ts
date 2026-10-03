@@ -105,6 +105,22 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       },
     );
 
+    // ```shapes — die DSL direkt im Block (Spec Modell per Prompt § 3). Eigenes try:
+    // belegt ein fremdes Plugin die Sprache, faellt nur dieser Weg aus, nicht das Plugin.
+    try {
+      this.registerMarkdownCodeBlockProcessor(
+        "shapes",
+        (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+          const block = new GltfBlock(el, source, hostDeps, "shapes");
+          this.track(block);
+          ctx.addChild(block);
+        },
+      );
+    } catch (error) {
+      console.warn("[three-d-codeblocks] ```shapes code blocks unavailable:", error);
+      new Notice("3D Codeblocks: ```shapes code blocks unavailable — another plugin already uses that language.");
+    }
+
     // ![[datei.gltf]] — Embed in einer Notiz über die (inoffizielle) embedRegistry.
     // Fehlt die API in einer künftigen Obsidian-Version, laufen die anderen drei Wege
     // weiter; nur Embeds entfallen dann.
@@ -131,6 +147,14 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       return view;
     });
     this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
+    // `.shapes` getrennt: haelt ein anderes Plugin die Endung, wirft Obsidian — dann
+    // sollen wenigstens glTF/GLB/STL weiter in der 3D-Ansicht aufgehen.
+    try {
+      this.registerExtensions(["shapes"], VIEW_TYPE_3D);
+    } catch (error) {
+      console.warn("[three-d-codeblocks] .shapes files unavailable:", error);
+      new Notice("3D Codeblocks: .shapes files unavailable — another plugin already handles that extension.");
+    }
 
     // Rechte Leiste: Presets/Save/Clear/Fit fuer den zuletzt bedienten Viewport.
     this.registerView(
