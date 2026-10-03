@@ -165,12 +165,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
               moveToFile: () => {
                 const info = sectionInfo();
                 if (!info) return;
-                void convertBlockAt(
-                  { app: this.app, ports: obsidianWritePorts(this.app), notice: (m: string) => { new Notice(m); } },
-                  ctx.sourcePath,
-                  info.lineStart,
-                  info.lineEnd,
-                );
+                void convertBlockAt(this.convertEnv(), ctx.sourcePath, info.lineStart, info.lineEnd, source);
               },
             },
             "shapes",
@@ -303,7 +298,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
 
     // Umwandeln ```shapes-Block <-> .shapes-Datei. checkCallback/Menue fragen nur billig und ohne
     // Nebenwirkung; die Ablehnungsgruende meldet der Befehl selbst als Notice.
-    const convertEnv = () => ({ app: this.app, ports: obsidianWritePorts(this.app), notice: (m: string) => { new Notice(m); } });
+    const convertEnv = () => this.convertEnv();
     this.addCommand({
       id: "convert-shapes-block-to-file",
       name: "Move shapes block into a .shapes file",
@@ -405,6 +400,10 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     }
   }
 
+  private convertEnv() {
+    return { app: this.app, ports: obsidianWritePorts(this.app), notice: (m: string) => { new Notice(m); } };
+  }
+
   /** Das Prompt-Panel in der rechten Leiste oeffnen (oder zeigen) und ihm das Ziel geben. Solange die View
    *  nicht registriert ist (Task 6), meldet das eine Notice statt ein leeres Blatt anzulegen. */
   async openPromptPanel(target: PanelTarget): Promise<void> {
@@ -412,7 +411,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     const unavailable = () => new Notice("The prompt panel is not available");
     // Intern, aber lesbar: ohne registrierten Typ legt setViewState ein leeres Blatt an, statt zu werfen.
     const registry = (this.app as unknown as { viewRegistry?: { viewByType?: Record<string, unknown> } }).viewRegistry?.viewByType;
-    if (registry && !(VIEW_TYPE_PROMPT in registry)) {
+    // Nicht nachweisbar registriert (auch: Registry fehlt) heisst nicht weitermachen — setViewState legte sonst ein leeres Blatt an.
+    if (!registry || !(VIEW_TYPE_PROMPT in registry)) {
       unavailable();
       return;
     }

@@ -136,9 +136,9 @@ async function moveFenceToFile(env: ConvertEnv, file: TFile, fence: Fence, lines
  * Wie `convertBlockToFile`, aber ohne Cursor: der Block wird ueber die Zeilen aus dem Markdown-
  * Nachbearbeiter (`lineStart`/`lineEnd` = die Zaunzeilen, 0-basiert) gefunden. Die Notiz wird neu gelesen
  * und der Zaun an `lineStart` geprueft (Sprache, Schlusszeile); stimmt etwas nicht, ist der Block gewandert
- * und nichts wird geaendert. Ein Zaun in einem Zitat/Callout ist von hier aus nicht auffindbar: dieselbe Ablehnung.
+ * und nichts wird geaendert. Ein Zaun in einem Zitat/Callout ist von hier aus nicht auffindbar: dieselbe Ablehnung. `expectedBody` ist der gerenderte Blocktext.
  */
-export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: number, lineEnd: number): Promise<boolean> {
+export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: number, lineEnd: number, expectedBody: string): Promise<boolean> {
   const { app, ports, notice } = env;
   const file = app.vault.getAbstractFileByPath(path);
   let text: string;
@@ -154,6 +154,14 @@ export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: n
   }
   const fence = listFences(text).find((f) => f.openLine === lineStart);
   if (!fence || fence.lang !== "shapes" || fence.closeLine !== lineEnd) {
+    notice("The block moved or sits inside a quote, callout or list — nothing was changed. Place the cursor in it and use the command instead.");
+    return false;
+  }
+  // Zeilennummern allein tragen nicht: nach einer Aenderung darueber trifft eine veraltete Position einen ANDERN,
+  // gleich langen shapes-Block. Der Inhalt muss der sein, den der Nachbearbeiter gerendert hat. `source` kann ein
+  // abschliessendes Zeilenende tragen (siehe ModelBlock.stripTrailingNewline) — beide Seiten ohne eines vergleichen.
+  const norm = (t: string) => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  if (norm(fence.body) !== norm(expectedBody)) {
     notice("The block moved or sits inside a quote, callout or list — nothing was changed. Place the cursor in it and use the command instead.");
     return false;
   }

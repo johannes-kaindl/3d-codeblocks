@@ -263,11 +263,13 @@ describe("convertBlockToFile", () => {
   });
 });
 
+const BODY = "title: Tisch\nbox A size 1";
+
 describe("convertBlockAt (no cursor, lines from the post processor)", () => {
   // NOTE: Zeile 0 "# Möbel", 1 "```shapes", 4 "```" — lineStart/lineEnd sind die Zaunzeilen.
   it("moves the block located by its fence lines (reading mode: vault.process path)", async () => {
     const { env, store, notices, events } = setup({ "n.md": NOTE }, { activeFile: "n.md" });
-    expect(await convertBlockAt(env, "n.md", 1, 4)).toBe(true);
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(true);
     expect(store["Anhänge/Tisch.shapes"]).toBe("title: Tisch\nbox A size 1\n");
     expect(store["n.md"]).toBe(REF_NOTE);
     expect(notices[0]).toContain("Anhänge/Tisch.shapes");
@@ -276,14 +278,14 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
 
   it("also works with the note open in an editor", async () => {
     const { env, store } = setup({ "n.md": NOTE });
-    expect(await convertBlockAt(env, "n.md", 1, 4)).toBe(true);
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(true);
     expect(store["n.md"]).toBe(REF_NOTE);
   });
 
   it("refuses when the block moved (an insertion above): nothing created, nothing changed", async () => {
     const moved = "neu\n" + NOTE;
     const { env, store, notices } = setup({ "n.md": moved }, { activeFile: "n.md" });
-    expect(await convertBlockAt(env, "n.md", 1, 4)).toBe(false);
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(false);
     expect(store["n.md"]).toBe(moved);
     expect(Object.keys(store)).toEqual(["n.md"]);
     expect(notices[0]).toMatch(/nothing was changed/);
@@ -292,7 +294,7 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
   it("refuses a fence of another language at the given line", async () => {
     const note = "# Möbel\n```python\nbox A size 1\n```\nEnde";
     const { env, store, notices } = setup({ "n.md": note }, { activeFile: "n.md" });
-    expect(await convertBlockAt(env, "n.md", 1, 3)).toBe(false);
+    expect(await convertBlockAt(env, "n.md", 1, 3, BODY)).toBe(false);
     expect(store["n.md"]).toBe(note);
     expect(Object.keys(store)).toEqual(["n.md"]);
     expect(notices[0]).toMatch(/nothing was changed/);
@@ -300,7 +302,7 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
 
   it("refuses when lineEnd is not the closing fence of the block", async () => {
     const { env, store } = setup({ "n.md": NOTE }, { activeFile: "n.md" });
-    expect(await convertBlockAt(env, "n.md", 1, 3)).toBe(false);
+    expect(await convertBlockAt(env, "n.md", 1, 3, BODY)).toBe(false);
     expect(store["n.md"]).toBe(NOTE);
     expect(Object.keys(store)).toEqual(["n.md"]);
   });
@@ -310,7 +312,7 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
       { "n.md": NOTE },
       { activeFile: "n.md", onCreate: (s) => { s["n.md"] = s["n.md"].replace("box A size 1", "box A size 2"); } },
     );
-    expect(await convertBlockAt(env, "n.md", 1, 4)).toBe(false);
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(false);
     expect(trashed).toEqual(["Anhänge/Tisch.shapes"]);
     expect(store["Anhänge/Tisch.shapes"]).toBeUndefined();
     expect(store["n.md"]).toContain("box A size 2");
@@ -320,7 +322,7 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
   it("works for a CRLF note", async () => {
     const crlf = NOTE.replace(/\n/g, "\r\n");
     const { env, store } = setup({ "n.md": crlf }, { activeFile: "n.md" });
-    expect(await convertBlockAt(env, "n.md", 1, 4)).toBe(true);
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(true);
     expect(store["Anhänge/Tisch.shapes"]).toBe("title: Tisch\nbox A size 1\n");
     expect(store["n.md"].replace(/\r\n/g, "\n")).toBe(REF_NOTE);
   });
@@ -328,7 +330,7 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
   it("refuses a block nested in a callout (lineStart points at the `> ```shapes` line)", async () => {
     const note = "> [!note]\n> ```shapes\n> box A size 1\n> ```\nEnde";
     const { env, store, notices } = setup({ "n.md": note }, { activeFile: "n.md" });
-    expect(await convertBlockAt(env, "n.md", 1, 3)).toBe(false);
+    expect(await convertBlockAt(env, "n.md", 1, 3, BODY)).toBe(false);
     expect(store["n.md"]).toBe(note);
     expect(Object.keys(store)).toEqual(["n.md"]);
     expect(notices[0]).toMatch(/quote, callout or list/);
@@ -336,18 +338,39 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
 
   it("refuses an indented block and an empty block with the same messages as the cursor path", async () => {
     const indented = setup({ "n.md": "- punkt\n  ```shapes\n  box A size 1\n  ```" }, { activeFile: "n.md" });
-    expect(await convertBlockAt(indented.env, "n.md", 1, 3)).toBe(false);
+    expect(await convertBlockAt(indented.env, "n.md", 1, 3, "  box A size 1")).toBe(false);
     expect(Object.keys(indented.store)).toEqual(["n.md"]);
     const empty = setup({ "n.md": "```shapes\n```" }, { activeFile: "n.md" });
-    expect(await convertBlockAt(empty.env, "n.md", 0, 1)).toBe(false);
+    expect(await convertBlockAt(empty.env, "n.md", 0, 1, "")).toBe(false);
     expect(empty.notices[0]).toMatch(/empty/);
     expect(Object.keys(empty.store)).toEqual(["n.md"]);
+  });
+
+  it("refuses a different block of the same size at stale lines (A deleted, B's info now hits C)", async () => {
+    const B = "```shapes\ntitle: B\nbox B size 1\n```";
+    const C = "```shapes\ntitle: C\nbox C size 1\n```";
+    // A was deleted: B now sits at 0-3 and C at 4-7.
+    const staleNote = `${B}\n${C}\nEnde`;
+    const { env, store, notices } = setup({ "n.md": staleNote }, { activeFile: "n.md" });
+    // B's section info was 4..7 when A still existed; now lines 4..7 are C.
+    expect(await convertBlockAt(env, "n.md", 4, 7, "title: B\nbox B size 1")).toBe(false);
+    expect(store["n.md"]).toBe(staleNote);
+    expect(Object.keys(store)).toEqual(["n.md"]);
+    expect(notices[0]).toMatch(/nothing was changed/);
+  });
+
+  it("accepts a source with a trailing line break, and a CRLF source against a CRLF note", async () => {
+    const a = setup({ "n.md": NOTE }, { activeFile: "n.md" });
+    expect(await convertBlockAt(a.env, "n.md", 1, 4, BODY + "\n")).toBe(true);
+    const crlf = NOTE.replace(/\n/g, "\r\n");
+    const b = setup({ "n.md": crlf }, { activeFile: "n.md" });
+    expect(await convertBlockAt(b.env, "n.md", 1, 4, BODY.replace(/\n/g, "\r\n") + "\r\n")).toBe(true);
   });
 
   it("refuses an unknown note path", async () => {
     const { env, notices } = setup({ "n.md": NOTE }, { activeFile: "n.md" });
     (env.app as never as { vault: { getAbstractFileByPath: () => null } }).vault.getAbstractFileByPath = () => null;
-    expect(await convertBlockAt(env, "n.md", 1, 4)).toBe(false);
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(false);
     expect(notices[0]).toMatch(/nothing was changed/);
   });
 });

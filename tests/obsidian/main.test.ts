@@ -290,6 +290,14 @@ describe("openPromptPanel", () => {
     spy.mockRestore();
   });
 
+  it("does not create a leaf when the registry is absent (registration not provable)", async () => {
+    const { plugin, app, leaf } = setup();
+    delete app.viewRegistry;
+    await plugin.openPromptPanel(target);
+    expect(leaf.setViewState).not.toHaveBeenCalled();
+    expect(app.workspace.getRightLeaf).not.toHaveBeenCalled();
+  });
+
   it("reports a failing setViewState as 'not available' instead of throwing", async () => {
     const { plugin, leaf } = setup();
     leaf.setViewState = vi.fn(async () => { throw new Error("boom"); });
