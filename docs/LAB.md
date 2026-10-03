@@ -22,6 +22,16 @@ Environment variables:
 
 Each JSONL line records the case id, duration in ms, HTTP status or error, the first 6000 characters of the answer, and the outcome (`good`). For refine it also records the entries the reader dropped and the problems found when applying. Refine is all-or-nothing: if any entry of the answer is unusable, the case fails and the reasons are recorded.
 
+## Reading a run
+
+Every case record has an `outcome`: `good`, `bad` (the model answered, the result is not good), `timeout` (the case ran longer than 15 minutes; a labelled result that counts as not good) or `infra` (connection error, HTTP status other than 200, or a 200 response without text content; nothing was measured). An answer cut off by the token budget (`finish_reason: length`) is the model's failure and counts as `bad`.
+
+The final line of the JSONL file is the summary: `{"summary": true, "run": …, "complete": …, "good": …, "of": …, "timeouts": …, "infraErrors": …, "dry": …}`. `complete` is true only when every case got a model answer (no `infra`). The summary line is the only evidence that a run is complete, and a partial JSONL file never counts: a table row needs `complete: true` in the summary line and `dry: false`. An incomplete run makes the lab test fail and is "not measured".
+
+The lab test fails loudly on bad environment values (unknown task, a task spelled with different case, a non-numeric or negative temperature, a URL without a model).
+
+Refine case R07 depends on the model keeping the part name `Bein-1` when it replaces the leg; a model that renames it fails that case by construction.
+
 ## Rules
 
 - Rows below come only from complete runs. A run that failed or was aborted is "not measured", with the reason, and never a failure count.
@@ -34,4 +44,4 @@ Each JSONL line records the case id, duration in ms, HTTP status or error, the f
 | Date | Model | Task | Result (good of total) | Duration | Notes |
 |---|---|---|---|---|---|
 
-No lab runs recorded yet — see CHANGELOG/Cockpit for the plan.
+No lab runs recorded yet.

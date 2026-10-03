@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges } from "../../../src/core/shapes/changes";
 import { REFINE_BASE, REFINE_CASES } from "../../helpers/shapes-cases";
-import { REFINE_CORRECT, REFINE_WRONG } from "../../helpers/shapes-refine-answers";
+import { REFINE_ALTERNATIVES, REFINE_CORRECT, REFINE_WRONG } from "../../helpers/shapes-refine-answers";
 
 describe("refine cases are satisfiable and their checks are sound", () => {
   for (const c of REFINE_CASES) {
@@ -12,9 +12,17 @@ describe("refine cases are satisfiable and their checks are sound", () => {
       expect(right.ok, JSON.stringify(right)).toBe(true);
       if (right.ok) expect(c.check(right.after)).toBe(true);
 
-      const wrong = applyChanges(REFINE_BASE, REFINE_WRONG[c.id]);
-      expect(wrong.ok, JSON.stringify(wrong)).toBe(true);
-      if (wrong.ok) expect(c.check(wrong.after)).toBe(false);
+      [...(REFINE_ALTERNATIVES[c.id] ?? [])].forEach((alt, i) => {
+        const r = applyChanges(REFINE_BASE, alt);
+        expect(r.ok, `alternative ${i}: ${JSON.stringify(r)}`).toBe(true);
+        if (r.ok) expect(c.check(r.after), `alternative ${i} must pass`).toBe(true);
+      });
+
+      REFINE_WRONG[c.id].forEach((list, i) => {
+        const wrong = applyChanges(REFINE_BASE, list);
+        expect(wrong.ok, `wrong ${i}: ${JSON.stringify(wrong)}`).toBe(true);
+        if (wrong.ok) expect(c.check(wrong.after), `wrong ${i} must fail`).toBe(false);
+      });
 
       const empty = applyChanges(REFINE_BASE, []);
       expect(empty.ok).toBe(true);

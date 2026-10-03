@@ -1,47 +1,45 @@
-// Messlauf gegen ein echtes Modell — NICHT Teil des Gates: läuft nur mit SHAPES_LAB_URL + SHAPES_LAB_MODEL
+// Messlauf gegen ein echtes Modell — NICHT Teil des Gates: läuft nur mit gesetzten SHAPES_LAB_*-Variablen
 // (oder SHAPES_LAB_DRY=1 ohne HTTP) und erscheint sonst als "skipped". Protokoll und Aufruf: docs/LAB.md.
-// Ergebnis: eine JSONL-Zeile je Fall (nach SHAPES_LAB_OUT, falls gesetzt) + eine Zusammenfassung auf stdout.
+// Ergebnis: eine JSONL-Zeile je Fall + eine Summary-Zeile (nach SHAPES_LAB_OUT, falls gesetzt) und stdout.
+// Die Summary-Zeile ist der einzige Vollständigkeitsbeleg; ein unvollständiger Lauf lässt den Test scheitern.
 import { appendFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { REFINE_CASES, CREATE_CASES } from "../helpers/shapes-cases";
-import { dryChat, httpChat, runCreateCase, runRefineCase, type Chat } from "../helpers/shapes-lab-run";
+import { CREATE_CASES, REFINE_CASES } from "../helpers/shapes-cases";
+import { dryChat, httpChat, readLabEnv, runCreateCase, runRefineCase, summarize, CASE_TIMEOUT_MS } from "../helpers/shapes-lab-run";
 
-const URL_ = process.env.SHAPES_LAB_URL ?? "";
-const MODEL = process.env.SHAPES_LAB_MODEL ?? "";
-const TASK = process.env.SHAPES_LAB_TASK ?? "create";
-const OUT = process.env.SHAPES_LAB_OUT ?? "";
-const DRY = process.env.SHAPES_LAB_DRY === "1";
-const TEMPERATURE = Number(process.env.SHAPES_LAB_TEMPERATURE ?? "0.2");
+const env = readLabEnv(process.env);
+const HOUR = 3_600_000;
+const timeoutFor = (n: number, floor = 0): number => Math.max(floor, n * CASE_TIMEOUT_MS + 600_000);
 
-function record(rec: Record<string, unknown>): void {
-  const line = JSON.stringify({ at: new Date().toISOString(), model: DRY ? "dry" : MODEL, task: TASK, temperature: TEMPERATURE, ...rec });
-  if (OUT) appendFileSync(OUT, `${line}\n`);
-  console.log(line);
-}
+describe.runIf(env.active)("shapes lab", () => {
+  it.runIf(env.active && !env.ok)("environment is valid", () => {
+    expect(env.active && !env.ok ? env.problems : []).toEqual([]);
+  });
 
-const enabled = DRY || (URL_ !== "" && MODEL !== "");
-const http: Chat = httpChat(URL_, MODEL, TEMPERATURE);
-
-describe.runIf(enabled)(`shapes lab: ${DRY ? "dry" : MODEL} ${TASK}`, () => {
-  it.runIf(TASK === "create")("create", async () => {
-    let good = 0;
-    for (const c of CREATE_CASES) {
-      const rec = await runCreateCase(c, DRY ? dryChat("create", c.id) : http);
-      if (rec.good) good += 1;
-      record(rec);
-    }
-    console.log(`SUMMARY create ${DRY ? "dry" : MODEL}: ${good} of ${CREATE_CASES.length}`);
-    expect(true).toBe(true);
-  }, 7_200_000);
-
-  it.runIf(TASK === "refine")("refine", async () => {
-    let good = 0;
-    for (const c of REFINE_CASES) {
-      const rec = await runRefineCase(c, DRY ? dryChat("refine", c.id) : http);
-      if (rec.good) good += 1;
-      record(rec);
-    }
-    console.log(`SUMMARY refine ${DRY ? "dry" : MODEL}: ${good} of ${REFINE_CASES.length}`);
-    expect(true).toBe(true);
-  }, 7_200_000);
+  for (const task of ["create", "refine"] as const) {
+    const cases = task === "create" ? CREATE_CASES : REFINE_CASES;
+    it.runIf(env.active && env.ok && env.task === task)(task, async () => {
+      if (!env.active || !env.ok) return;
+      const ctx = { run: `${new Date().toISOString()} ${env.dry ? "dry" : env.model} ${task}`, dry: env.dry };
+      const http = httpChat(env.url, env.model, env.temperature);
+      const emit = (rec: object): void => {
+        const line = JSON.stringify({ at: new Date().toISOString(), model: env.dry ? "dry" : env.model, task, temperature: env.temperature, ...rec });
+        if (env.out) appendFileSync(env.out, `${line}\n`);
+        console.log(line);
+      };
+      const recs: Record<string, unknown>[] = [];
+      for (const c of cases) {
+        const chat = env.dry ? dryChat(task, c.id) : http;
+        const rec = task === "create"
+          ? await runCreateCase(c as (typeof CREATE_CASES)[number], chat, ctx)
+          : await runRefineCase(c as (typeof REFINE_CASES)[number], chat, ctx);
+        recs.push(rec);
+        emit(rec);
+      }
+      const { summary, line } = summarize(recs, { ...ctx, model: env.dry ? "dry" : env.model, task });
+      emit(summary);
+      console.log(line);
+      expect(summary.complete, line).toBe(true);
+    }, timeoutFor(cases.length, task === "create" ? 3 * HOUR : 0));
+  }
 });

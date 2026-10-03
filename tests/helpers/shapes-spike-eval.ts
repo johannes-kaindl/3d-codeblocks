@@ -31,26 +31,42 @@ export function readRecords(file: string): { id: string; answer?: string; error?
   });
 }
 
+export interface CreateMeasure {
+  loaded: boolean;
+  plausible: boolean;
+  parts: number | null;
+  size: number[] | null;
+  /** Anzahl der von partsFromLlm verworfenen Einträge. */
+  dropped: number;
+  error?: string;
+}
+
+/** DIE eine Messung eines Erzeugen-Antworttextes: lesen → formatieren → konvertieren → laden → zählen → Grenzen.
+ *  Golden-Test, Qualitäts-Test und Messlauf rufen alle diese Funktion. */
+export async function measureCreate(answerText: string, limit: { minParts: number; dims: [number, number][] }): Promise<CreateMeasure> {
+  const fail = (error: string, dropped = 0): CreateMeasure => ({ loaded: false, plausible: false, parts: null, size: null, dropped, error });
+  const answer = readPartsAnswer(answerText);
+  if (!answer.ok) return fail(answer.reason);
+  const llm = partsFromLlm(answer.parts);
+  const converted = convertShapesText(formatShapes({}, llm.parts));
+  if (!converted.ok) return fail(converted.messages.join(" "), llm.dropped.length);
+  const bytes = new TextEncoder().encode(JSON.stringify(converted.gltf)).buffer as ArrayBuffer;
+  const scene = (await loadModel(bytes, "gltf", "#888888")).object;
+  scene.updateMatrixWorld(true);
+  let parts = 0;
+  scene.traverse((o) => { if ((o as Mesh).isMesh) parts += 1; });
+  const size = new Box3().setFromObject(scene).getSize(new Vector3());
+  const dims = [size.x, size.y, size.z];
+  const plausible = parts >= limit.minParts && dims.every((v, i) => v >= limit.dims[i][0] && v <= limit.dims[i][1]);
+  return { loaded: parts >= 1, plausible, parts, size: dims.map((v) => +v.toFixed(3)), dropped: llm.dropped.length };
+}
+
 export async function evaluate(file: string): Promise<Outcome[]> {
   const out: Outcome[] = [];
   for (const rec of readRecords(file)) {
     const id = rec.id.slice(0, 3);
-    const answer = readPartsAnswer(rec.answer ?? "");
-    if (!answer.ok) { out.push({ id, loaded: false, plausible: false }); continue; }
-    const text = formatShapes({}, partsFromLlm(answer.parts).parts);
-    const converted = convertShapesText(text);
-    if (!converted.ok) { out.push({ id, loaded: false, plausible: false }); continue; }
-    const bytes = new TextEncoder().encode(JSON.stringify(converted.gltf)).buffer as ArrayBuffer;
-    const scene = (await loadModel(bytes, "gltf", "#888888")).object;
-    scene.updateMatrixWorld(true);
-    let parts = 0;
-    scene.traverse((o) => { if ((o as Mesh).isMesh) parts += 1; });
-    const size = new Box3().setFromObject(scene).getSize(new Vector3());
-    const dims = [size.x, size.y, size.z];
-    const limit = LIMITS[id];
-    const plausible = parts >= limit.minParts && dims.every((v, i) => v >= limit.dims[i][0] && v <= limit.dims[i][1]);
-    out.push({ id, loaded: parts >= 1, plausible });
+    const m = await measureCreate(rec.answer ?? "", LIMITS[id]);
+    out.push({ id, loaded: m.loaded, plausible: m.plausible });
   }
   return out;
 }
-
