@@ -38,4 +38,13 @@ export const PANEL_TEXTS = {
   acceptAsFile: "File in the attachment folder",
   noNoteOpen: "Open a note to insert a code block.",
   model: "Model",
+  promptLabel: "Your instruction",
+  refreshModels: "Refresh model list",
+  previewLabel: "Preview",
+  previewOf: (n: number) => `Preview of round ${n}`,
+  diffHeading: "Changes in this round",
+  modelGone: "The model to change is gone.",
+  answerChangesNothing: "The answer changes nothing.",
+  noUsableParts: "the answer holds no usable part",
+  noEndpointDetail: (detail: string) => `Reason: ${detail}`,
 } as const;

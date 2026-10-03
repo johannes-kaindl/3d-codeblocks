@@ -338,3 +338,169 @@
   border-left-color: var(--color-yellow);
   text-decoration: underline dotted var(--color-yellow);
 }
+
+/* HUB_CSS (obsidian-kit hub.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
+/* Hub-Tab-Leiste (obsidian-kit: buildHubInto). Die vier nummerierten Zutaten gehören
+   zusammen — jede einzeln ist wirkungslos, s. Modulkopf von src/obsidian/hub.ts. */
+.okit-hub-root { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.okit-hub-tabs {
+  display: flex;
+  flex-wrap: wrap;                 /* (1) erlaubt die zweite Zeile */
+  gap: var(--size-2-1);
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+/* box-shadow: none nimmt dem nativen <button> nur seinen Ruhe-Schatten. Obsidians
+   Fokusring bleibt: button:focus-visible { box-shadow: 0 0 0 3px … } hat mit (0,1,1) die
+   höhere Spezifität als .okit-hub-tab (0,1,0) — geprüft in Obsidians app.css. */
+.okit-hub-tab {
+  display: flex;
+  flex: 1 1 auto;                  /* (2) Basis = Inhaltsbreite, sonst bricht nichts um */
+  min-width: 0;                    /* (3) hebt min-width:auto auf, sonst sprengt ein langes Label die Zeile */
+  align-items: center;
+  justify-content: center;
+  gap: var(--size-4-1);
+  padding: var(--size-2-3) var(--size-4-2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.okit-hub-tab-label {              /* (4) ohne eigenes Label-Element kann nichts ellipsieren */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okit-hub-tab-icon { display: inline-flex; flex: 0 0 auto; }
+.okit-hub-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.okit-hub-tab.is-active { color: var(--text-normal); border-bottom-color: var(--interactive-accent); }
+.okit-hub-content { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+.okit-hub-panel { height: 100%; overflow: auto; }
+.okit-hub-panel.is-hidden { display: none; }
+
+/* STREAM_AREA_CSS (obsidian-kit stream-area.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
+.okit-stream { display: flex; flex-direction: column; min-height: 0; gap: var(--size-4-2); }
+.okit-stream-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  font-size: var(--font-ui-small); line-height: var(--line-height-normal);
+}
+/* Rollt der Wirt selbst, ist der Body KEIN eigener Scroll-Container — sonst entstuende
+   ein zweiter Rollbereich im ersten. Wird per Wurzelklasse geschaltet, nicht vom Consumer. */
+.okit-stream--host-scroll .okit-stream-body { flex: 0 0 auto; min-height: auto; overflow-y: visible; }
+.okit-stream-block > :first-child { margin-top: 0; }
+.okit-stream-block > :last-child { margin-bottom: 0; }
+.okit-stream-tail { white-space: pre-wrap; color: var(--text-muted); }
+.okit-stream-status {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--size-4-1);
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.okit-stream-reasoning {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.okit-stream-reasoning > summary { cursor: var(--cursor); color: var(--text-faint); }
+.okit-stream-reasoning > pre {
+  max-height: 12em; overflow-y: auto; white-space: pre-wrap;
+  background: var(--background-secondary); padding: var(--size-4-2);
+}
+/* Ein leerer Slot bleibt Flex-Item und kostet einen gap — spürbar bei einem Wirt, der die
+   Statuszeile nicht nutzt (Befund aus der ersten Adoption, 2026-09-11). */
+.okit-stream-status:empty, .okit-stream-reasoning-slot:empty { display: none; }
+
+/* VERSION_LIST_CSS (obsidian-kit version-list.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
+.okit-vlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  margin-bottom: var(--size-4-2);
+}
+
+.okit-vlist-heading,
+.okit-vlist-group {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.okit-vlist-group {
+  margin-top: var(--size-4-1);
+  color: var(--text-faint);
+}
+
+.okit-vlist-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
+.okit-vlist-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-4-1);
+  width: 100%;
+  text-align: left;
+  padding: var(--size-2-2) var(--size-4-1);
+  background-color: transparent;
+  box-shadow: none;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.okit-vlist-row:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.okit-vlist-row:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.okit-vlist-row.is-active {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.okit-vlist-no,
+.okit-vlist-meta {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.okit-vlist-label {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Prompt-Panel (src/obsidian/prompt-panel.ts): nur Theme-Variablen. */
+.tdcb-prompt .is-hidden { display: none; }
+.tdcb-prompt-top, .tdcb-prompt-model, .tdcb-prompt-actions {
+  display: flex; align-items: center; gap: var(--size-4-2); flex: 0 0 auto;
+}
+.tdcb-prompt-hint, .tdcb-prompt-quality, .tdcb-prompt-preview-caption, .tdcb-prompt-diff-heading {
+  flex: 0 0 auto; font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.tdcb-prompt-hint:empty { display: none; }
+.tdcb-prompt-target { flex: 1 1 auto; min-width: 0; font-weight: var(--font-semibold); overflow-wrap: anywhere; }
+.tdcb-prompt-model select { flex: 1 1 auto; min-width: 0; }
+.tdcb-prompt-input { width: 100%; resize: vertical; flex: 0 0 auto; }
+.tdcb-prompt > .okit-hub-content .okit-hub-panel,
+.tdcb-prompt-versions { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-2); }
+.tdcb-prompt .okit-hub-panel.is-hidden { display: none; }
+.tdcb-prompt-stream { flex: 0 1 auto; max-height: 14em; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
+.tdcb-prompt-preview, .tdcb-prompt-diff, .tdcb-prompt-rounds, .tdcb-prompt-empty { flex: 0 0 auto; }
+.tdcb-prompt-empty { padding: var(--size-4-2); border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s); color: var(--text-muted); }
+.tdcb-prompt-diff ul { margin: 0; padding-left: var(--size-4-4); font-size: var(--font-ui-small); }
+.tdcb-prompt-versions-empty { color: var(--text-muted); font-size: var(--font-ui-small); }
+/* Status-Indikator (UI-STANDARD §8): Form UND Farbe UND Klasse; is-checking dreht sich. */
+.tdcb-status { display: flex; gap: var(--size-2-2); align-items: center; }
+.tdcb-status-icon svg { width: 14px; height: 14px; }
+.tdcb-status.is-ok .tdcb-status-icon { color: var(--text-success); }
+.tdcb-status.is-error .tdcb-status-icon { color: var(--text-error); }
+.tdcb-status.is-warning .tdcb-status-icon { color: var(--text-warning); }
+.tdcb-status.is-checking .tdcb-status-icon svg { animation: tdcb-spin 1.2s linear infinite; }
+@keyframes tdcb-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tdcb-status.is-checking .tdcb-status-icon svg { animation: none; } }

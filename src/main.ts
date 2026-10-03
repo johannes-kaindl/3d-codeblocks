@@ -1,4 +1,5 @@
 import {
+  type App,
   Notice,
   Plugin,
   TFile,
@@ -10,6 +11,7 @@ import { ActiveViewport, type ViewportController } from "./core/active-viewport"
 import type { PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
+import { findEndpointManager } from "./vendor/kit-obsidian/endpoint-source";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
@@ -26,7 +28,7 @@ import {
   convertBlockToFile,
   convertFileToBlock,
 } from "./obsidian/shapes-convert";
-import { VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel-id";
+import { PromptPanelView, VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
 import { SourceEditor } from "./obsidian/source-editor";
@@ -229,6 +231,51 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       (leaf: WorkspaceLeaf) => new ControlPanelView(leaf, this.active),
     );
 
+    // Prompt-Panel (Spec Modell per Prompt § 6): ein Frontend fuer Erzeugen und Aendern.
+    this.registerView(
+      VIEW_TYPE_PROMPT,
+      (leaf: WorkspaceLeaf) =>
+        new PromptPanelView(leaf, {
+          ...hostDeps,
+          llm: this.llm,
+          readTargetText: (t) => readTargetText(this.app, t),
+          // Platzhalter bis Task 7 (panel-accept): schreibt nichts.
+          accept: async () => ({ ok: false, message: "Apply is not wired yet." }),
+          openSettings: () => {
+            const setting = (this.app as unknown as { setting: { open(): void; openTabById(id: string): void } }).setting;
+            setting.open();
+            setting.openTabById(this.manifest.id);
+          },
+          confirm: (message) => confirmAction(this.app, { message, confirmLabel: "Discard", cancelLabel: "Keep" }),
+          managerPresent: () => findEndpointManager(this.app) !== null,
+          persistModel: async (model) => {
+            if (findEndpointManager(this.app)) this.settings.endpointChoice = { ...this.settings.endpointChoice, model };
+            else this.settings.llmModel = model;
+            await this.saveSettings();
+          },
+        }),
+    );
+    this.addCommand({ id: "open-prompt-panel", name: "Open prompt panel", callback: () => void this.openPromptPanel({ kind: "new" }) });
+    this.addCommand({
+      id: "edit-in-prompt-panel",
+      name: "Edit shapes model in prompt panel",
+      checkCallback: (checking) => {
+        const t = this.active.get()?.shapesTarget?.() ?? null;
+        if (!t) return false;
+        if (!checking) void this.openPromptPanel(t);
+        return true;
+      },
+    });
+    // Das Panel folgt dem zuletzt bedienten Modell (Spec § 2 Nr. 5).
+    this.register(
+      this.active.subscribe((controller) => {
+        const t: PanelTarget = controller ? (controller.shapesTarget?.() ?? { kind: "other", label: controller.label() }) : { kind: "new" };
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
+          if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(t);
+        }
+      }),
+    );
+
     this.addCommand({
       id: "open-controls",
       name: "Open 3D view controls",
@@ -427,8 +474,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         await leaf.setViewState({ type: VIEW_TYPE_PROMPT, active: true });
       }
       await workspace.revealLeaf(leaf);
-      const view = leaf.view as unknown as { setTarget?: (t: PanelTarget) => void };
-      if (typeof view.setTarget === "function") view.setTarget(target);
+      if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(target);
     } catch (error) {
       console.warn("[three-d-codeblocks] could not open the prompt panel:", error);
       unavailable();
@@ -469,4 +515,15 @@ export function isPanelVisible(workspace: {
   return (
     workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS).length > 0 && !workspace.rightSplit.collapsed
   );
+}
+
+/** Aktueller Text des Ziels fuers Prompt-Panel; `null` = Datei/Block nicht (mehr) lesbar. Platzhalter bis
+ *  Task 7 (panel-accept). Der Blockrumpf liegt zwischen den Zaunzeilen (0-basiert, beide inklusive). */
+async function readTargetText(app: App, t: PanelTarget): Promise<string | null> {
+  if (t.kind !== "shapes-file" && t.kind !== "shapes-block") return null;
+  const file = app.vault.getAbstractFileByPath(t.path);
+  if (!(file instanceof TFile)) return null;
+  const text = await app.vault.read(file);
+  if (t.kind === "shapes-file") return text;
+  return text.split("\n").slice(t.lineStart + 1, t.lineEnd).join("\n");
 }

@@ -4,6 +4,7 @@ import { TFile, makeFakeApp } from "../__mocks__/obsidian";
 import { VIEW_TYPE_3D } from "../../src/obsidian/file-view";
 import { VIEW_TYPE_SHAPES } from "../../src/obsidian/shapes-file-view";
 import { VIEW_TYPE_PROMPT } from "../../src/obsidian/prompt-panel-id";
+import { PromptPanelView } from "../../src/obsidian/prompt-panel";
 
 // Regressionstest fuer Finding 2 (Whole-Branch-Review 2026-07-25): ein Leaf allein
 // (getLeavesOfType(...).length > 0) reicht nicht -- Sidebar-Leaves ueberleben in
@@ -240,10 +241,16 @@ describe("LLM connection wiring", () => {
 });
 
 describe("openPromptPanel", () => {
+  /** Echte View (der Opener prueft per instanceof), setTarget als Spion. */
+  const spiedView = () => {
+    const v = new PromptPanelView({ app: undefined } as never, {} as never);
+    vi.spyOn(v, "setTarget").mockImplementation(() => {});
+    return v;
+  };
   const target = { kind: "shapes-file", path: "a.shapes", label: "a" } as const;
   function setup(opts: { registered?: boolean; existing?: any } = {}) {
     const app = makeFakeApp();
-    const view = { setTarget: vi.fn() };
+    const view = spiedView();
     const leaf = { view, setViewState: vi.fn(async () => {}), detach: vi.fn() };
     app.viewRegistry = { viewByType: opts.registered === false ? {} : { [VIEW_TYPE_PROMPT]: () => ({}) } };
     app.workspace.getLeavesOfType = vi.fn(() => (opts.existing ? [opts.existing] : []));
@@ -263,7 +270,7 @@ describe("openPromptPanel", () => {
   });
 
   it("reuses an open panel instead of creating a second leaf", async () => {
-    const existing = { view: { setTarget: vi.fn() }, setViewState: vi.fn() };
+    const existing = { view: spiedView(), setViewState: vi.fn() };
     const { plugin, app } = setup({ existing });
     await plugin.openPromptPanel(target);
     expect(app.workspace.getRightLeaf).not.toHaveBeenCalled();
