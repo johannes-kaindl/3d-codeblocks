@@ -204,6 +204,42 @@ describe("PromptPanelView", () => {
     expect(statusText(view)).toBe("The open note is in reading view — switch to editing view to insert a code block.");
   });
 
+  describe("example empty state (.tdcb-prompt-examples)", () => {
+    const shown = (view: PromptPanelView): boolean => !hasClass(one(view, "tdcb-prompt-examples"), "is-hidden");
+    const BOX = '{"parts":[{"name":"A","shape":"box","size":[1]}]}';
+    it("is visible for an empty panel with target new, and carries the examples text", async () => {
+      const { view } = makeView(answer(BOX));
+      await view.onOpen();
+      expect(shown(view)).toBe(true);
+      expect(one(view, "tdcb-prompt-examples").textContent).toContain("snowman");
+    });
+    it("is gone while a request runs and after the first round, and for another target", async () => {
+      const h = held(BOX);
+      const { view } = makeView(h.complete, { readTargetText: vi.fn(async () => TABLE) });
+      await view.onOpen();
+      one(view, "tdcb-prompt-input").value = "a box";
+      one(view, "tdcb-prompt-send").click();
+      await vi.waitFor(() => expect(view.running()).toBe(true));
+      expect(shown(view)).toBe(false);
+      h.release();
+      await view.settled();
+      expect(shown(view)).toBe(false);
+      // Nach Verwerfen (Runden weg, Ziel neu) kommt er wieder.
+      one(view, "tdcb-prompt-discard").click();
+      await vi.waitFor(() => expect(view.state().rounds.rounds).toHaveLength(0));
+      expect(shown(view)).toBe(true);
+      view.setTarget({ kind: "shapes-file", path: "x.shapes", label: "x" });
+      expect(shown(view)).toBe(false);
+    });
+    it("yields to the no-endpoint empty state when both would apply", async () => {
+      const { view } = makeView(async () => ({ ok: false, kind: "no-endpoint", detail: "off", partial: "", reasoning: "", timing: TIMING, facts: null, deviations: [], source: {} }));
+      await view.onOpen();
+      await send(view, "a box");
+      expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(false);
+      expect(shown(view)).toBe(false);
+    });
+  });
+
   // Eine Anfrage, die haengt, bis der Test sie freigibt.
   function held(content: string) {
     let release: () => void = () => {};

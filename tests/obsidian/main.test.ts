@@ -269,6 +269,38 @@ describe("lastEditor (target of Apply while the panel has focus)", () => {
   });
 });
 
+describe("lastEditor prefers the most recent main-area leaf (view instance replaced in the same leaf)", () => {
+  const mdView = () => Object.assign(new MarkdownView({} as never), { file: new TFile() });
+  async function loaded(opts: { recent: unknown; active?: unknown; leaves?: unknown[] }) {
+    const app = makeFakeApp();
+    app.workspace.getActiveViewOfType = vi.fn(() => opts.active ?? null);
+    app.workspace.getLeavesOfType = vi.fn((t: string) => (t === "markdown" ? (opts.leaves ?? []) : []));
+    app.workspace.getMostRecentLeaf = vi.fn(() => (opts.recent ? { view: opts.recent } : null));
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    await plugin.onload();
+    return { plugin, app };
+  }
+  it("returns the fresh view of the same leaf although the remembered one is detached", async () => {
+    const stale = mdView();
+    const fresh = mdView();
+    const { plugin, app } = await loaded({ recent: null, active: stale, leaves: [{ view: stale }] });
+    expect((plugin as any).lastEditor()).toBe(stale);
+    // setViewState tauscht die Instanz: das Blatt haengt jetzt an `fresh`, `stale` ist abgehaengt.
+    (app.workspace.getLeavesOfType as any) = vi.fn(() => [{ view: fresh }]);
+    (app.workspace.getMostRecentLeaf as any) = vi.fn(() => ({ view: fresh }));
+    expect((plugin as any).lastEditor()).toBe(fresh);
+  });
+  it("falls back to the remembered view when the main-area leaf is not a markdown view", async () => {
+    const remembered = mdView();
+    const { plugin } = await loaded({ recent: { file: new TFile() }, active: remembered, leaves: [{ view: remembered }] });
+    expect((plugin as any).lastEditor()).toBe(remembered);
+  });
+  it("is null when both are gone", async () => {
+    const { plugin } = await loaded({ recent: null, active: mdView(), leaves: [] });
+    expect((plugin as any).lastEditor()).toBeNull();
+  });
+});
+
 describe("openPromptPanel", () => {
   /** Echte View (der Opener prueft per instanceof), setTarget als Spion. */
   const spiedView = () => {

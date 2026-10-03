@@ -393,6 +393,8 @@ export function makeFakeApp(): any {
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
       getLeavesOfType: vi.fn().mockReturnValue([]),
+      rootSplit: {},
+      getMostRecentLeaf: vi.fn().mockReturnValue(null),
       onLayoutReady: vi.fn((fn: () => void) => { fn(); }),
       getActiveViewOfType: vi.fn().mockReturnValue(null),
     },

@@ -460,8 +460,13 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   // waere dann null.
   private lastMarkdownView: MarkdownView | null = null;
 
-  /** Die zuletzt bediente Notiz, solange sie noch in einem Blatt haengt (sonst `null`). */
+  /** Die zuletzt bediente Notiz. Primaer das zuletzt benutzte Blatt der Hauptflaeche (das Panel liegt in der
+   *  Seitenleiste): `setViewState` tauscht die View-Instanz im selben Blatt aus, ohne dass `active-leaf-change`
+   *  feuert, ein gemerkter Verweis haengt dann ab. Zweitens der gemerkte, solange er noch in einem Blatt haengt. */
   private lastEditor(): MarkdownView | null {
+    const workspace = this.app.workspace;
+    const recent = workspace.getMostRecentLeaf(workspace.rootSplit)?.view;
+    if (recent instanceof MarkdownView && recent.file) return recent;
     const view = this.lastMarkdownView;
     if (!view?.file) return null;
     return this.app.workspace.getLeavesOfType("markdown").some((leaf) => leaf.view === view) ? view : null;

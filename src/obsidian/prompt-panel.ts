@@ -103,6 +103,7 @@ export class PromptPanelView extends ItemView {
   private discardBtn!: HTMLButtonElement;
   private emptyEl!: HTMLElement;
   private emptyDetail!: HTMLElement;
+  private examplesEl!: HTMLElement;
   private versionsEl: HTMLElement | null = null;
 
   constructor(
@@ -217,6 +218,9 @@ export class PromptPanelView extends ItemView {
     this.emptyDetail = this.emptyEl.createDiv({ cls: "tdcb-prompt-empty-detail" });
     const settingsBtn = this.emptyEl.createEl("button", { text: PANEL_TEXTS.openSettings, attr: { type: "button" } });
     settingsBtn.addEventListener("click", () => this.deps.openSettings());
+
+    // Empty-State mit Beispielen (UI-STANDARD §8): nur bei Ziel "neu", ohne Runden und ohne Lauf.
+    this.examplesEl = c.createDiv({ cls: "tdcb-empty tdcb-prompt-examples is-hidden", text: PANEL_TEXTS.emptyCreate });
 
     this.inputEl = c.createEl("textarea", { cls: "tdcb-prompt-input", attr: { rows: "4", "aria-label": PANEL_TEXTS.promptLabel } });
     this.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -536,6 +540,8 @@ export class PromptPanelView extends ItemView {
     this.applyBtn.disabled = n === 0 || running;
     this.discardBtn.disabled = n === 0 || running;
     this.emptyEl.toggleClass("is-hidden", !this.noEndpoint);
+    // Zwei getrennte Elemente; trifft beides zu, gewinnt "no endpoint".
+    this.examplesEl.toggleClass("is-hidden", this.noEndpoint || running || n > 0 || this.panel.target.kind !== "new");
     this.previewWrap.toggleClass("is-hidden", n === 0);
   }
 
