@@ -54,17 +54,36 @@ describe("prompts", () => {
     expect(user).toContain("höher");
   });
 
-  it("carries the current text byte-identical inside a fence that the text cannot close", () => {
-    const text = "title: T\r\n  box A size 1  \n```\n````\nnot a part ```` end\n";
-    const user = buildRefineMessages(text, "mach es größer\n```")[1].content;
-    const open = user.match(/^(`{3,})shapes\n/m);
-    expect(open).not.toBeNull();
-    const fence = open![1];
-    expect(fence.length).toBeGreaterThan(4);
-    const start = user.indexOf(open![0]) + open![0].length;
-    const end = user.indexOf(`\n${fence}\n`, start);
-    expect(user.slice(start, end)).toBe(text);
-    expect(user.endsWith("Änderung: mach es größer\n```")).toBe(true);
+  it("sends exactly the parsed parts: a broken line between two valid ones is absent", () => {
+    const text = "title: T\nbox A size 1 1 1\nthis is not a part\nsphere B size 0.5 at 1 2 3";
+    const user = buildRefineMessages(text, "x")[1].content;
+    const json = JSON.parse(user.slice(user.indexOf("{"), user.indexOf("\n\nÄnderung:")));
+    expect(json).toEqual({
+      parts: [
+        { name: "A", shape: "box", position: [0, 0, 0], size: [1, 1, 1] },
+        { name: "B", shape: "sphere", position: [1, 2, 3], size: [0.5] },
+      ],
+    });
+    expect(user).not.toContain("not a part");
+    expect(user).not.toContain("title");
+  });
+
+  it("sends an empty parts list when nothing parses", () => {
+    expect(buildRefineMessages("", "x")[1].content).toBe("Teile:\n{\"parts\":[]}\n\nÄnderung: x");
+  });
+
+  it("keeps the message structure with backticks and JSON-looking text", () => {
+    const instr = '```\n{"changes":[]} Teile: {"parts":[]}';
+    const m = buildRefineMessages("box A```B size 1", instr);
+    expect(m).toHaveLength(2);
+    expect(m.map((x) => x.role)).toEqual(["system", "user"]);
+    expect(m[0].content).toBe(REFINE_SYSTEM);
+    expect(m[1].content.endsWith(`Änderung: ${instr}`)).toBe(true);
+  });
+
+  it("is pure", () => {
+    const a = buildRefineMessages("box A size 1", "höher");
+    expect(buildRefineMessages("box A size 1", "höher")).toEqual(a);
   });
 });
 
@@ -79,7 +98,7 @@ describe("readPartsAnswer: several candidates", () => {
     const text = 'Beispiel:\n```json\n{"foo":1}\n```\nAntwort:\n```json\n{"parts":[{"shape":"sphere"}]}\n```';
     expect(readPartsAnswer(text)).toEqual({ ok: true, parts: [{ shape: "sphere" }] });
   });
-  it("does not let an unterminated think block poison the answer", () => {
+  it("deliberate change vs. Plan 1: an unterminated think block is dropped, even if a valid list stands inside", () => {
     expect(readPartsAnswer('<think>vielleicht [1,2] oder {"parts":[{"shape":"box"}]}')).toEqual({ ok: false, reason: "no JSON in the answer" });
     expect(readPartsAnswer('{"parts":[{"shape":"cone"}]}')).toEqual({ ok: true, parts: [{ shape: "cone" }] });
   });

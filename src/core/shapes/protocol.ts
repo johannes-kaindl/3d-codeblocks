@@ -1,7 +1,6 @@
 // Prompts und Antwortleser für shapes. Pure. Der System-Prompt fürs Erzeugen ist WÖRTLICH
 // der aus Spike A (2026-10-01) — er trägt die gemessenen 9/10. Jede Änderung (auch Whitespace)
 // braucht einen neuen Messlauf; der Test pinnt ihn per SHA-256.
-import { fenceFor } from "./fence";
 import { parseShapes } from "./parse";
 
 export interface PromptMessage {
@@ -34,15 +33,9 @@ export function buildRefineMessages(currentText: string, instruction: string): P
     ...(p.rot.some((v) => v !== 0) ? { rotation_deg: p.rot } : {}),
     ...(p.color ? { color: p.color } : {}),
   }));
-  // Der Quelltext steht unverändert in einem Zaun, den er selbst nicht schließen kann (länger als
-  // jeder Backtick-Lauf darin); der Wunsch steht danach und kann den Zaun nicht verwechseln.
-  const fence = fenceFor(currentText);
   return [
     { role: "system", content: REFINE_SYSTEM },
-    {
-      role: "user",
-      content: `Teile:\n${JSON.stringify({ parts })}\n\nQuelltext (unverändert):\n${fence}shapes\n${currentText}\n${fence}\n\nÄnderung: ${instruction}`,
-    },
+    { role: "user", content: `Teile:\n${JSON.stringify({ parts })}\n\nÄnderung: ${instruction}` },
   ];
 }
 
@@ -73,6 +66,8 @@ function extractJson(text: string): Extracted {
   let clean = text.replace(/<think>[\s\S]*?<\/think>/g, "");
   const strayClose = clean.lastIndexOf("</think>");
   if (strayClose >= 0) clean = clean.slice(strayClose + "</think>".length);
+  // Bewusste Verhaltensänderung gegenüber Plan 1: ein nie geschlossenes <think> verwirft den Rest
+  // (alte Fassung las `<think>hm [gültige Liste]` noch), weil dort Klammern aus dem Gedankentext stammen.
   const unterminated = clean.indexOf("<think>");
   if (unterminated >= 0) clean = clean.slice(0, unterminated);
 
