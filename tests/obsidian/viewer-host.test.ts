@@ -372,3 +372,46 @@ describe("ViewerHost and cameras from the file", () => {
     expect(textOf(message)).not.toContain("camera");
   });
 });
+
+describe("ViewerHost with shapes source", () => {
+  const enc = (text: string) => () => Promise.resolve(new TextEncoder().encode(text).buffer as ArrayBuffer);
+  const shapes = (text: string) => ({ provideBytes: enc(text), format: "shapes" as const, inspectContainer: false, label: "t" });
+
+  it("converts shapes text to glTF before loading", async () => {
+    const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
+    const { host } = makeHost({ loadModel });
+    await host.render(shapes("box A size 1"));
+    expect(loadModel).toHaveBeenCalledTimes(1);
+    expect(loadModel.mock.calls[0]![1]).toBe("gltf");
+    const json = JSON.parse(new TextDecoder().decode(loadModel.mock.calls[0]![0] as ArrayBuffer));
+    expect(json.nodes[0].name).toBe("A");
+  });
+
+  it("shows line problems as notes once the model stands", async () => {
+    const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
+    const { host, created, message } = makeHost({ loadModel, managed: false });
+    await host.render(shapes("box A size 1\nbox B size 1 2"));
+    expect(loadModel).toHaveBeenCalledTimes(1);
+    expect(created).toHaveLength(1);
+    expect(created[0].setModel).toHaveBeenCalled();
+    expect(JSON.stringify(message.children)).toContain("Line 2: `size` of a box needs 1 or 3 numbers");
+  });
+
+  it("shows invalid-shapes and builds no viewport when nothing is valid", async () => {
+    const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
+    const { host, created, message } = makeHost({ loadModel });
+    await host.render(shapes("boxx A"));
+    expect(loadModel).not.toHaveBeenCalled();
+    expect(created).toHaveLength(0);
+    expect(JSON.stringify(message.children)).toContain("The shapes code has no valid part.");
+  });
+
+  it("re-renders from the original text on reload (source stays shapes)", async () => {
+    const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
+    const { host } = makeHost({ loadModel });
+    const src = shapes("box A size 1");
+    await host.render(src);
+    await host.render(src);
+    expect(loadModel.mock.calls.map((c) => c[1])).toEqual(["gltf", "gltf"]);
+  });
+});

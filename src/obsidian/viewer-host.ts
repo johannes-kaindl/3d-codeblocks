@@ -21,6 +21,7 @@ import type { SceneColors } from "../viewer/scene";
 import { renderMessage } from "./render-box";
 
 import { resourceProblemNotes } from "../core/gltf-uri";
+import { convertShapesBytes } from "../core/shapes/convert";
 import type { ResourceResolver } from "./gltf-resources";
 import type { LightingMode, ModelLightsMode } from "../core/lighting";
 
@@ -170,7 +171,23 @@ export class ViewerHost {
     }
     if (this.disposed) return;
 
-    if (source.inspectContainer) {
+    // shapes ist Text: hier, an EINER Stelle, in glTF wandeln — so gilt es fuer Block,
+    // Datei-Verweis, Embed und Dateiansicht gleich. `this.source` bleibt die Original-
+    // quelle, damit ein Reload (Poster-Klick, Datei geaendert) wieder vom Text ausgeht.
+    let mountSource = source;
+    let extraNotes: string[] = [];
+    if (source.format === "shapes") {
+      const converted = convertShapesBytes(bytes);
+      if (!converted.ok) {
+        this.show({ kind: "invalid-shapes", messages: converted.messages });
+        return;
+      }
+      bytes = converted.bytes;
+      extraNotes = converted.notes;
+      mountSource = { ...source, format: "gltf", inspectContainer: false };
+    }
+
+    if (mountSource.inspectContainer) {
       const inspection = inspectGlb(bytes);
       if (!inspection.valid) {
         this.show({ kind: "invalid-file" });
@@ -183,7 +200,7 @@ export class ViewerHost {
       }
     }
 
-    await this.mount(bytes, source);
+    await this.mount(bytes, mountSource, extraNotes);
   }
 
   refreshColors(): void {
@@ -231,7 +248,7 @@ export class ViewerHost {
 
   // --- intern ---------------------------------------------------------------
 
-  private async mount(bytes: ArrayBuffer, source: RenderSource): Promise<void> {
+  private async mount(bytes: ArrayBuffer, source: RenderSource, extraNotes: string[] = []): Promise<void> {
     // Vorgaenger IMMER freigeben, bevor ein neuer Viewport entsteht. Ohne das leckt
     // jeder Reload (`onFileModified` → `render()` → hier) einen kompletten Satz
     // WebGL-Ressourcen: Renderer, Canvas, ResizeObserver, OrbitControls. Der
@@ -276,7 +293,7 @@ export class ViewerHost {
       return;
     }
 
-    const notes = [...resourceProblemNotes(source.resources?.problems ?? []), ...cameraNotes];
+    const notes = [...extraNotes, ...resourceProblemNotes(source.resources?.problems ?? []), ...cameraNotes];
 
     // FileView (unmanaged): ein Modell im Pane, immer voll interaktiv.
     if (!this.deps.managed) {
