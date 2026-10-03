@@ -4,15 +4,18 @@
 // - Paarung über den EXAKTEN Teilnamen. Doppelte Namen (der Parser lehnt sie ab, die Funktion
 //   darf trotzdem nicht fallen) werden der Reihe nach gepaart: erstes mit erstem, zweites mit
 //   zweitem; Übriggebliebene sind added bzw. removed.
-// - Zahlen gelten als gleich, wenn sie GEDRUCKT gleich sind (formatNumber). Rundungsunterschiede,
-//   die im Text unsichtbar sind, erscheinen nicht als Änderung.
+// - Gleichheit entscheidet auf den ROHEN Zahlen (elementweise, NaN gleich NaN, -0 gleich 0). Der
+//   Parser behält jede Dezimalstelle, 0.12344 und 0.12341 sind verschiedene Werte.
+// - Angezeigt wird über formatNumber (4 Nachkommastellen). Sind die Rohwerte verschieden, die
+//   gedruckten Texte aber gleich, wird das Feld beidseitig mit voller Genauigkeit (String(n))
+//   gedruckt, damit eine Änderung nie wie eine leere Änderung aussieht.
 // - Reine Umordnung wird nicht gezeigt: die Textreihenfolge der Teile ist keine Geometrie.
 // - Gleicher Name, andere Form: ein "changed"-Eintrag mit Feld `shape`, kein removed+added.
 // - Reihenfolge der Ausgabe: `after`, danach entfernte Teile in `before`-Reihenfolge.
-import { formatNumber } from "./format";
+import { formatNumber, isZero } from "./format";
 import type { ShapeDraft } from "./types";
 
-type Field = "shape" | "size" | "at" | "rot" | "color";
+export type Field = "shape" | "size" | "at" | "rot" | "color";
 
 export type PartDiff =
   | { name: string; change: "removed" }
@@ -20,7 +23,16 @@ export type PartDiff =
   | { name: string; change: "changed"; fields: { field: Field; from: string; to: string }[] };
 
 const nums = (v: readonly number[]): string => v.map(formatNumber).join(" ");
-const isZero = (v: readonly number[]): boolean => v.every((x) => formatNumber(x) === "0");
+const same = (a: number, b: number): boolean => a === b || (Number.isNaN(a) && Number.isNaN(b));
+const vecEqual = (a: readonly number[], b: readonly number[]): boolean => a.length === b.length && a.every((x, i) => same(x, b[i] ?? NaN));
+const full = (v: readonly number[]): string => v.map(String).join(" ");
+
+/** Feld-Eintrag, wenn die Rohwerte verschieden sind; sonst null. */
+function vecField(field: Field, b: readonly number[], p: readonly number[]): { field: Field; from: string; to: string } | null {
+  if (vecEqual(b, p)) return null;
+  if (nums(b) === nums(p)) return { field, from: full(b), to: full(p) };
+  return { field, from: nums(b), to: nums(p) };
+}
 
 function describe(p: ShapeDraft): string {
   const bits = [p.kind, `size ${nums(p.size)}`];
@@ -49,9 +61,12 @@ export function diffParts(before: readonly ShapeDraft[], after: readonly ShapeDr
     cursor.set(p.name, i + 1);
     const fields: { field: Field; from: string; to: string }[] = [];
     if (b.kind !== p.kind) fields.push({ field: "shape", from: b.kind, to: p.kind });
-    if (nums(b.size) !== nums(p.size)) fields.push({ field: "size", from: nums(b.size), to: nums(p.size) });
-    if (nums(b.at) !== nums(p.at)) fields.push({ field: "at", from: nums(b.at), to: nums(p.at) });
-    if (nums(b.rot) !== nums(p.rot)) fields.push({ field: "rot", from: nums(b.rot), to: nums(p.rot) });
+    const sizeField = vecField("size", b.size, p.size);
+    if (sizeField) fields.push(sizeField);
+    const atField = vecField("at", b.at, p.at);
+    if (atField) fields.push(atField);
+    const rotField = vecField("rot", b.rot, p.rot);
+    if (rotField) fields.push(rotField);
     if (b.color !== p.color) fields.push({ field: "color", from: b.color ?? "default", to: p.color ?? "default" });
     if (fields.length > 0) out.push({ name: p.name, change: "changed", fields });
   }

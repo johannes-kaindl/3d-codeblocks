@@ -24,9 +24,19 @@ describe("diffParts", () => {
     expect(diffParts([P({})], [P({})])).toEqual([]);
     expect(diffParts([], [])).toEqual([]);
   });
-  it("treats values that print equal as equal (0.10000001 vs 0.1)", () => {
-    expect(diffParts([P({ at: [0.1, 0, 0] })], [P({ at: [0.10000001, 0, 0] })])).toEqual([]);
+  it("decides on raw numbers; invisible-at-4-decimals differences print with full precision", () => {
+    expect(diffParts([P({ at: [0.1, 0, 0] })], [P({ at: [0.10000001, 0, 0] })]).map(formatDiff)).toEqual(["Platte: at 0.1 0 0 → 0.10000001 0 0"]);
+    expect(diffParts([P({ size: [0.12344, 1, 1] })], [P({ size: [0.12341, 1, 1] })]).map(formatDiff)).toEqual(["Platte: size 0.12344 1 1 → 0.12341 1 1"]);
     expect(diffParts([P({ size: [1, 1, 1] })], [P({ size: [1, 1, 1.0004] })]).map(formatDiff)).toEqual(["Platte: size 1 1 1 → 1 1 1.0004"]);
+  });
+  it("identical raw values, NaN vs NaN and -0 vs 0 give no entry", () => {
+    expect(diffParts([P({ at: [0.12344, 0, 0] })], [P({ at: [0.12344, 0, 0] })])).toEqual([]);
+    expect(diffParts([P({ at: [NaN, 0, 0] })], [P({ at: [NaN, 0, 0] })])).toEqual([]);
+    expect(diffParts([P({ at: [-0, 0, 0] })], [P({ at: [0, 0, 0] })])).toEqual([]);
+  });
+  it("null colour vs #a0a0a0 stays a change; zero rot is no change", () => {
+    expect(diffParts([P({ color: null })], [P({ color: "#a0a0a0" })]).map(formatDiff)).toEqual(["Platte: color default → #a0a0a0"]);
+    expect(diffParts([P({ rot: [0, 0, 0] })], [P({ rot: [0, 0, 0] })])).toEqual([]);
   });
   it("shows only the fields that differ; null colour reads `default`", () => {
     const d = diffParts([P({ color: null })], [P({ color: "#ff0000" })]);
@@ -63,6 +73,5 @@ describe("diffParts", () => {
     const ms = performance.now() - t;
     expect(d).toHaveLength(2500);
     expect(ms).toBeLessThan(500);
-    console.log(`diff 5000 parts: ${ms.toFixed(1)} ms`);
   });
 });

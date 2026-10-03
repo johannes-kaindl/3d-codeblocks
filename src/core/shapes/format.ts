@@ -8,7 +8,7 @@ export function formatNumber(n: number): string {
   return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
-const isZero = (v: readonly number[]): boolean => v.every((x) => x === 0);
+export const isZero = (v: readonly number[]): boolean => v.every((x) => x === 0);
 const nums = (v: readonly number[]): string => v.map(formatNumber).join(" ");
 
 export function formatPartLine(part: ShapeDraft): string {
