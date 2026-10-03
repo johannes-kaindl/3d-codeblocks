@@ -43,10 +43,19 @@ describe("buildMesh", () => {
         const e2 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
         const cross = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
         const area = Math.hypot(cross[0], cross[1], cross[2]);
-        if (area < 1e-9) continue; // entartete Dreiecke an den Kugelpolen
+        const scale = Math.max(...size) ** 2;
+        if (area < 1e-9 * scale) continue; // entartete Dreiecke an den Kugelpolen (relativ zur Teilegroesse)
         const na = vertex(m.normals, a), nb = vertex(m.normals, b), nc = vertex(m.normals, c);
         const n = [na[0] + nb[0] + nc[0], na[1] + nb[1] + nc[1], na[2] + nb[2] + nc[2]];
         expect(cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2], `${kind} triangle ${t / 3}`).toBeGreaterThan(0);
+        // (a) unabhaengig von den Normalen: alle Formen sind um den Ursprung konvex.
+        const cen = [(pa[0] + pb[0] + pc[0]) / 3, (pa[1] + pb[1] + pc[1]) / 3, (pa[2] + pb[2] + pc[2]) / 3];
+        expect(cross[0] * cen[0] + cross[1] * cen[1] + cross[2] * cen[2], `${kind} triangle ${t / 3} vs centroid`).toBeGreaterThan(0);
+        // (b) Normalen zeigen nicht nach innen.
+        for (const [i, p] of [[a, pa], [b, pb], [c, pc]] as [number, number[]][]) {
+          const nv = vertex(m.normals, i);
+          expect(nv[0] * p[0] + nv[1] * p[1] + nv[2] * p[2], `${kind} triangle ${t / 3} vertex normal`).toBeGreaterThan(0);
+        }
         checked += 1;
       }
       expect(checked).toBeGreaterThan(10);

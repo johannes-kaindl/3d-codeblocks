@@ -55,6 +55,13 @@ describe("shapesToGltf", () => {
     expect(node.rotation).toBeUndefined();
   });
 
+  it("declares POSITION min/max over the float32 values", () => {
+    const doc = shapesToGltf([{ kind: "sphere", name: "K", size: [0.1], at: [0, 0, 0], rot: [0, 0, 0], color: null }]);
+    const acc = (doc.accessors as { min?: number[]; max?: number[] }[])[0];
+    expect(acc.max).toEqual([0.1, 0.1, 0.1].map(Math.fround));
+    expect(acc.min).toEqual([-0.1, -0.1, -0.1].map(Math.fround));
+  });
+
   it("refuses an empty part list", () => {
     expect(() => shapesToGltf([])).toThrow(/no parts/);
   });

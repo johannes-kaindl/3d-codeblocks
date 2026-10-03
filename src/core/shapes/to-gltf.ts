@@ -55,8 +55,8 @@ export function shapesToGltf(parts: readonly ShapeDraft[], extras?: Record<strin
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (let k = 0; k < mesh.positions.length; k += 3) {
       for (let a = 0; a < 3; a++) {
-        min[a] = Math.min(min[a], mesh.positions[k + a]);
-        max[a] = Math.max(max[a], mesh.positions[k + a]);
+        min[a] = Math.min(min[a], Math.fround(mesh.positions[k + a]));
+        max[a] = Math.max(max[a], Math.fround(mesh.positions[k + a]));
       }
     }
     const base = accessors.length;
