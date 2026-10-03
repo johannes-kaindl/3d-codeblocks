@@ -313,6 +313,18 @@ export class FileView {
   register = vi.fn();
 }
 
+export class TextFileView extends FileView {
+  data = "";
+  // Als vi.fn je Instanz, damit Tests das verzoegerte Speichern beobachten koennen.
+  requestSave = vi.fn();
+  onOpen(): Promise<void> {
+    return Promise.resolve();
+  }
+  onClose(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }

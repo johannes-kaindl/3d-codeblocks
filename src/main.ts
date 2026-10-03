@@ -18,6 +18,8 @@ import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
 import { GltfBlock } from "./obsidian/gltf-block";
 import { SettingsTab } from "./obsidian/settings";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
+import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
+import { SourceEditor } from "./obsidian/source-editor";
 import { readSceneColors } from "./obsidian/theme";
 import { isWebGLAvailable } from "./obsidian/webgl";
 import { obsidianWritePorts } from "./obsidian/write-ports";
@@ -148,10 +150,19 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       return view;
     });
     this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
+    // `.shapes` bekommt die eigene Dateiansicht (Text + Modell), nicht die ModelFileView.
+    this.registerView(VIEW_TYPE_SHAPES, (leaf: WorkspaceLeaf) => {
+      const view = new ShapesFileView(leaf, {
+        ...hostDeps,
+        createEditor: (parent, opts) => new SourceEditor(parent, opts),
+      });
+      this.track(view);
+      return view;
+    });
     // `.shapes` getrennt: haelt ein anderes Plugin die Endung, wirft Obsidian — dann
     // sollen wenigstens glTF/GLB/STL weiter in der 3D-Ansicht aufgehen.
     try {
-      this.registerExtensions(["shapes"], VIEW_TYPE_3D);
+      this.registerExtensions(["shapes"], VIEW_TYPE_SHAPES);
     } catch (error) {
       console.warn("[three-d-codeblocks] .shapes files unavailable:", error);
       new Notice("3D Codeblocks: .shapes files unavailable — another plugin already handles that extension.");

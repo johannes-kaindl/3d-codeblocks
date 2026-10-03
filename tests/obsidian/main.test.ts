@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import ThreeDCodeblocksPlugin, { isPanelVisible } from "../../src/main";
 import { TFile, makeFakeApp } from "../__mocks__/obsidian";
 import { VIEW_TYPE_3D } from "../../src/obsidian/file-view";
+import { VIEW_TYPE_SHAPES } from "../../src/obsidian/shapes-file-view";
 
 // Regressionstest fuer Finding 2 (Whole-Branch-Review 2026-07-25): ein Leaf allein
 // (getLeavesOfType(...).length > 0) reicht nicht -- Sidebar-Leaves ueberleben in
@@ -121,6 +122,17 @@ describe("shapes registration", () => {
     expect(languages).toEqual(expect.arrayContaining(["3d", "gltf", "shapes"]));
     const extensions = plugin.registerExtensions.mock.calls.flatMap((c: unknown[]) => c[0] as string[]);
     expect(extensions).toEqual(expect.arrayContaining(["gltf", "glb", "stl", "shapes"]));
+  });
+
+  it("(f) maps .shapes to the shapes file view and keeps it off the model file view", async () => {
+    const plugin = freshPlugin();
+    await plugin.onload();
+    const calls = plugin.registerExtensions.mock.calls as [string[], string][];
+    expect(calls).toContainEqual([["shapes"], VIEW_TYPE_SHAPES]);
+    expect(calls).toContainEqual([["gltf", "glb", "stl"], VIEW_TYPE_3D]);
+    expect(calls.filter(([exts, type]) => exts.includes("shapes") && type === VIEW_TYPE_3D)).toEqual([]);
+    const types = plugin.registerView.mock.calls.map((c: unknown[]) => c[0]);
+    expect(types).toContain("tdcb-shapes-file");
   });
 
   it("keeps loading when another plugin already owns the shapes language", async () => {

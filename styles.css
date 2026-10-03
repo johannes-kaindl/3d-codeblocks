@@ -259,3 +259,82 @@
 .tdcb-panel-edit input[type="number"] {
   width: 5em;
 }
+
+/* .shapes-Dateiansicht: Pillen-Leiste, Text- und Modell-Pane (Spec Modell per Prompt § 5.1). */
+.tdcb-shapes-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.tdcb-shapes-pills {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  padding: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tdcb-shapes-pill[hidden] {
+  display: none;
+}
+/* Aktive Pille: Farbe PLUS Fettdruck PLUS Unterstreichung (UI-STANDARD § 8: zweiter Kanal
+   neben der Farbe); aria-pressed traegt den Zustand fuer Screenreader. */
+.tdcb-shapes-pill[aria-pressed="true"] {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: var(--font-semibold);
+  text-decoration: underline;
+  text-underline-offset: var(--size-2-2);
+}
+.tdcb-shapes-summary {
+  margin-left: var(--size-4-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.tdcb-shapes-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.tdcb-shapes-body.is-split {
+  flex-direction: row;
+}
+.tdcb-shapes-text,
+.tdcb-shapes-model {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.tdcb-shapes-text .cm-editor {
+  height: 100%;
+}
+.tdcb-shapes-body.is-split .tdcb-shapes-text {
+  border-right: 1px solid var(--background-modifier-border);
+}
+.tdcb-shapes-text.is-hidden,
+.tdcb-shapes-model.is-hidden {
+  display: none;
+}
+/* Fehlerzeilen: Farbe ist nur ein Kanal. Zweiter Kanal = Linienform (gewellt gegen
+   gepunktet) und ein linker Balken (durchgezogen gegen gepunktet); die Meldung steht
+   zusaetzlich als Text in der Zusammenfassung der Pillen-Leiste (Tastatur/Touch). */
+.tdcb-issue-line {
+  border-left: var(--size-4-1) solid transparent;
+}
+.tdcb-issue-line.is-error {
+  background: rgba(var(--color-red-rgb), 0.15);
+  border-left-style: solid;
+  border-left-color: var(--color-red);
+  text-decoration: underline wavy var(--color-red);
+}
+.tdcb-issue-line.is-warning {
+  background: rgba(var(--color-yellow-rgb), 0.15);
+  border-left-style: dotted;
+  border-left-color: var(--color-yellow);
+  text-decoration: underline dotted var(--color-yellow);
+}
