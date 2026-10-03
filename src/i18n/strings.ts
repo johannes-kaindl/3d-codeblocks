@@ -3,3 +3,39 @@
 import { HELP_SETTING_TEXTS_EN, type HelpSettingTexts } from "../vendor/kit-obsidian/help-setting";
 
 export const HELP_TEXTS: HelpSettingTexts = HELP_SETTING_TEXTS_EN;
+
+/** Texte des Prompt-Panels (Plan 3b, Task 6). Die LLM-Einstellungen tragen die Kit-Texte. */
+export const PANEL_TEXTS = {
+  title: "Model by prompt",
+  tabPrompt: "Prompt",
+  tabVersions: "Versions",
+  targetNew: "New model",
+  targetEdit: (label: string) => `Edit: ${label}`,
+  targetKept: (label: string) => `Target kept: ${label} — discard to switch`,
+  newButton: "New",
+  placeholderCreate: "Describe the model, e.g. “A table: top 1.2 × 0.7 m, four legs, 0.75 m high.”",
+  placeholderRefine: "What should change? e.g. “Make the top 20 cm higher.”",
+  create: "Create",
+  refine: "Change",
+  abort: "Stop",
+  accept: "Apply",
+  discard: "Discard",
+  rounds: "Rounds",
+  reasoning: "Thinking…",
+  running: (model: string) => `Asking ${model}… this can take several minutes.`,
+  done: "Done — check the preview, then apply or change further.",
+  aborted: "Stopped.",
+  applied: (where: string) => `Applied to ${where}.`,
+  noEndpoint: "No language model is set up yet.",
+  openSettings: "Open settings",
+  emptyCreate: "Describe a model in words. Examples: “A snowman from three spheres with a cone nose.” · “A bookshelf with three shelves, 1.8 m high.”",
+  versionsEmpty: "No saved versions yet.",
+  versionsOnlyFiles: "Versions are kept for .shapes files only.",
+  unsupported: (label: string) => `${label} can't be changed by prompt.`,
+  discardConfirm: (n: number) => `Discard ${n} unapplied round(s)?`,
+  acceptAsTitle: "Apply the new model as …",
+  acceptAsBlock: "Code block at the cursor",
+  acceptAsFile: "File in the attachment folder",
+  noNoteOpen: "Open a note to insert a code block.",
+  model: "Model",
+} as const;

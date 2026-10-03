@@ -151,3 +151,86 @@ describe("shapes registration", () => {
     await expect(plugin.onload()).resolves.toBeUndefined();
   });
 });
+
+describe("LLM connection wiring", () => {
+  async function load(loadData: unknown = {}) {
+    const app = makeFakeApp();
+    const plugin = new ThreeDCodeblocksPlugin(app, { id: "three-d-codeblocks" } as any) as any;
+    plugin.registerView = vi.fn();
+    plugin.registerExtensions = vi.fn();
+    plugin.registerMarkdownCodeBlockProcessor = vi.fn();
+    plugin.addCommand = vi.fn();
+    plugin.loadData = vi.fn(async () => loadData);
+    plugin.saveData = vi.fn(async () => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await plugin.onload();
+    return plugin;
+  }
+
+  it("creates plugin.llm with complete, models and renderSettings", async () => {
+    const plugin = await load();
+    expect(plugin.llm.complete).toBeTypeOf("function");
+    expect(plugin.llm.models).toBeTypeOf("function");
+    expect(plugin.llm.renderSettings).toBeTypeOf("function");
+    expect(plugin.llm.hideSettings).toBeTypeOf("function");
+  });
+
+  it("calls createLlmConnection once with the documented option shape", async () => {
+    const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
+    const spy = vi.spyOn(mod, "createLlmConnection");
+    const plugin = await load();
+    expect(spy).toHaveBeenCalledTimes(1);
+    const o = spy.mock.calls[0]![0];
+    expect(o.caller).toBe("3d-codeblocks");
+    expect(o.capability).toBe("chat");
+    expect(o.mode).toBe("structured");
+    expect(o.pluginId).toBe("three-d-codeblocks");
+    expect(o.getSettings()).toEqual({
+      endpoints: plugin.settings.endpoints,
+      choice: plugin.settings.endpointChoice,
+      model: plugin.settings.llmModel,
+      request: plugin.settings.request,
+    });
+    spy.mockRestore();
+  });
+
+  it("persist applies the patch synchronously, before saving", async () => {
+    const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
+    const spy = vi.spyOn(mod, "createLlmConnection");
+    const plugin = await load();
+    const persist = spy.mock.calls[0]![0].persist;
+    let seenAtSave: unknown;
+    plugin.saveData = vi.fn(async (s: any) => { seenAtSave = s.llmModel; });
+    const p = persist({ model: "m1", choice: { endpointId: "e" }, endpoints: [{ url: "http://a/v1", id: "e" }] });
+    expect(plugin.settings.llmModel).toBe("m1");
+    expect(plugin.settings.endpointChoice).toEqual({ endpointId: "e" });
+    expect(plugin.settings.endpoints).toEqual([{ url: "http://a/v1", id: "e" }]);
+    await p;
+    expect(seenAtSave).toBe("m1");
+    spy.mockRestore();
+  });
+
+  it("a failing save leaves the settings updated and does not throw out of persist", async () => {
+    const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
+    const spy = vi.spyOn(mod, "createLlmConnection");
+    const plugin = await load();
+    const persist = spy.mock.calls[0]![0].persist;
+    plugin.saveData = vi.fn(async () => { throw new Error("disk full"); });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let result: Promise<void> | undefined;
+    expect(() => { result = persist({ model: "m2" }); }).not.toThrow();
+    await expect(result).resolves.toBeUndefined();
+    expect(plugin.settings.llmModel).toBe("m2");
+    expect(warn).toHaveBeenCalled();
+    // Nie ein Schluessel- oder Settings-Dump in der Meldung.
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("http");
+    spy.mockRestore();
+  });
+
+  it("onunload lets the connection release its model lists", async () => {
+    const plugin = await load();
+    const hide = vi.spyOn(plugin.llm, "hideSettings");
+    plugin.onunload();
+    expect(hide).toHaveBeenCalledTimes(1);
+  });
+});

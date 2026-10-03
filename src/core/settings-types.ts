@@ -13,8 +13,13 @@
 
 import type { PanelPlacement } from "./panel-target";
 import type { LightingMode, ModelLightsMode } from "./lighting";
+import { migrateEndpointList, type EndpointConfig } from "../vendor/kit/endpoint_config";
+import type { EndpointChoice } from "../vendor/kit/endpoint-source";
+import { DEFAULT_REQUEST_SETTINGS, sanitizeRequestSettings, type RequestSettings } from "../vendor/kit/sampling-profiles";
 import {
+  arrayThen,
   check,
+  isPlainObject,
   oneOf,
   validateSettings as validateAgainstSchema,
   type FieldCheck,
@@ -22,6 +27,9 @@ import {
 } from "../vendor/kit/settings_schema";
 
 export type ViewMode = "immediate" | "on-click";
+
+/** Wohin das Prompt-Panel ein neues Modell schreibt, wenn man "Apply" klickt. */
+export type AcceptAs = "block" | "file" | "ask";
 
 export interface PluginSettings {
   viewMode: ViewMode;
@@ -37,6 +45,15 @@ export interface PluginSettings {
   lighting: LightingMode;
   /** Was mit den Lichtern aus der Datei geschieht. */
   modelLights: ModelLightsMode;
+  /** Lokale Endpunkt-Liste der LLM-Anbindung (Schluessel liegen im Schluesselbund, `secretId`). */
+  endpoints: EndpointConfig[];
+  /** Wahl in der Endpunkt-Quelle (gilt nur mit Endpoint-Manager). */
+  endpointChoice?: EndpointChoice | undefined;
+  /** Globales Modell fuer Zeilen ohne eigenes Modell. */
+  llmModel: string;
+  /** Sampling-Einstellungen der LLM-Anbindung. */
+  request: RequestSettings;
+  acceptAs: AcceptAs;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -53,6 +70,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   // Auslieferungszustand war damit der fehlerhafte.
   lighting: "faithful",
   modelLights: "prefer",
+  endpoints: [],
+  // Schluessel muss existieren (geschlossene Welt in validateSettings), Wert ist "keine Wahl".
+  endpointChoice: undefined,
+  llmModel: "",
+  request: DEFAULT_REQUEST_SETTINGS,
+  acceptAs: "block",
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;
@@ -93,6 +116,23 @@ const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   // Anders als `defaultHeight`: eine vorhandene Zahl wird geklemmt, nicht verworfen —
   // wer 0 oder 999 eintraegt, meint "so wenig/viel wie moeglich".
   maxContexts: clampContexts,
+  acceptAs: oneOf(["block", "file", "ask"] as const),
+  // Die Kit-Migration ist die einzige Stelle, die die Zeilenform kennt: sie reicht `id` und
+  // `secretId` durch (sonst ginge der Schluesselbund-Verweis beim Neustart verloren, waehrend der
+  // Schluessel schon aus data.json entfernt ist) und laesst einen Klartext-`apiKey` fuer die
+  // Migration stehen.
+  endpoints: arrayThen<EndpointConfig>((items) =>
+    migrateEndpointList(undefined, items as (string | EndpointConfig)[]),
+  ),
+  endpointChoice: (raw, fallback) => {
+    if (!isPlainObject(raw)) return fallback;
+    const out: EndpointChoice = {};
+    if (typeof raw["endpointId"] === "string") out.endpointId = raw["endpointId"];
+    if (typeof raw["model"] === "string") out.model = raw["model"];
+    return out;
+  },
+  llmModel: check((v) => typeof v === "string"),
+  request: (raw) => sanitizeRequestSettings(raw).settings,
 };
 
 export function validateSettings(loaded: unknown): PluginSettings {

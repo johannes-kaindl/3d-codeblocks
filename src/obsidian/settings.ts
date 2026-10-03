@@ -15,13 +15,14 @@
 import {
   PluginSettingTab,
   type App,
+  type Setting,
   type SettingDefinitionItem,
 } from "obsidian";
 import { MAX_CONTEXTS_LIMIT, validateSettings, type PluginSettings } from "../core/settings-types";
 import type ThreeDCodeblocksPlugin from "../main";
 import { HELP_TEXTS } from "../i18n/strings";
 import { githubHelpUrls, helpSettingDefinition } from "../vendor/kit-obsidian/help-setting";
-import { renderSettingDefinitions } from "../vendor/kit-obsidian/settings_walker";
+import { renderSettingDefinitions, settingBodyHost } from "../vendor/kit-obsidian/settings_walker";
 
 export class SettingsTab extends PluginSettingTab {
   constructor(
@@ -128,6 +129,23 @@ export class SettingsTab extends PluginSettingTab {
         desc: "Comma-separated name prefixes protected from editing (e.g. env__).",
         control: { type: "text", key: "lockedNodePrefixes" },
       },
+      {
+        type: "group",
+        heading: "Model by prompt",
+        items: [
+          {
+            name: "Apply new models as",
+            desc: "Where the prompt panel puts a new model when you click Apply.",
+            control: {
+              type: "dropdown",
+              key: "acceptAs",
+              options: { block: "Code block at the cursor", file: "File in the attachment folder", ask: "Ask each time" },
+            },
+          },
+          // Texte kommen aus dem Kit (englische Default-Texte) — kein eigenes Buendel.
+          { name: "Language model", desc: "", render: (setting: Setting) => this.plugin.llm.renderSettings(settingBodyHost(setting)) },
+        ],
+      },
     ];
   }
 
@@ -150,6 +168,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   // ── Imperativer Fallback (Obsidian < 1.13) ───────────────────────────────
+  override hide(): void {
+    super.hide?.();
+    this.plugin.llm.hideSettings();
+  }
+
   private cleanupPrevious: () => void = () => {};
 
   display(): void {

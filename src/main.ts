@@ -9,6 +9,7 @@ import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { ModelBlock } from "./obsidian/block-child";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
+import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
 import { vaultEditIo } from "./obsidian/edit-mode";
@@ -45,9 +46,36 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   // Welcher Viewport zuletzt vom Nutzer bedient wurde — Sidebar/Toolbar (Task 10/11)
   // lesen und schreiben darueber, ohne den Block selbst zu kennen.
   readonly active = new ActiveViewport();
+  /** Die LLM-Verbindung (Endpunkt-Quelle, Modelle, Anfragen, Einstellungs-Abschnitt). */
+  llm!: LlmConnection;
 
   async onload(): Promise<void> {
     this.settings = validateSettings(await this.loadData());
+    this.llm = createLlmConnection({
+      app: this.app,
+      pluginId: this.manifest.id,
+      caller: "3d-codeblocks",
+      capability: "chat",
+      mode: "structured",
+      getSettings: () => ({
+        endpoints: this.settings.endpoints,
+        choice: this.settings.endpointChoice,
+        model: this.settings.llmModel,
+        request: this.settings.request,
+      }),
+      // Patch ZUERST uebernehmen, dann speichern — die Verbindung prueft das (MIGRATION 0.49.0).
+      persist: (patch) => {
+        if (patch.endpoints !== undefined) this.settings.endpoints = patch.endpoints;
+        if (patch.choice !== undefined) this.settings.endpointChoice = patch.choice;
+        if (patch.model !== undefined) this.settings.llmModel = patch.model;
+        if (patch.request !== undefined) this.settings.request = patch.request;
+        // Ein fehlgeschlagenes Speichern darf keine unbehandelte Rejection werden; die Settings
+        // sind schon uebernommen. Nur der Fehlername wird gemeldet, nie Settings-Inhalt.
+        return this.saveSettings().catch((error: unknown) => {
+          console.warn("[three-d-codeblocks] saving the language model settings failed:", error instanceof Error ? error.name : "unknown error");
+        });
+      },
+    });
     this.addSettingTab(new SettingsTab(this.app, this));
 
     // `active` gehoert seit Task 12 mit dazu — Embed und FileView brauchen es, um sich
@@ -331,6 +359,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   }
 
   onunload(): void {
+    // Verwirft die Modell-Listen eines evtl. noch offenen Settings-Tabs.
+    this.llm?.hideSettings();
     // three setzt beim Laden einen globalen Marker (window.__THREE__). Obsidian räumt
     // Globals beim Plugin-Reload (disable/enable) nicht auf → beim Wiedereinschalten
     // warnt three „Multiple instances of Three.js". Marker hier entfernen, damit ein
