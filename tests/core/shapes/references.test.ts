@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { listFences } from "../../../src/core/shapes/fence";
-import { findModelReferences, referenceBlock, shapesBlock } from "../../../src/core/shapes/references";
+import { findModelReferences, referenceBlock, shapesBlock, unaccountedMentions } from "../../../src/core/shapes/references";
 
 const TARGET = "Modelle/tisch.shapes";
 // Auflösung wie ein Wikilink, hier vereinfacht: Basisname → voller Pfad.
@@ -309,5 +309,50 @@ describe("findModelReferences: fix round 2", () => {
       if (r.kind === "block") expect(typeof r.nested).toBe("boolean");
     }
     expect(run("```3d\nfile: tisch.shapes\n```")[0]).toMatchObject({ nested: false });
+  });
+});
+
+describe("findModelReferences: fix round 3", () => {
+  const run = (text: string) => findModelReferences([{ path: "a.md", text }], TARGET, resolve);
+
+  it("N1: a deeper quoted fence ends when the quote depth drops", () => {
+    const refs = run(">> ```js\n>> a\n> ![[tisch.shapes]]");
+    expect(refs.map((r) => [r.kind, r.from])).toEqual([["embed", 2]]);
+  });
+  it("N2: a lazily continued list item stays open", () => {
+    expect(run("- a\nlazy\n\n  ![[tisch.shapes]]")[0]).toMatchObject({ kind: "embed", alone: false });
+    expect(run("- a\nlazy\n\n  ```3d\n  file: tisch.shapes\n  ```")[0]).toMatchObject({ kind: "block", nested: true, from: 3, to: 5 });
+    const refs = run("- a\nlazy\n\n  ```3d\n  file: x\n\n![[tisch.shapes]]");
+    expect(refs.map((r) => [r.kind, r.from])).toEqual([["embed", 6]]);
+  });
+  it("N3: quote-in-list and list-in-list fences are found", () => {
+    expect(run("- > ```3d\n  > file: tisch.shapes\n  > ```")[0]).toMatchObject({ kind: "block", nested: true, from: 0, to: 2 });
+    expect(run("- - ```3d\n    file: tisch.shapes\n    ```")[0]).toMatchObject({ kind: "block", nested: true, from: 0, to: 2 });
+  });
+});
+
+describe("unaccountedMentions", () => {
+  const notes = (text: string) => [{ path: "a.md", text }];
+  const un = (text: string) => unaccountedMentions(notes(text), TARGET, findModelReferences(notes(text), TARGET, resolve));
+
+  it("reports prose, other-language fences and HTML comments", () => {
+    expect(un("Das Modell tisch.shapes ist neu.").map((m) => m.line)).toEqual([0]);
+    expect(un("```js\nload('tisch.shapes')\n```").map((m) => m.line)).toEqual([1]);
+    expect(un("<!-- tisch.shapes -->")).toHaveLength(1);
+  });
+  it("does not report lines covered by a found reference", () => {
+    expect(un("```3d\nfile: tisch.shapes\n```\n![[tisch.shapes]]")).toEqual([]);
+  });
+  it("is case-insensitive, CRLF-safe and catches the URL-encoded form", () => {
+    expect(un("a\r\nTISCH.SHAPES\r\nb").map((m) => [m.line, m.text])).toEqual([[1, "TISCH.SHAPES"]]);
+    const t = unaccountedMentions(notes("![](my%20file.shapes)"), "Ordner/my file.shapes", []);
+    expect(t).toHaveLength(1);
+  });
+  it("also reports the same basename in another folder (cannot be told apart)", () => {
+    const other = [{ path: "a.md", text: "![[Archiv/tisch.shapes]]" }];
+    expect(unaccountedMentions(other, TARGET, findModelReferences(other, TARGET, () => "Archiv/tisch.shapes"))).toHaveLength(1);
+  });
+  it("reports nothing when the basename is not mentioned", () => {
+    expect(un("Ein Tisch.\n![[anderes.glb]]\ntisch")).toEqual([]);
   });
 });

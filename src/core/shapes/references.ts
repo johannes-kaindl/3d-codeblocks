@@ -44,14 +44,14 @@ interface ScannedFence {
   body: string;
 }
 
-function stripQuotes(line: string): { rest: string; quoted: boolean } {
+function stripQuotes(line: string): { rest: string; quoted: boolean; depth: number } {
   let rest = line;
-  let quoted = false;
+  let depth = 0;
   while (QUOTE.test(rest)) {
     rest = rest.replace(QUOTE, "");
-    quoted = true;
+    depth += 1;
   }
-  return { rest, quoted };
+  return { rest, quoted: depth > 0, depth };
 }
 
 /**
@@ -64,13 +64,20 @@ function scanFences(lines: string[]): ScannedFence[] {
   const out: ScannedFence[] = [];
   let i = 0;
   while (i < lines.length) {
-    const { rest: afterQuote, quoted } = stripQuotes(lines[i]);
-    let rest = afterQuote;
+    // Zitat- und Listenpräfixe abwechselnd abstreifen, bis nichts mehr geht (`- > ```3d`, `- - ```3d`).
+    let rest = lines[i];
+    let depth = 0;
     let marked = false;
-    if (LIST_MARK.test(rest)) {
-      rest = rest.replace(LIST_MARK, "");
-      marked = true;
+    for (;;) {
+      if (QUOTE.test(rest)) {
+        rest = rest.replace(QUOTE, "");
+        depth += 1;
+      } else if (LIST_MARK.test(rest)) {
+        rest = rest.replace(LIST_MARK, "");
+        marked = true;
+      } else break;
     }
+    const quoted = depth > 0;
     const indent = /^[ \t]*/.exec(rest)?.[0] ?? "";
     const fenceText = rest.slice(indent.length);
     const open = FENCE_OPEN.exec(fenceText);
@@ -88,7 +95,8 @@ function scanFences(lines: string[]): ScannedFence[] {
     const body: string[] = [];
     while (j < lines.length) {
       const stripped = stripQuotes(lines[j]);
-      if (quoted && !stripped.quoted) break;
+      // Zitat-Tiefe: der Zaun endet, sobald die Tiefe unter die des Zaunbeginns fällt.
+      if (quoted && stripped.depth < depth) break;
       if (!quoted && nested && lines[j].trim() !== "" && /^[ \t]*/.exec(lines[j])![0].length < col) break;
       if (closeRe.test(stripped.rest) && (nested || /^ {0,3}\S/.test(stripped.rest))) {
         closed = true;
@@ -122,7 +130,7 @@ function containersBefore(lines: string[], index: number): { list: boolean; quot
     }
     quote = /^\s*>/.test(l);
     if (LIST_LINE.test(l)) list = true;
-    else if (!/^\s/.test(l) && !quote) list = false;
+    else if (!/^\s/.test(l) && !quote && (k === 0 || lines[k - 1].trim() === "" || HEADING.test(lines[k - 1]) || THEMATIC.test(lines[k - 1]))) list = false;
   }
   return { list, quote };
 }
@@ -216,6 +224,34 @@ export function findModelReferences(
   }
   // Reihenfolge: je Notiz nach Zeile — die Meldung an den Nutzer liest sich dann wie der Vault.
   return refs.sort((a, b) => (a.notePath === b.notePath ? a.from - b.from : a.notePath < b.notePath ? -1 : 1));
+}
+
+/**
+ * Sicherheitsnetz, unabhängig vom Markdown-Parser: jede Zeile, die den Dateinamen MIT Endung (ohne
+ * Beachtung der Groß-/Kleinschreibung; auch in URL-kodierter Form, wie sie `![](a%20b.shapes)` trägt)
+ * enthält und von keinem gefundenen Verweis abgedeckt ist. Der Aufrufer lehnt dann ab. Bewusst grob:
+ * derselbe Dateiname in einem anderen Ordner, Fließtext, Fremdzäune und HTML-Kommentare werden ebenfalls
+ * gemeldet — ein Treffer über den Basisnamen lässt sich nicht unterscheiden. `file:`-Werte ohne Endung
+ * lösen (getFirstLinkpathDest) nie auf eine .shapes-Datei auf, deshalb genügt der Name mit Endung.
+ */
+export function unaccountedMentions(
+  notes: readonly NoteText[],
+  targetPath: string,
+  refs: readonly ModelReference[],
+): { notePath: string; line: number; text: string }[] {
+  const base = targetPath.slice(targetPath.lastIndexOf("/") + 1).toLowerCase();
+  if (base === "") return [];
+  const needles = [...new Set([base, encodeURIComponent(base).toLowerCase(), base.replace(/ /g, "%20")])];
+  const out: { notePath: string; line: number; text: string }[] = [];
+  for (const note of notes) {
+    note.text.split(/\r?\n/).forEach((text, line) => {
+      const lower = text.toLowerCase();
+      if (!needles.some((n) => lower.includes(n))) return;
+      if (refs.some((r) => r.notePath === note.path && line >= r.from && line <= r.to)) return;
+      out.push({ notePath: note.path, line, text });
+    });
+  }
+  return out;
 }
 
 export function referenceBlock(linktext: string): string {
