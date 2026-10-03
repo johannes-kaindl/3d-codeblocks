@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyChanges, applyChangesAnswer, findPartName } from "../../../src/core/shapes/changes";
+import { applyChanges, applyChangesAnswer, matchPart } from "../../../src/core/shapes/changes";
 import { readChangesAnswer } from "../../../src/core/shapes/protocol";
 
 const TABLE = [
@@ -103,17 +103,34 @@ describe("applyChanges", () => {
     expect(r.ok && r.after.at(-1)?.name).toBe("Bein-vorne-links");
   });
 
-  it("Focus 1: findPartName ignores case and separators, refuses ambiguity", () => {
-    expect(findPartName(["Bein-1", "Platte"], "platte")).toBe("Platte");
-    expect(findPartName(["Tischplatte"], "tischplatte")).toBe("Tischplatte");
-    expect(findPartName(["Bein-vorne-links"], "bein vorne links")).toBe("Bein-vorne-links");
-    expect(findPartName(["Bein-1", "Platte"], "Bein_1")).toBe("Bein-1");
-    expect(findPartName(["Bein-1", "Bein_1"], "bein 1")).toBe("ambiguous");
-    expect(findPartName(["Bein-1", "Bein_1"], "Bein-1")).toBe("Bein-1");
-    expect(findPartName(["Platte"], "Stuhl")).toBeNull();
-    expect(findPartName(["Platte"], "-_ ")).toBeNull();
-    expect(findPartName(["ambiguous"], "ambiguous")).toBe("ambiguous");
-    expect(findPartName(["Ärger"], "Ärger")).toBe("Ärger"); // NFC vs NFD
+  it("Focus 1: matchPart ignores case and separators, refuses ambiguity (also with an exact hit)", () => {
+    const found = (n: string): unknown => ({ kind: "found", name: n });
+    expect(matchPart(["Bein-1", "Platte"], "platte")).toEqual(found("Platte"));
+    expect(matchPart(["Tischplatte"], "tischplatte")).toEqual(found("Tischplatte"));
+    expect(matchPart(["Bein-vorne-links"], "bein vorne links")).toEqual(found("Bein-vorne-links"));
+    expect(matchPart(["Bein-1", "Platte"], "Bein_1")).toEqual(found("Bein-1"));
+    expect(matchPart(["Bein-1", "Bein_1"], "bein 1")).toEqual({ kind: "ambiguous", candidates: ["Bein-1", "Bein_1"] });
+    expect(matchPart(["Bein-1", "Bein_1"], "Bein-1")).toEqual({ kind: "ambiguous", candidates: ["Bein-1", "Bein_1"] });
+    expect(matchPart(["Platte"], "Stuhl")).toEqual({ kind: "none" });
+    expect(matchPart(["Platte"], "-_ ")).toEqual({ kind: "none" });
+    expect(matchPart(["ambiguous"], "ambiguous")).toEqual(found("ambiguous"));
+    expect(matchPart(["\u00c4rger"], "A\u0308rger")).toEqual(found("\u00c4rger")); // NFD gesucht, NFC vorhanden
+  });
+
+  it("a part literally named `ambiguous` can be changed", () => {
+    expect(text(applyChanges("box ambiguous size 1\n", [{ op: "change", name: "ambiguous", color: "#000" }]))).toBe("box ambiguous size 1 1 1 color #000000\n");
+  });
+
+  it("a decomposed model-side name edits the composed part in the text", () => {
+    expect(text(applyChanges("box \u00c4rger size 1\n", [{ op: "remove", name: "A\u0308rger" }]))).toBe("");
+  });
+
+  it("refuses a target that sits on an error line (duplicate name)", () => {
+    const dup = "box A size 1\nbox A size 2\n";
+    expect(applyChanges(dup, [{ op: "change", name: "A", color: "#000" }])).toEqual({
+      ok: false,
+      problems: ["change 1: `A` appears on a line with an error — fix the text first"],
+    });
   });
 
   it("Focus 1: a case-insensitive name edits the right line in the text", () => {
@@ -194,6 +211,40 @@ describe("applyChanges", () => {
     const r = applyChanges(TABLE, [{ op: "remove", name: "Bein-2" }]);
     expect(r.ok && [r.before.length, r.after.length]).toEqual([3, 2]);
     expect(r.ok && r.before[2]).toEqual({ kind: "box", name: "Bein-2", size: [0.05, 0.7, 0.05], at: [0.55, 0.35, -0.3], rot: [0, 0, 0], color: null });
+  });
+});
+
+describe("round-trip guard", () => {
+  const fail = (t: string, c: Parameters<typeof applyChanges>[1]): string[] => {
+    const r = applyChanges(t, c);
+    if (r.ok) throw new Error("expected failure, got: " + r.text);
+    return r.problems;
+  };
+  const MSG = (n: string): string => `\`${n}\`: its values need more than 4 decimals — edit this part by hand`;
+
+  it("a colour-only change on a part with a size below 0.0001 is refused (it would vanish)", () => {
+    expect(fail("sphere S size 0.00004\n", [{ op: "change", name: "S", color: "#000" }])).toContain(MSG("S"));
+  });
+
+  it("a colour-only change must not silently round other values", () => {
+    expect(fail("box B size 0.123456789 at 1.000001 0 0\n", [{ op: "change", name: "B", color: "#000" }])).toEqual([MSG("B")]);
+  });
+
+  it("model-supplied values are rounded the way they are printed, and `after` agrees with the text", () => {
+    const r = applyChanges("box B size 1\n", [{ op: "change", name: "B", at: [0.00001, 1.23456, 0] }]);
+    expect(r.ok && r.text).toBe("box B size 1 1 1 at 0 1.2346 0\n");
+    expect(r.ok && r.after[0]?.at).toEqual([0, 1.2346, 0]);
+  });
+
+  it("an added part with long decimals is printed and reported identically", () => {
+    const r = applyChanges("box B size 1\n", [{ op: "add", part: { name: "C", shape: "sphere", size: [0.123456], position: [0, 0, 0.00001] } }]);
+    expect(r.ok && r.text).toBe("box B size 1\nsphere C size 0.1235\n");
+    expect(r.ok && r.after[1]).toMatchObject({ name: "C", size: [0.1235], at: [0, 0, 0] });
+  });
+
+  it("a colour-only change on 4-decimal values stays byte-identical except the colour", () => {
+    const t = "box B size 0.1235 0.0001 2 at 1.0001 0 -0.9999 color #111111\n";
+    expect(text(applyChanges(t, [{ op: "change", name: "B", color: "#222222" }]))).toBe(t.replace("#111111", "#222222"));
   });
 });
 

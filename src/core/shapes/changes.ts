@@ -1,7 +1,9 @@
 // Änderungsliste auf shapes-Text anwenden (Spec § 4.1). Pure.
 // - Nur Zeilen genannter Teile werden ersetzt/entfernt; alles andere bleibt BYTE-GLEICH
 //   (Zeilenenden je Zeile erhalten, auch gemischte; Schluss-Umbruch bleibt oder fehlt wie vorher).
-// - Auffüll-Adapter: fehlt einem `change` ein Feld, gilt der Bestand (Spike B: 13/20 → 20/20).
+// - Auffüll-Adapter: fehlt einem `change` ein Feld, gilt der Bestand.
+// - Round-Trip-Wächter: der erzeugte Text wird neu geparst; `after` stammt aus diesem Parse, und
+//   verlorene oder verschobene Werte (mehr als 4 Nachkommastellen) lassen die Liste scheitern.
 // - Alles oder nichts: ein Problem → nichts geändert, Liste der Probleme zurück.
 // - Eine Zeile mit unbekannten Wörtern (Parse-Warnung) wird NIE umgeschrieben: das Umformatieren
 //   würde die Wörter stillschweigend löschen. Stattdessen scheitert die ganze Liste.
@@ -9,7 +11,7 @@
 import { formatNumber, formatPartLine, partsFromLlm } from "./format";
 import { normalizeColor, normalizeSize, parseShapes } from "./parse";
 import type { RawChange, readChangesAnswer } from "./protocol";
-import type { ShapeDraft, ShapePart, Vec3 } from "./types";
+import { SHAPE_KINDS, type ShapeDraft, type ShapePart, type Vec3 } from "./types";
 
 export type ApplyResult =
   | { ok: true; text: string; before: ShapeDraft[]; after: ShapeDraft[] }
@@ -27,25 +29,21 @@ const toDraft = (p: ShapePart): ShapeDraft => ({
 /** NFC + klein, ohne Leerraum/Bindestrich/Unterstrich. */
 const fold = (name: string): string => name.normalize("NFC").toLowerCase().replace(/[\s_-]+/g, "");
 
-type Match = { found: string } | { none: true } | { ambiguous: string[] };
+export type Match = { kind: "found"; name: string } | { kind: "none" } | { kind: "ambiguous"; candidates: string[] };
 
-/** Exakter Treffer gewinnt; sonst gefaltet. Mehr als ein gefalteter Treffer → mehrdeutig. */
-function matchPart(names: readonly string[], wanted: string): Match {
-  if (names.includes(wanted)) return { found: wanted };
+/** Gefaltet vergleichen (Groß/Klein, Leerraum, `-`, `_`, NFC). Mehr als ein Treffer — auch mit einem
+ *  exakten darunter — ist mehrdeutig; ein leerer gefalteter Name trifft nie. */
+export function matchPart(names: readonly string[], wanted: string): Match {
   const key = fold(wanted);
-  if (key === "") return { none: true };
+  if (key === "") return { kind: "none" };
   const hits = names.filter((n) => fold(n) === key);
-  if (hits.length === 1) return { found: hits[0] };
-  return hits.length === 0 ? { none: true } : { ambiguous: hits };
+  if (hits.length === 1) return { kind: "found", name: hits[0] };
+  return hits.length === 0 ? { kind: "none" } : { kind: "ambiguous", candidates: hits };
 }
 
-/** String-Fassung von `matchPart`: Name, null (kein Treffer) oder "ambiguous". Ein Teil, das selbst
- *  "ambiguous" heißt, ist davon nicht zu unterscheiden — der Anwender-Pfad nutzt deshalb `matchPart`. */
-export function findPartName(names: readonly string[], wanted: string): string | null {
-  const m = matchPart(names, wanted);
-  if ("found" in m) return m.found;
-  return "none" in m ? null : "ambiguous";
-}
+/** Wert so, wie `formatNumber` ihn schreibt — damit Zustand, Text und Re-Parse dasselbe meinen. */
+const printed = (n: number): number => Number(formatNumber(n));
+const printedVec = (v: Vec3): Vec3 => [printed(v[0]), printed(v[1]), printed(v[2])];
 
 function vec(name: string, field: string, v: number[] | undefined, fallback: Vec3, problems: string[]): Vec3 {
   if (v === undefined) return fallback;
@@ -53,7 +51,7 @@ function vec(name: string, field: string, v: number[] | undefined, fallback: Vec
     problems.push(`\`${name}\`: \`${field}\` needs 3 numbers`);
     return fallback;
   }
-  return [v[0], v[1], v[2]];
+  return printedVec([v[0], v[1], v[2]]);
 }
 
 interface Entry {
@@ -86,6 +84,13 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
     order.push(p.name);
   }
   const problems: string[] = [];
+  const touched = new Set<string>();
+  // Namen von Teilzeilen, die der Parser mit Fehler verworfen hat (z. B. doppelter Name).
+  const errorNames = new Set<string>();
+  for (const err of parsed.errors) {
+    const toks = (entries[err.line - 1]?.text ?? "").trim().split(/\s+/);
+    if ((SHAPE_KINDS as readonly string[]).includes((toks[0] ?? "").toLowerCase()) && toks[1] !== undefined) errorNames.add(fold(toks[1]));
+  }
 
   changes.forEach((change, ci) => {
     const label = `change ${ci + 1}`;
@@ -96,6 +101,9 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
         problems.push(`${label} (add): ${dropped[0]?.reason ?? "unreadable"}`);
         return;
       }
+      draft.size = draft.size.map(printed);
+      draft.at = printedVec(draft.at);
+      draft.rot = printedVec(draft.rot);
       const clash = [...state.keys()].filter((n) => fold(n) === fold(draft.name));
       if (clash.length > 0) {
         problems.push(`${label} (add): a part named \`${clash[0]}\` already exists — remove it first or pick another name`);
@@ -108,15 +116,20 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
 
     const names = [...state.keys()];
     const m = matchPart(names, change.name);
-    if ("none" in m) {
+    if (m.kind === "none") {
       problems.push(`${label}: no part named \`${change.name}\` (available: ${names.join(", ") || "none"})`);
       return;
     }
-    if ("ambiguous" in m) {
-      problems.push(`${label}: \`${change.name}\` matches more than one part: ${m.ambiguous.join(", ")}`);
+    if (m.kind === "ambiguous") {
+      problems.push(`${label}: \`${change.name}\` matches more than one part: ${m.candidates.join(", ")}`);
       return;
     }
-    const found = m.found;
+    const found = m.name;
+    if (errorNames.has(fold(found))) {
+      problems.push(`${label}: \`${found}\` appears on a line with an error — fix the text first`);
+      return;
+    }
+    touched.add(found);
     const entry = state.get(found) as State;
 
     if (change.op === "remove") {
@@ -135,7 +148,7 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
         raw.every((v) => typeof v === "number" && Number.isFinite(v)) ? normalizeSize(d.kind, raw) : "`size` values must be finite numbers";
       if (typeof normalized === "string") own.push(`\`${found}\`: ${normalized}`);
       else if (normalized.some((v) => formatNumber(v) === "0")) own.push(`\`${found}\`: \`size\` values must be at least 0.0001`);
-      else size = normalized;
+      else size = normalized.map(printed);
     }
     let color = d.color;
     if (change.color !== undefined) {
@@ -194,8 +207,27 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
   const last = kept[kept.length - 1];
   if (last) last.sep = "";
   const out = kept.map((e) => e.text + e.sep).join("");
-  const after = order.map((n) => (state.get(n) as State).draft);
-  return { ok: true, text: out, before, after };
+  const expected = order.map((n) => (state.get(n) as State).draft);
+
+  // Round-Trip-Wächter: Text neu lesen, Zustand, Text und `after` dürfen nicht auseinanderlaufen.
+  const re = parseShapes(out);
+  const reDrafts = re.parts.map(toDraft);
+  const guard: string[] = [];
+  if (re.errors.length > parsed.errors.length) guard.push("the result would contain a line the parser rejects");
+  for (const want of expected) {
+    const got = reDrafts.find((d) => d.name === want.name);
+    if (!got || JSON.stringify(got) !== JSON.stringify(want)) {
+      guard.push(`\`${want.name}\`: its values need more than 4 decimals — edit this part by hand`);
+    }
+  }
+  for (const b of before) {
+    if (touched.has(b.name)) continue;
+    const got = reDrafts.find((d) => d.name === b.name);
+    if (!got || JSON.stringify(got) !== JSON.stringify(b)) guard.push(`\`${b.name}\`: would be changed by the rewrite — nothing applied`);
+  }
+  if (reDrafts.length !== expected.length && guard.length === 0) guard.push("the result has a different number of parts than expected");
+  if (guard.length > 0) return { ok: false, problems: [...new Set(guard)] };
+  return { ok: true, text: out, before, after: reDrafts };
 }
 
 /** Der EINE Einstieg für eine Modellantwort: nimmt das ganze Ergebnis von `readChangesAnswer`. */
