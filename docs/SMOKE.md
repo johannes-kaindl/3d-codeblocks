@@ -583,6 +583,12 @@ Der Abschnitt räumt vor sich selbst alles ab, was einen seiner Namenspräfixe (
 | SH11 | Datei → Block bei offener Ansicht mit Tippen, das noch nicht gespeichert ist (der Befehl läuft im selben Aufruf, weit innerhalb der 2 s Speicherverzögerung; steht die Zeile schon auf der Platte, wird der Punkt als übersprungen gemeldet): die Notiz trägt den Block samt frischer Zeile, die Datei ist weg, keine offene Ansicht bleibt, und binnen 3,5 s taucht keine Datei gleichen Namens wieder auf |
 | SH12 | Beide Befehle sind registriert; je Cursor-Ort (Überschrift, im Block, auf einer Embed-Zeile) stimmt, ob sie verfügbar sind, und der Menüeintrag erscheint nur am richtigen Ort mit den Icons `file-output` bzw. `file-input`; die Icons existieren (`setIcon` liefert ein `<svg>`, ein erfundener Name nicht). Ist `require("obsidian")` im Renderer nicht erreichbar, wird der Icon-Teil als übersprungen gemeldet (SH12b) |
 
+**Ergebnis Plan 2 (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess, Vault aus dem Fixture):** vorher (nach Plan 1) 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 83 grün · 0 rot · 8 übersprungen · 0 nichts gemessen (+7 grün = SH6–SH12; der achte Skip ist SH12b, die Icon-Existenzprüfung — `require("obsidian")` ist im Renderer nicht erreichbar, die Icons stehen nur als Menü-Eintrags-Attribut fest, ihre Darstellung ist nicht gemessen).
+
+**Gemessen im echten Obsidian, nicht nur gegen die Attrappe:** (1) SH11 — der Befehl „Datei → Block“ 2 ms nach dem Tippen, also vor dem verzögerten Speichern: die Notiz trägt den Block samt frischer Zeile, die Datei ist weg und tauchte binnen 3,5 s nicht wieder auf (keine Wiederauferstehung durch das Schluss-Speichern der geschlossenen Ansicht); (2) eine externe Änderung kommt als `setViewData(…, false)` an, der Cursor bleibt, kein Echo beim eigenen Speichern, Tippen plus externe Änderung vor dem Speichern führt Obsidian selbst zusammen; (3) `getAvailablePathForAttachment` liefert bei belegtem Namen einen nummerierten Pfad (`Tisch-probe 1.shapes`), auch bei abweichender Groß-/Kleinschreibung.
+
+**Gegenprobe Plan 2 (CORE-TEST-01):** derselbe Treiber gegen den Plugin-Stand nach Plan 1 (`dedb545`, ohne Dateiansicht) meldet SH1–SH5 grün, SH6 und SH7 rot („keine .tdcb-shapes-view im Blatt“, „kein Editor“) und bricht in SH8 ab — die Punkte können also fehlschlagen und messen das Feature; der Abbruch räumt auf (Vault danach ohne Reste).
+
 ## Befunde
 
 _Hier notieren, was auffällt._
