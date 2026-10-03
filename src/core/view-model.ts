@@ -9,6 +9,7 @@ export type ViewerState =
   | { kind: "compressed-gltf"; extensions: string[] }
   | { kind: "invalid-file" }
   | { kind: "invalid-gltf-json" }
+  | { kind: "invalid-shapes"; messages: string[] }
   | { kind: "no-webgl" }
   | { kind: "context-lost" }
   | { kind: "load-failed"; detail: string }
@@ -67,6 +68,8 @@ export function toViewModel(state: ViewerState): ViewModel {
       return error("The file is damaged or not a valid GLB.");
     case "invalid-gltf-json":
       return error("The glTF code is not valid JSON.");
+    case "invalid-shapes":
+      return error(`The shapes code has no valid part. ${state.messages.join(" ")}`.trim());
     case "no-webgl":
       return error("WebGL is unavailable, so the 3D view cannot be shown.");
     case "context-lost":

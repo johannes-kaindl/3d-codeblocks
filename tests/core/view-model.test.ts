@@ -35,7 +35,7 @@ describe("toViewModel", () => {
 
   it("lists the supported extensions on an unsupported format", () => {
     const vm = toViewModel({ kind: "unsupported-format", path: "a/b.obj" });
-    expect(vm.message).toBe("Unsupported format: a/b.obj (supported: .glb, .gltf, .stl)");
+    expect(vm.message).toBe("Unsupported format: a/b.obj (supported: .glb, .gltf, .stl, .shapes)");
   });
 
   it("explains why compressed glTF cannot work", () => {
@@ -76,6 +76,12 @@ describe("toViewModel", () => {
     const vm = toViewModel({ kind: "invalid-gltf-json" });
     expect(vm.message).toBe("The glTF code is not valid JSON.");
     expect(vm.tone).toBe("error");
+  });
+
+  it("explains a shapes text without any valid part", () => {
+    const vm = toViewModel({ kind: "invalid-shapes", messages: ["Line 1: Unknown shape `boxx`"] });
+    expect(vm.tone).toBe("error");
+    expect(vm.message).toBe("The shapes code has no valid part. Line 1: Unknown shape `boxx`");
   });
 });
 

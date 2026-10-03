@@ -134,3 +134,10 @@ describe("loadModel (Kameras aus der Datei)", () => {
     expect((await loadModel(colouredStl(false), "stl", "#888888")).cameras).toEqual([]);
   });
 });
+
+describe("loadModel (shapes)", () => {
+  it("refuses raw shapes text — the host converts it first", async () => {
+    const bytes = new TextEncoder().encode("box A size 1").buffer;
+    await expect(loadModel(bytes, "shapes", "#888888")).rejects.toThrow(/converted/);
+  });
+});

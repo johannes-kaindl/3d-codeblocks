@@ -1,13 +1,14 @@
 // Dateiendung → Format. Pure.
 
-export type ModelFormat = "gltf" | "stl";
+export type ModelFormat = "gltf" | "stl" | "shapes";
 
-export const SUPPORTED_EXTENSIONS = [".glb", ".gltf", ".stl"] as const;
+export const SUPPORTED_EXTENSIONS = [".glb", ".gltf", ".stl", ".shapes"] as const;
 
 const BY_EXTENSION: Record<string, ModelFormat> = {
   ".glb": "gltf",
   ".gltf": "gltf",
   ".stl": "stl",
+  ".shapes": "shapes",
 };
 
 export function detectFormat(path: string): ModelFormat | null {
