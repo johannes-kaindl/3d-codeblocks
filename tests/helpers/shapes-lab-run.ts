@@ -22,6 +22,8 @@ export interface ChatResult {
   timedOut?: boolean;
   finishReason?: string;
   usage?: unknown;
+  /** Länge (nicht Text) des Denkprotokolls eines Reasoning-Modells, falls mitgeliefert. */
+  reasoningChars?: number;
 }
 export type Chat = (messages: PromptMessage[]) => Promise<ChatResult>;
 export interface RunContext { run: string; dry: boolean }
@@ -41,19 +43,34 @@ export function httpChat(url: string, model: string, temperature: number): Chat 
       });
       const ms = () => Date.now() - t0;
       if (res.status !== 200) return { text: "", ms: ms(), status: res.status, error: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
-      const json = (await res.json()) as { choices?: { message?: { content?: unknown }; finish_reason?: unknown }[]; usage?: unknown };
-      const choice = json.choices?.[0];
-      const content = choice?.message?.content;
-      const meta = { status: res.status, finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined, usage: json.usage };
-      if (typeof content !== "string") {
-        const why = Array.isArray(content) ? "content is an array of parts, not text" : "response has no choices[0].message.content text";
-        return { text: "", ms: ms(), ...meta, error: why };
+      let json: { choices?: { message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown }; finish_reason?: unknown }[]; usage?: unknown };
+      try {
+        json = (await res.json()) as typeof json;
+      } catch {
+        return { text: "", ms: ms(), status: res.status, error: "invalid JSON body" };
       }
-      return { text: content, ms: ms(), ...meta };
+      const choice = json?.choices?.[0];
+      const content = choice?.message?.content;
+      const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined;
+      const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
+      const meta = {
+        status: res.status,
+        finishReason,
+        usage: json?.usage,
+        ...(typeof reasoning === "string" ? { reasoningChars: reasoning.length } : {}),
+      };
+      if (typeof content === "string") return { text: content, ms: ms(), ...meta };
+      // Ein Reasoning-Modell, das sein Token-Budget im Denken verbraucht hat: content null/fehlt, aber
+      // finish_reason "length" — das ist das Versagen des Modells (bad), kein Transportfehler.
+      if (!Array.isArray(content) && finishReason === "length") return { text: "", ms: ms(), ...meta };
+      const why = Array.isArray(content) ? "content is an array of parts, not text" : "response has no choices[0].message.content text";
+      return { text: "", ms: ms(), ...meta, error: why };
     } catch (e) {
       const name = (e as Error)?.name;
       const timedOut = name === "TimeoutError" || name === "AbortError";
-      return { text: "", ms: Date.now() - t0, timedOut, error: timedOut ? `timeout after ${CASE_TIMEOUT_MS / 1000} s` : msg(e) };
+      const cause = (e as { cause?: { code?: unknown; message?: unknown } })?.cause;
+      const detail = cause ? ` (${String(cause.code ?? cause.message ?? "").slice(0, 120)})` : "";
+      return { text: "", ms: Date.now() - t0, timedOut, error: timedOut ? `timeout after ${CASE_TIMEOUT_MS / 1000} s` : `${msg(e)}${detail}` };
     }
   };
 }
@@ -84,6 +101,7 @@ async function ask(rec: Record<string, unknown>, chat: Chat, messages: PromptMes
   if (r.status !== undefined) rec.status = r.status;
   if (r.finishReason !== undefined) rec.finish_reason = r.finishReason;
   if (r.usage !== undefined) rec.usage = r.usage;
+  if (r.reasoningChars !== undefined) rec.reasoningChars = r.reasoningChars;
   rec.answer = r.text.slice(0, 6000);
   if (r.timedOut) {
     rec.outcome = "timeout";
@@ -187,14 +205,16 @@ export function readLabEnv(env: Record<string, string | undefined>): LabEnv {
   const dryRaw = env.SHAPES_LAB_DRY;
   if (dryRaw !== undefined && dryRaw !== "1" && dryRaw !== "0") problems.push(`SHAPES_LAB_DRY must be 1 or 0, got "${dryRaw}"`);
   const dry = dryRaw === "1";
-  const url = env.SHAPES_LAB_URL ?? "";
+  const url = (env.SHAPES_LAB_URL ?? "").trim();
   const model = env.SHAPES_LAB_MODEL ?? "";
   if (!dry && (url === "" || model === "")) problems.push("a real run needs both SHAPES_LAB_URL and SHAPES_LAB_MODEL");
+  else if (url !== "" && !/^https?:\/\/\S+$/.test(url)) problems.push(`SHAPES_LAB_URL must start with http:// or https://, got "${url}"`);
   const task = env.SHAPES_LAB_TASK ?? "create";
   if (task !== "create" && task !== "refine") problems.push(`SHAPES_LAB_TASK must be exactly "create" or "refine", got "${task}"`);
   const tRaw = env.SHAPES_LAB_TEMPERATURE;
-  const temperature = tRaw === undefined ? 0.2 : tRaw.trim() === "" ? NaN : Number(tRaw);
-  if (!Number.isFinite(temperature) || temperature < 0) problems.push(`SHAPES_LAB_TEMPERATURE must be a number >= 0, got "${tRaw}"`);
+  const plain = tRaw === undefined || /^\d+(\.\d+)?$/.test(tRaw.trim());
+  const temperature = tRaw === undefined ? 0.2 : plain ? Number(tRaw.trim()) : NaN;
+  if (!plain || temperature > 2) problems.push(`SHAPES_LAB_TEMPERATURE must be a plain decimal between 0 and 2, got "${tRaw}"`);
   if (problems.length > 0) return { active: true, ok: false, problems };
   return { active: true, ok: true, url, model, task: task as "create" | "refine", out: env.SHAPES_LAB_OUT ?? "", dry, temperature };
 }

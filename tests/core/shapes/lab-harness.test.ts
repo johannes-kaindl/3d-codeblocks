@@ -1,9 +1,9 @@
 // Trockenlauf des Messlauf-Ablaufs ohne Modell: derselbe Code (runCreateCase/runRefineCase) mit
 // eingespeister Chat-Funktion. Ein Fehler im Messlauf soll hier auffallen, nicht in einem echten Lauf.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CREATE_CASES, REFINE_CASES } from "../../helpers/shapes-cases";
 import { changesAsAnswerText } from "../../helpers/shapes-refine-answers";
-import { dryChat, readLabEnv, runCreateCase, runRefineCase, summarize, type Chat } from "../../helpers/shapes-lab-run";
+import { dryChat, httpChat, readLabEnv, runCreateCase, runRefineCase, summarize, type Chat } from "../../helpers/shapes-lab-run";
 
 describe("lab harness (dry, no model, no network)", () => {
   it("create: canned golden answers run prompt → read → convert → load → check", async () => {
@@ -105,12 +105,64 @@ describe("lab harness (dry, no model, no network)", () => {
     expect(readLabEnv({})).toEqual({ active: false });
     const bad = (e: Record<string, string>) => { const r = readLabEnv(e); return r.active && !r.ok ? r.problems.join("|") : "ok"; };
     expect(bad({ SHAPES_LAB_URL: "http://x" })).toContain("both SHAPES_LAB_URL and SHAPES_LAB_MODEL");
-    expect(bad({ SHAPES_LAB_URL: "u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TASK: "Refine" })).toContain("TASK");
-    expect(bad({ SHAPES_LAB_URL: "u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TEMPERATURE: "abc" })).toContain("TEMPERATURE");
-    expect(bad({ SHAPES_LAB_URL: "u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TEMPERATURE: "-1" })).toContain("TEMPERATURE");
-    expect(bad({ SHAPES_LAB_URL: "u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TEMPERATURE: "" })).toContain("TEMPERATURE");
+    expect(bad({ SHAPES_LAB_URL: "http://u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TASK: "Refine" })).toContain("TASK");
+    expect(bad({ SHAPES_LAB_URL: "http://u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TEMPERATURE: "abc" })).toContain("TEMPERATURE");
+    expect(bad({ SHAPES_LAB_URL: "http://u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TEMPERATURE: "-1" })).toContain("TEMPERATURE");
+    expect(bad({ SHAPES_LAB_URL: "http://u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TEMPERATURE: "" })).toContain("TEMPERATURE");
     expect(bad({ SHAPES_LAB_DRY: "yes" })).toContain("DRY");
     expect(readLabEnv({ SHAPES_LAB_DRY: "1" })).toMatchObject({ active: true, ok: true, task: "create", temperature: 0.2, dry: true });
-    expect(readLabEnv({ SHAPES_LAB_URL: "u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TASK: "refine", SHAPES_LAB_TEMPERATURE: "0" })).toMatchObject({ ok: true, task: "refine", temperature: 0 });
+    expect(readLabEnv({ SHAPES_LAB_URL: "http://u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TASK: "refine", SHAPES_LAB_TEMPERATURE: "0" })).toMatchObject({ ok: true, task: "refine", temperature: 0 });
+  });
+
+  describe("httpChat against a stubbed fetch (no network)", () => {
+    afterEach(() => vi.unstubAllGlobals());
+    const stub = (body: unknown, status = 200) =>
+      vi.stubGlobal("fetch", async () => ({ status, text: async () => String(body), json: async () => { if (body === "NOT JSON") throw new SyntaxError("x"); return body; } }));
+    const call = () => httpChat("http://stub/v1", "m", 0.2)([{ role: "user", content: "hi" }]);
+
+    it("content null + finish_reason length (reasoning model out of budget) is bad, reasoning length recorded, not its text", async () => {
+      stub({ choices: [{ message: { content: null, reasoning_content: "x".repeat(123) }, finish_reason: "length" }], usage: { completion_tokens: 14000 } });
+      const r = await call();
+      expect(r).toMatchObject({ text: "", status: 200, finishReason: "length", reasoningChars: 123 });
+      expect(r.error).toBeUndefined();
+      const rec = await runCreateCase(CREATE_CASES[0], async () => r, ctx);
+      expect(rec).toMatchObject({ outcome: "bad", finish_reason: "length", reasoningChars: 123 });
+      expect(JSON.stringify(rec)).not.toContain("xxxxxxxx");
+    });
+
+    it("content absent without finish_reason length stays infra", async () => {
+      stub({ choices: [{ message: { content: null, reasoning_content: "thinking" }, finish_reason: "stop" }] });
+      const r = await call();
+      expect(r.error).toContain("no choices[0].message.content");
+      expect((await runCreateCase(CREATE_CASES[0], async () => r, ctx)).outcome).toBe("infra");
+    });
+
+    it("an invalid JSON body keeps status 200 and says so", async () => {
+      stub("NOT JSON");
+      expect(await call()).toMatchObject({ status: 200, error: "invalid JSON body" });
+    });
+
+    it("fetch failed carries the cause code", async () => {
+      vi.stubGlobal("fetch", async () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); });
+      const r = await call();
+      expect(r.error).toBe("fetch failed (ECONNREFUSED)");
+      expect(r.timedOut).toBeFalsy();
+    });
+
+    it("a non-200 status is infra with the status", async () => {
+      stub("boom", 503);
+      expect(await call()).toMatchObject({ status: 503 });
+    });
+  });
+
+  it("env: whitespace URL, non-http URL, temperature out of range or not a plain decimal are rejected", () => {
+    const base = { SHAPES_LAB_URL: "http://127.0.0.1:1234/v1/chat/completions", SHAPES_LAB_MODEL: "m" };
+    const bad = (e: Record<string, string>) => { const r = readLabEnv({ ...base, ...e }); return r.active && !r.ok ? r.problems.join("|") : "ok"; };
+    expect(bad({ SHAPES_LAB_URL: "   " })).toContain("both SHAPES_LAB_URL");
+    expect(bad({ SHAPES_LAB_URL: "127.0.0.1:1234" })).toContain("http");
+    expect(bad({ SHAPES_LAB_URL: "ftp://x" })).toContain("http");
+    for (const t of ["2.1", "3", "0x10", "1e3", "1e-1", ".5", "+0.2", "0.2.1"]) expect(bad({ SHAPES_LAB_TEMPERATURE: t }), t).toContain("TEMPERATURE");
+    for (const t of ["0", "0.2", "1", "2", " 0.7 "]) expect(bad({ SHAPES_LAB_TEMPERATURE: t }), t).toBe("ok");
+    expect(readLabEnv({ ...base, SHAPES_LAB_URL: "  https://h/v1  " })).toMatchObject({ ok: true, url: "https://h/v1" });
   });
 });
