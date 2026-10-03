@@ -119,6 +119,13 @@ export class ShapesFileView extends TextFileView implements TrackedView {
     return this.data;
   }
 
+  // Gemessen 2026-10-03 (Obsidian 1.14.4, Zweitinstanz, Probe über CDP an einer offenen .shapes-Datei):
+  // - Eine externe Änderung der Datei (Sync) kommt als `setViewData(data, false)` an; der Cursor
+  //   blieb in Zeile 1, der geänderte Text in Zeile 4 war übernommen. `clear === true` ist also
+  //   der Dateiwechsel, nicht der externe Reload — anders als der Kommentar in json-editors JsonFileView.
+  // - Das eigene Speichern löst kein `setViewData` aus (kein Echo).
+  // - Tippt man und ändert die Datei von außen vor dem Speichern, führt Obsidian beide Stände
+  //   selbst zusammen: Editor und Platte trugen danach beide Änderungen, nichts ging verloren.
   setViewData(data: string, clear: boolean): void {
     this.data = data;
     if (this.editor) {
