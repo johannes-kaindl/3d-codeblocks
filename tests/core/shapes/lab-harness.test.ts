@@ -5,6 +5,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { CREATE_CASES, REFINE_CASES } from "../../helpers/shapes-cases";
 import { changesAsAnswerText } from "../../helpers/shapes-refine-answers";
+import { promptSha } from "../../helpers/prompt-sha";
 import { dryChat, httpChat, readLabEnv, runCreateCase, runRefineCase, summarize, type Chat } from "../../helpers/shapes-lab-run";
 
 describe("lab harness (dry, no model, no network)", () => {
@@ -58,6 +59,28 @@ describe("lab harness (dry, no model, no network)", () => {
     expect(rec).toMatchObject({ outcome: "good", good: true, run: "test-run", dry: true });
     const bad = await runRefineCase(REFINE_CASES[2], async () => ({ text: "{\"changes\":[]}", ms: 1 }), ctx);
     expect(bad).toMatchObject({ outcome: "bad", good: false });
+  });
+
+  it("records and summary carry the promptSha of their task (M/I-2)", async () => {
+    const r = await runRefineCase(REFINE_CASES[2], dryChat("refine", "R03"), ctx);
+    expect(r.promptSha).toBe(promptSha("refine"));
+    const c = await runCreateCase(CREATE_CASES[0], dryChat("create", "A01"), ctx);
+    expect(c.promptSha).toBe(promptSha("create"));
+    expect(sum([r]).summary.promptSha).toBe(promptSha("refine"));
+    expect(summarize([c], { ...ctx, model: "m", task: "create" }).summary.promptSha).toBe(promptSha("create"));
+  });
+
+  it("marks answerTruncated only when the 6000-char cut applied (M-9)", async () => {
+    const long = await runRefineCase(REFINE_CASES[2], async () => ({ text: "x".repeat(6001), ms: 1 }), ctx);
+    expect(long).toMatchObject({ answerTruncated: true });
+    expect((long.answer as string).length).toBe(6000);
+    const short = await runRefineCase(REFINE_CASES[2], async () => ({ text: "x".repeat(6000), ms: 1 }), ctx);
+    expect(short.answerTruncated).toBeUndefined();
+  });
+
+  it("trims SHAPES_LAB_MODEL (M-9)", () => {
+    const r = readLabEnv({ SHAPES_LAB_URL: "http://127.0.0.1:1/v1", SHAPES_LAB_MODEL: "  qwen/x \n" });
+    expect(r.active && r.ok && r.model).toBe("qwen/x");
   });
 
   it("transport error and HTTP 500 are infra and make the run INCOMPLETE", async () => {

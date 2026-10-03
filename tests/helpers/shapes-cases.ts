@@ -27,7 +27,7 @@ export const REFINE_BASE = [
 
 // Für R06: der Ausgangsstand als Teile (aus REFINE_BASE, von Hand gespiegelt, damit der Helfer
 // keine Produktionslogik braucht).
-const BASE: ShapeDraft[] = [
+export const BASE: ShapeDraft[] = [
   { kind: "box", name: "Platte", size: [1.2, 0.05, 0.7], at: [0, 0.725, 0], rot: [0, 0, 0], color: "#8b5a2b" },
   { kind: "box", name: "Bein-1", size: [0.05, 0.7, 0.05], at: [-0.55, 0.35, -0.3], rot: [0, 0, 0], color: null },
   { kind: "box", name: "Bein-2", size: [0.05, 0.7, 0.05], at: [0.55, 0.35, -0.3], rot: [0, 0, 0], color: null },

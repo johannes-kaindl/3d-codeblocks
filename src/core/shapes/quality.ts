@@ -2,6 +2,10 @@
 // Kein Raten aus Familie oder Namen: endpoint-source liefert die Familie, nicht die Größe,
 // und Aliasnamen sagen nichts. Neue Zeilen kommen NUR aus einem Messlauf (Protokoll: docs/LAB.md). `measuredAt` ist je Eintrag das Datum des aufgezeichneten Laufs;
 // die Zahlen leitet quality.test.ts bei jedem Lauf aus den Fixtures neu ab.
+// Die Messungen liefen mit temperature 0.2, max_tokens 14000 und ohne response_format; das Panel muss
+// dasselbe Sampling senden oder neu messen. `promptSha` bindet jede Zeile an den gemessenen Prompt
+// (Regel: tests/helpers/prompt-sha.ts); ändert sich der Prompt, wird die Zeile ungültig und gehört nach
+// docs/LAB.md in die Liste der zurückgezogenen Zeilen.
 export type QualityTask = "create" | "refine";
 
 export interface Measurement {
@@ -17,24 +21,26 @@ export interface Measurement {
   good: number;
   of: number;
   measuredAt: string;
+  /** Fingerabdruck des gemessenen Prompts (System + Vorlage), siehe tests/helpers/prompt-sha.ts. */
+  promptSha: string;
   source: string;
 }
 
 export const MEASUREMENTS: readonly Measurement[] = [
   {
-    model: "qwen/qwen3.8-27b", mode: "structured", task: "create", good: 9, of: 10, measuredAt: "2026-10-01",
+    model: "qwen/qwen3.8-27b", mode: "structured", task: "create", good: 9, of: 10, measuredAt: "2026-10-01", promptSha: "6d29c7c76d4532f2",
     source: "Spike A 2026-10-01, tests/fixtures/shapes-spike/a-q27-dsl.jsonl (+ tests/fixtures/shapes-spike/a-q27-dsl-rerun.jsonl for A04), evaluated via tests/helpers/shapes-spike-eval.ts (golden-spike.test.ts). The lab control run on 2026-10-03 through the production code reproduced 9 of 10 (A07 bad again): tests/fixtures/shapes-lab/qwen3.8-27b-create-2026-10-03.jsonl",
   },
   {
-    model: "google/gemma-4-e4b", mode: "structured", task: "create", good: 4, of: 10, measuredAt: "2026-10-01",
+    model: "google/gemma-4-e4b", mode: "structured", task: "create", good: 4, of: 10, measuredAt: "2026-10-01", promptSha: "6d29c7c76d4532f2",
     source: "Spike A 2026-10-01, tests/fixtures/shapes-spike/a-e4b-dsl.jsonl, evaluated via tests/helpers/shapes-spike-eval.ts (golden-spike.test.ts). The spike recorded 5/10 without the hole check; 4/10 is re-derived (2026-10-03) with the stricter hole check on A01",
   },
   {
-    model: "qwen/qwen3.8-27b", mode: "structured", task: "refine", good: 8, of: 8, measuredAt: "2026-10-03",
+    model: "qwen/qwen3.8-27b", mode: "structured", task: "refine", good: 8, of: 8, measuredAt: "2026-10-03", promptSha: "8bd865943b3454d1",
     source: "Lab run 2026-10-03, tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
   },
   {
-    model: "google/gemma-4-e4b", mode: "structured", task: "refine", good: 6, of: 8, measuredAt: "2026-10-03",
+    model: "google/gemma-4-e4b", mode: "structured", task: "refine", good: 6, of: 8, measuredAt: "2026-10-03", promptSha: "8bd865943b3454d1",
     source: "Lab run 2026-10-03, tests/fixtures/shapes-lab/gemma-4-e4b-refine-2026-10-03.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
   },
 ];
@@ -42,14 +48,14 @@ export const MEASUREMENTS: readonly Measurement[] = [
 /** Bezugszahl für ungemessene Modelle: das eine gemessene kleine Modell, nie als dessen eigenes Ergebnis gezeigt. */
 const SMALL_MODEL = "google/gemma-4-e4b";
 
-function smallReference(task: QualityTask): Measurement | null {
-  return MEASUREMENTS.find((x) => x.model === SMALL_MODEL && x.task === task) ?? null;
+function smallReference(task: QualityTask, table: readonly Measurement[]): Measurement | null {
+  return table.find((x) => x.model === SMALL_MODEL && x.task === task) ?? null;
 }
 
-export function findMeasurement(model: string, task: QualityTask): Measurement | null {
+export function findMeasurement(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS): Measurement | null {
   const wanted = model.trim().toLowerCase();
   if (wanted === "") return null;
-  return MEASUREMENTS.find((m) => m.task === task && m.model.toLowerCase() === wanted) ?? null;
+  return table.find((m) => m.task === task && m.model.toLowerCase() === wanted) ?? null;
 }
 
 const NOUN: Record<QualityTask, { measured: string; plural: string }> = {
@@ -57,13 +63,13 @@ const NOUN: Record<QualityTask, { measured: string; plural: string }> = {
   refine: { measured: "test change requests were applied correctly", plural: "test change requests right" },
 };
 
-export function qualityLine(model: string, task: QualityTask): { measured: boolean; text: string } {
-  const m = findMeasurement(model, task);
+export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS): { measured: boolean; text: string } {
+  const m = findMeasurement(model, task, table);
   if (m) return { measured: true, text: `Measured: ${m.good} of ${m.of} ${NOUN[task].measured} (${m.model}, ${m.measuredAt}, n=1 per ${task === "refine" ? "request" : "prompt"}).` };
   // Kein kleiner Verfeinern-Eintrag: auf den Erstellen-Satz zurückfallen.
-  const refTask: QualityTask = smallReference(task) ? task : "create";
-  const ref = smallReference(refTask);
-  if (!ref) throw new Error("quality: small reference measurement missing");
+  const refTask: QualityTask = smallReference(task, table) ? task : "create";
+  const ref = smallReference(refTask, table);
+  if (!ref) return { measured: false, text: "Not measured for this model." };
   const shortName = ref.model.slice(ref.model.lastIndexOf("/") + 1);
   return {
     measured: false,

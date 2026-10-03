@@ -5,6 +5,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { applyChangesAnswer } from "../../src/core/shapes/changes";
 import { buildCreateMessages, buildRefineMessages, readChangesAnswer, type PromptMessage } from "../../src/core/shapes/protocol";
+import { promptSha } from "./prompt-sha";
 import { CREATE_CASES, REFINE_BASE, REFINE_CASES } from "./shapes-cases";
 import { REFINE_CORRECT, changesAsAnswerText } from "./shapes-refine-answers";
 import { measureCreate, readRecords } from "./shapes-spike-eval";
@@ -125,6 +126,7 @@ async function ask(rec: Record<string, unknown>, chat: Chat, messages: PromptMes
   if (r.usage !== undefined) rec.usage = r.usage;
   if (r.reasoningChars !== undefined) rec.reasoningChars = r.reasoningChars;
   rec.answer = r.text.slice(0, 6000);
+  if (r.text.length > 6000) rec.answerTruncated = true;
   if (r.timedOut) {
     rec.outcome = "timeout";
     rec.error = r.error ?? "timeout";
@@ -138,10 +140,10 @@ async function ask(rec: Record<string, unknown>, chat: Chat, messages: PromptMes
   return r;
 }
 
-function finish(rec: Record<string, unknown>, ctx: RunContext): Record<string, unknown> {
+function finish(rec: Record<string, unknown>, ctx: RunContext, task: "create" | "refine"): Record<string, unknown> {
   rec.outcome ??= rec.good === true ? "good" : "bad";
   rec.good = rec.outcome === "good";
-  return { ...rec, run: ctx.run, dry: ctx.dry };
+  return { ...rec, run: ctx.run, dry: ctx.dry, promptSha: promptSha(task) };
 }
 
 export async function runCreateCase(c: (typeof CREATE_CASES)[number], chat: Chat, ctx: RunContext = { run: "adhoc", dry: false }): Promise<Record<string, unknown>> {
@@ -159,7 +161,7 @@ export async function runCreateCase(c: (typeof CREATE_CASES)[number], chat: Chat
     rec.good = false;
     rec.error = msg(e);
   }
-  return finish(rec, ctx);
+  return finish(rec, ctx, "create");
 }
 
 export async function runRefineCase(c: (typeof REFINE_CASES)[number], chat: Chat, ctx: RunContext = { run: "adhoc", dry: false }): Promise<Record<string, unknown>> {
@@ -183,7 +185,7 @@ export async function runRefineCase(c: (typeof REFINE_CASES)[number], chat: Chat
     rec.good = false;
     rec.error = msg(e);
   }
-  return finish(rec, ctx);
+  return finish(rec, ctx, "refine");
 }
 
 export interface LabSummary {
@@ -197,6 +199,8 @@ export interface LabSummary {
   timeouts: number;
   infraErrors: number;
   dry: boolean;
+  /** Prompt-Fingerabdruck (Regel: tests/helpers/prompt-sha.ts). */
+  promptSha: string;
 }
 
 /** Einzige Vollständigkeits-Aussage eines Laufs: complete = jeder Fall hat eine Modellantwort (good/bad/timeout). */
@@ -207,6 +211,7 @@ export function summarize(recs: readonly Record<string, unknown>[], ctx: RunCont
     summary: true, run: ctx.run, model: ctx.model, task: ctx.task,
     complete: infraErrors === 0 && recs.length > 0, good: count("good"), of: recs.length,
     timeouts: count("timeout"), infraErrors, dry: ctx.dry,
+    promptSha: promptSha(ctx.task === "refine" ? "refine" : "create"),
   };
   const line = summary.complete
     ? `COMPLETE ${ctx.task} ${ctx.model}: ${summary.good} of ${summary.of} (timeouts: ${summary.timeouts})`
@@ -228,7 +233,7 @@ export function readLabEnv(env: Record<string, string | undefined>): LabEnv {
   if (dryRaw !== undefined && dryRaw !== "1" && dryRaw !== "0") problems.push(`SHAPES_LAB_DRY must be 1 or 0, got "${dryRaw}"`);
   const dry = dryRaw === "1";
   const url = (env.SHAPES_LAB_URL ?? "").trim();
-  const model = env.SHAPES_LAB_MODEL ?? "";
+  const model = (env.SHAPES_LAB_MODEL ?? "").trim();
   if (!dry && (url === "" || model === "")) problems.push("a real run needs both SHAPES_LAB_URL and SHAPES_LAB_MODEL");
   else if (url !== "" && !/^https?:\/\/\S+$/.test(url)) problems.push(`SHAPES_LAB_URL must start with http:// or https://, got "${url}"`);
   const task = env.SHAPES_LAB_TASK ?? "create";

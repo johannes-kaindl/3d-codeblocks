@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { MEASUREMENTS, failureHint, findMeasurement, qualityLine } from "../../../src/core/shapes/quality";
+import { promptSha } from "../../helpers/prompt-sha";
+import { BASE, REFINE_BASE } from "../../helpers/shapes-cases";
+import { CREATE_CASES } from "../../helpers/shapes-cases";
+import { parseShapes } from "../../../src/core/shapes/parse";
+import { runCreateCase } from "../../helpers/shapes-lab-run";
 import { evaluate } from "../../helpers/shapes-spike-eval";
 
 describe("quality", () => {
@@ -96,5 +101,44 @@ describe("quality", () => {
     const e = findMeasurement("google/gemma-4-e4b", "create");
     expect(q).toMatchObject({ good: q27, of: 10 });
     expect(e).toMatchObject({ good: e4b, of: 10 });
+  });
+
+  it("every row carries the promptSha of the CURRENT prompt of its task (a prompt edit retires the rows)", () => {
+    for (const m of MEASUREMENTS) expect(m.promptSha, `${m.model} ${m.task}`).toBe(promptSha(m.task));
+  });
+
+  it("falls back to the plain sentence when no reference row exists (M-2)", () => {
+    expect(qualityLine("x", "refine", [])).toEqual({ measured: false, text: "Not measured for this model." });
+    expect(qualityLine("x", "create", [])).toEqual({ measured: false, text: "Not measured for this model." });
+  });
+
+  it("falls back to the create sentence when there is no small refine row", () => {
+    const table = MEASUREMENTS.filter((m) => !(m.task === "refine" && m.model === "google/gemma-4-e4b"));
+    expect(qualityLine("x", "refine", table).text).toContain("4 of 10 test prompts plausible");
+  });
+
+  it("replays the create control run through the production path: 9 of 10, A07 bad (M-1)", async () => {
+    const path = fileURLToPath(new URL("../../fixtures/shapes-lab/qwen3.8-27b-create-2026-10-03.jsonl", import.meta.url));
+    const recs = readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    const summary = recs.find((r) => r.summary === true);
+    expect(summary).toMatchObject({ complete: true, dry: false, good: 9, of: 10 });
+    const cases = recs.filter((r) => r.summary !== true);
+    expect(cases).toHaveLength(10);
+    const outcomes: Record<string, string> = {};
+    for (const r of cases) {
+      const answer = String(r.answer);
+      expect(answer.length, `${String(r.id)} would be truncated`).toBeLessThan(6000);
+      const c = CREATE_CASES.find((x) => x.id === r.id);
+      if (!c) throw new Error(`unknown case ${String(r.id)}`);
+      outcomes[c.id] = String((await runCreateCase(c, async () => ({ text: answer, ms: 0, status: 200 }))).outcome);
+      expect(outcomes[c.id], c.id).toBe(r.outcome);
+    }
+    expect(Object.values(outcomes).filter((o) => o === "good")).toHaveLength(9);
+    expect(outcomes.A07).toBe("bad");
+  });
+
+  it("the hand-mirrored BASE equals the parsed REFINE_BASE (M-8)", () => {
+    const parsed = parseShapes(REFINE_BASE).parts.map((p) => ({ kind: p.kind, name: p.name, size: p.size, at: p.at, rot: p.rot, color: p.color }));
+    expect(BASE).toEqual(parsed);
   });
 });
