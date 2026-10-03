@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows
 - `.shapes` files open in their own view with **Model | Text | Split**: edit the text and the model re-renders after a short pause; broken lines are marked in the text.
 - Commands **Move shapes block into a .shapes file** and **Move .shapes file into a code block** (also in the editor's right-click menu). Moving a file back into a block only happens when exactly one place uses it (one embed or one ```3d block with nothing but the `file:` line); the file then goes to the trash or is removed, as your *Deleted files* setting says. Embeds with display options and blocks with comment lines are refused, because they would lose them.
 - Command **Export shapes model as glTF**: writes a self-contained `.gltf` to the attachment folder; an existing file is only overwritten after you confirm.
+- A ```` ```shapes ```` fence whose info line contains a backtick (for example a prose line like ```` ```shapes``` text ````) is no longer treated as the start of a code block, following the CommonMark rule. This only matters for Export and Move shapes block into a file with such an unusual line.
 - The GitHub release now also carries a ready-to-unpack `three-d-codeblocks.zip` (the plugin folder with `main.js`, `manifest.json` and `styles.css`) and a `checksums.sha256` file. For a manual install, download the zip and unpack it into `.obsidian/plugins/` instead of creating the folder and saving three files by hand.
 
 ## [0.5.0] — 2026-09-26

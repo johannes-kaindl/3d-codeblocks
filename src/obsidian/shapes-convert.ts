@@ -259,7 +259,13 @@ function mentionNotice(file: TFile, mentions: { notePath: string; line: number }
 
 /** Was mit der Datei passiert, sagt die Obsidian-Einstellung "Deleted files" (trashOption), nicht wir. */
 function trashOutcome(app: App): string {
-  const option = (app.vault as unknown as { getConfig?: (key: string) => unknown }).getConfig?.("trashOption");
+  let option: unknown;
+  try {
+    option = (app.vault as unknown as { getConfig?: (key: string) => unknown }).getConfig?.("trashOption");
+  } catch {
+    // Eine werfende Einstellungsabfrage darf eine gelungene Umwandlung nicht in eine Fehlermeldung verwandeln.
+    option = undefined;
+  }
   if (option === "local") return "The file was moved to the .trash folder of the vault — restore it from there if you need it.";
   if (option === "system") return "The file was moved to the system trash — restore it from there if you need it.";
   return "The file was removed according to your Deleted files setting (it is not recoverable if that is set to permanently delete).";

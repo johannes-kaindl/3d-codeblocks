@@ -15,7 +15,9 @@ console.log(`main.js: ${sizeKb.toFixed(0)} KB (Schranke ${LIMIT_KB} KB)`);
 // CodeMirror gehoert Obsidian: das Bundle muss es per require holen und darf keine eigene Kopie tragen
 // (zwei EditorView-Klassen kennen die Erweiterungen des jeweils anderen nicht).
 const needle = 'require("@codemirror/view")';
-const forbidden = "class EditorView";
+// Laufzeit-Klassennamen ueberleben die Minifizierung (ein Klassenname wie `EditorView` nicht) und stehen im Bundle,
+// sobald CodeMirror mitgebuendelt ist.
+const forbidden = "cm-scroller";
 const bundle = readFileSync("main.js", "utf8");
 if (!bundle.includes(needle)) {
   console.error(`main.js enthaelt ${needle} nicht — CodeMirror wird nicht von Obsidian geholt (external vergessen?).`);
@@ -25,4 +27,4 @@ if (bundle.includes(forbidden)) {
   console.error(`main.js enthaelt "${forbidden}" — eine eigene CodeMirror-Kopie ist im Bundle gelandet (external pruefen).`);
   process.exit(1);
 }
-console.log("main.js: CodeMirror extern (require vorhanden, keine eigene EditorView-Klasse)");
+console.log("main.js: CodeMirror extern (require vorhanden, kein eigenes CodeMirror)");

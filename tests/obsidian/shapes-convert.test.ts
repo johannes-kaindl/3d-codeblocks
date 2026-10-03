@@ -539,6 +539,16 @@ describe("convertFileToBlock", () => {
     if (option === "none" || option === undefined) expect(notices[0]).not.toMatch(/restore/);
   });
 
+  it("(I1) a throwing getConfig still reports success, with the neutral wording", async () => {
+    const { env, notices, trashed, app } = setup(withFile(), { cursorLine: 2 });
+    (app as never as { vault: { getConfig: () => never } }).vault.getConfig = () => { throw new Error("no config"); };
+    expect(await convertFileToBlock(env)).toBe(true);
+    expect(trashed).toEqual(["Anhänge/Tisch.shapes"]);
+    expect(notices[0]).toMatch(/is now a code block/);
+    expect(notices[0]).toMatch(/Deleted files setting/);
+    expect(notices[0]).not.toMatch(/Could not convert/);
+  });
+
   it.each([
     ["|400", "![[Tisch.shapes|400]]"],
     ["|Alias", "![[Tisch.shapes|Alias]]"],
