@@ -27,6 +27,11 @@ export const REFINE_CORRECT: Record<string, RawChange[]> = {
   R08: legs.map(([name, x, z], i): RawChange => ({ op: "add", part: { op: "add", name: `Fuss-${i + 1}`, shape: "sphere", position: [x, 0.04, z], size: [0.04] } })),
 };
 
+/** Zweiter kanonischer Weg für R07 seit Plan 3b: Formwechsel per `change` (die Antwort, die gemma in R07 versuchte). */
+export const REFINE_CORRECT_SHAPE_CHANGE: Record<string, RawChange[]> = {
+  R07: [{ op: "change", name: "Bein-1", shape: "cylinder", size: [0.03, 0.7] }],
+};
+
 const feet = (pos: (x: number, z: number) => [number, number, number], n = 4): RawChange[] =>
   legs.slice(0, n).map(([, x, z], i): RawChange => ({ op: "add", part: { op: "add", name: `Fuss-${i + 1}`, shape: "sphere", position: pos(x, z), size: [0.04] } }));
 
@@ -85,6 +90,7 @@ export function changesAsAnswerText(changes: readonly RawChange[]): string {
     return {
       op: "change",
       name: c.name,
+      ...(c.shape ? { shape: c.shape } : {}),
       ...(c.at ? { position: c.at } : {}),
       ...(c.size ? { size: c.size } : {}),
       ...(c.rot ? { rotation_deg: c.rot } : {}),

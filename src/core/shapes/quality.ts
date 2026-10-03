@@ -35,14 +35,9 @@ export const MEASUREMENTS: readonly Measurement[] = [
     model: "google/gemma-4-e4b", mode: "structured", task: "create", good: 4, of: 10, measuredAt: "2026-10-01", promptSha: "6d29c7c76d4532f2",
     source: "Spike A 2026-10-01, tests/fixtures/shapes-spike/a-e4b-dsl.jsonl, evaluated via tests/helpers/shapes-spike-eval.ts (golden-spike.test.ts). The spike recorded 5/10 without the hole check; 4/10 is re-derived (2026-10-03) with the stricter hole check on A01",
   },
-  {
-    model: "qwen/qwen3.8-27b", mode: "structured", task: "refine", good: 8, of: 8, measuredAt: "2026-10-03", promptSha: "8bd865943b3454d1",
-    source: "Lab run 2026-10-03, tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
-  },
-  {
-    model: "google/gemma-4-e4b", mode: "structured", task: "refine", good: 6, of: 8, measuredAt: "2026-10-03", promptSha: "8bd865943b3454d1",
-    source: "Lab run 2026-10-03, tests/fixtures/shapes-lab/gemma-4-e4b-refine-2026-10-03.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
-  },
+  // Verfeinern: keine Zeilen. Die zwei Zeilen vom 2026-10-03 (qwen 8/8, gemma 6/8) maßen den alten REFINE_SYSTEM
+  // und sind seit dem Formwechsel per `change` zurückgezogen (docs/LAB.md, Retired rows); neue Zeilen kommen
+  // aus dem Messlauf mit dem jetzigen Prompt.
 ];
 
 /** Bezugszahl für ungemessene Modelle: das eine gemessene kleine Modell, nie als dessen eigenes Ergebnis gezeigt. */
@@ -77,18 +72,18 @@ export function qualityLine(model: string, task: QualityTask, table: readonly Me
   };
 }
 
-function best(task: QualityTask): Measurement | null {
+function best(task: QualityTask, table: readonly Measurement[]): Measurement | null {
   // Gleichstand: Modellname alphabetisch zuerst (deterministisch).
-  return MEASUREMENTS.filter((m) => m.task === task)
+  return table.filter((m) => m.task === task)
     .sort((a, b) => b.good / b.of - a.good / a.of || a.model.localeCompare(b.model))[0] ?? null;
 }
 
-export function failureHint(model: string, task: QualityTask = "create"): string {
+export function failureHint(model: string, task: QualityTask = "create", table: readonly Measurement[] = MEASUREMENTS): string {
   const base = task === "refine" ? "The change list could not be applied." : "The answer could not be turned into a model.";
   const noun = task === "refine" ? "test change requests applied correctly" : "test prompts plausible";
-  const top = best(task);
+  const top = best(task, table);
   if (!top) return base;
-  const own = findMeasurement(model, task);
+  const own = findMeasurement(model, task, table);
   if (own && own.model === top.model) {
     return `${base} In the test this model got ${own.good} of ${own.of} ${noun} — try a simpler wording or a smaller change.`;
   }

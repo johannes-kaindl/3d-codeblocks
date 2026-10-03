@@ -11,7 +11,7 @@
 import { formatNumber, formatPartLine, partsFromLlm } from "./format";
 import { normalizeColor, normalizeSize, parseShapes } from "./parse";
 import type { RawChange, readChangesAnswer } from "./protocol";
-import { SHAPE_KINDS, type ShapeDraft, type ShapePart, type Vec3 } from "./types";
+import { SHAPE_KINDS, type ShapeDraft, type ShapeKind, type ShapePart, type Vec3 } from "./types";
 
 export type ApplyResult =
   | { ok: true; text: string; before: ShapeDraft[]; after: ShapeDraft[] }
@@ -166,11 +166,26 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
 
     const d = entry.draft;
     const own: string[] = [];
+    // Formwechsel: `shape` (Groß/Klein und Leerraum wie bei den Formwörtern im Parser) bestimmt die Art, nach der
+    // `size` geprüft wird. Gleiche Art ist ein Nichtstun; eine andere Art braucht eine `size` für die neue Form.
+    let kind: ShapeKind = d.kind;
+    if (change.shape !== undefined) {
+      const wanted = change.shape.trim().toLowerCase();
+      if (!(SHAPE_KINDS as readonly string[]).includes(wanted)) {
+        problems.push(`${label}: \`${found}\`: unknown shape \`${change.shape}\``);
+        return;
+      }
+      kind = wanted as ShapeKind;
+      if (kind !== d.kind && change.size === undefined) {
+        problems.push(`${label}: \`${found}\`: changing the shape needs a \`size\` for a ${kind}`);
+        return;
+      }
+    }
     let size = d.size;
     if (change.size !== undefined) {
       const raw = change.size;
       const normalized =
-        raw.every((v) => typeof v === "number" && Number.isFinite(v)) ? normalizeSize(d.kind, raw) : "`size` values must be finite numbers";
+        raw.every((v) => typeof v === "number" && Number.isFinite(v)) ? normalizeSize(kind, raw) : "`size` values must be finite numbers";
       if (typeof normalized === "string") own.push(`\`${found}\`: ${normalized}`);
       else if (normalized.some((v) => formatNumber(v) === "0")) own.push(`\`${found}\`: \`size\` values must be at least 0.0001`);
       else size = normalized.map(printed);
@@ -187,7 +202,7 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
       problems.push(...own.map((m) => `${label}: ${m}`));
       return;
     }
-    entry.draft = { ...d, size, color, at, rot };
+    entry.draft = { ...d, kind, size, color, at, rot };
   });
 
   if (problems.length > 0) return { ok: false, problems };

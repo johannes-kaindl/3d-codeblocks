@@ -17,8 +17,8 @@ position = Mittelpunkt des Teils. size: box=[Breite X,Höhe Y,Tiefe Z] · cylind
 // neue Tabellenzeile; der Test pinnt beides per SHA-256, und `promptSha` der Tabellenzeile muss passen.
 export const REFINE_SYSTEM = `Du änderst ein bestehendes 3D-Modell aus einfachen Primitiven. Koordinaten in Metern, Y zeigt nach oben, X nach rechts, Z zum Betrachter. position = Mittelpunkt des Teils. size: box=[Breite X,Höhe Y,Tiefe Z] · cylinder/cone=[Radius,Höhe] (Achse entlang Y) · sphere=[Radius].
 Du bekommst die Teile als JSON und einen Änderungswunsch. Antworte NUR mit JSON, ohne Erklärung, und nenne NUR die Teile, die sich ändern:
-{"changes":[{"op":"change","name":"<vorhandener Name>","position":[x,y,z],"size":[...],"rotation_deg":[rx,ry,rz],"color":"#rrggbb"},{"op":"add","name":"...","shape":"box|cylinder|sphere|cone","position":[x,y,z],"size":[...],"color":"#rrggbb"},{"op":"remove","name":"<vorhandener Name>"}]}
-Bei "change" lässt du Felder weg, die gleich bleiben. Die Form eines Teils änderst du, indem du es entfernst und unter demselben Namen neu hinzufügst.`;
+{"changes":[{"op":"change","name":"<vorhandener Name>","shape":"box|cylinder|sphere|cone","position":[x,y,z],"size":[...],"rotation_deg":[rx,ry,rz],"color":"#rrggbb"},{"op":"add","name":"...","shape":"box|cylinder|sphere|cone","position":[x,y,z],"size":[...],"color":"#rrggbb"},{"op":"remove","name":"<vorhandener Name>"}]}
+Bei "change" lässt du Felder weg, die gleich bleiben. Wechselst du die Form ("shape"), gib "size" für die neue Form mit.`;
 
 export function buildCreateMessages(prompt: string): PromptMessage[] {
   return [
@@ -124,14 +124,15 @@ export function readPartsAnswer(text: string): { ok: true; parts: unknown[] } | 
 }
 
 export type RawChange =
-  | { op: "change"; name: string; at?: number[]; size?: number[]; rot?: number[]; color?: string }
+  | { op: "change"; name: string; shape?: string; at?: number[]; size?: number[]; rot?: number[]; color?: string }
   | { op: "add"; part: unknown }
   | { op: "remove"; name: string };
 
 const numbers = (v: unknown): number[] | undefined =>
   Array.isArray(v) && v.every((x) => typeof x === "number" && Number.isFinite(x)) ? (v as number[]) : undefined;
 
-const CHANGE_KEYS: ReadonlySet<string> = new Set(["op", "name", "position", "size", "rotation_deg", "color"]);
+const CHANGE_KEYS: ReadonlySet<string> = new Set(["op", "name", "shape", "position", "size", "rotation_deg", "color"]);
+const ADD_KEYS: ReadonlySet<string> = new Set(["op", "name", "shape", "position", "size", "rotation_deg", "color"]);
 
 export function readChangesAnswer(
   text: string,
@@ -149,6 +150,9 @@ export function readChangesAnswer(
     const op = typeof item.op === "string" ? item.op.trim().toLowerCase() : "";
     const name = typeof item.name === "string" ? item.name.trim() : "";
     if (op === "add") {
+      // `add` ist so streng wie `change`: ein unbekannter Schlüssel (`at`, `colour`, …) lässt den Eintrag scheitern.
+      const unknownAddKey = Object.keys(item).find((k) => !ADD_KEYS.has(k));
+      if (unknownAddKey !== undefined) return drop(`\`add\` has an unknown key \`${unknownAddKey}\``);
       changes.push({ op: "add", part: item });
     } else if (op === "remove" || op === "change") {
       if (name === "") return drop(`\`${op}\` needs a name`);
@@ -156,13 +160,15 @@ export function readChangesAnswer(
         changes.push({ op: "remove", name });
         return;
       }
-      // Bis Plan 3b die Form beim `change` kann: jeder Schlüssel außerhalb der bekannten Felder lässt den
-      // Eintrag scheitern, statt still ignoriert zu werden (sonst „gelingt“ eine Formänderung als Größenänderung).
+      // Jeder Schlüssel außerhalb der bekannten Felder lässt den Eintrag scheitern, statt still ignoriert
+      // zu werden (sonst „gelingt“ ein vertipptes `colour` als Nichtstun).
       const unknownKey = Object.keys(item).find((k) => !CHANGE_KEYS.has(k));
-      if (unknownKey !== undefined) {
-        return drop(unknownKey === "shape" ? "`change` with `shape` is not supported yet" : `\`change\` has an unknown key \`${unknownKey}\``);
-      }
+      if (unknownKey !== undefined) return drop(`\`change\` has an unknown key \`${unknownKey}\``);
       const change: Extract<RawChange, { op: "change" }> = { op: "change", name };
+      if (item.shape !== undefined) {
+        if (typeof item.shape !== "string") return drop("`shape` must be text");
+        change.shape = item.shape;
+      }
       if (item.position !== undefined) {
         const at = numbers(item.position);
         if (!at || at.length !== 3) return drop("`position` must be three numbers");
@@ -182,7 +188,7 @@ export function readChangesAnswer(
         if (typeof item.color !== "string") return drop("`color` must be text");
         change.color = item.color;
       }
-      if (change.at === undefined && change.size === undefined && change.rot === undefined && change.color === undefined) {
+      if (change.shape === undefined && change.at === undefined && change.size === undefined && change.rot === undefined && change.color === undefined) {
         return drop("`change` changes nothing");
       }
       changes.push(change);

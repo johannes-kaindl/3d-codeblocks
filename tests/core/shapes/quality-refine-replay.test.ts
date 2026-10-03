@@ -1,9 +1,10 @@
-// Replay: die Verfeinern-Zahlen der Messtabelle werden aus den aufgezeichneten Modellantworten
-// über denselben Produktionsweg neu abgeleitet wie im Messlauf (runRefineCase mit eingespeister Antwort).
+// Replay: die aufgezeichneten Verfeinern-Antworten vom 2026-10-03 laufen über denselben Produktionsweg wie im
+// Messlauf (runRefineCase mit eingespeister Antwort). Seit dem Formwechsel per `change` sind die zugehörigen
+// Tabellenzeilen zurückgezogen (alter REFINE_SYSTEM); der Replay bleibt als REGRESSIONSTEST von Leser und
+// Anwender auf aufgezeichneten Antworten (8 und 6 gut), ohne Bindung an MEASUREMENTS.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { findMeasurement } from "../../../src/core/shapes/quality";
 import { REFINE_CASES } from "../../helpers/shapes-cases";
 import { runRefineCase } from "../../helpers/shapes-lab-run";
 
@@ -34,7 +35,7 @@ const FIXTURES = [
 
 describe("refine replay", () => {
   for (const f of FIXTURES) {
-    it(`${f.model}: re-derives ${f.good} of 8 from the recorded answers and matches the table`, async () => {
+    it(`${f.model}: re-derives ${f.good} of 8 from the recorded answers (regression test, retired table row)`, async () => {
       const recs = load(f.file);
       const summary = recs.find((r) => r.summary === true)!;
       expect(summary).toMatchObject({ complete: true, dry: false, good: f.good, of: 8, model: f.model, task: "refine" });
@@ -43,7 +44,6 @@ describe("refine replay", () => {
       expect(count(out)).toBe(f.good);
       // Jeder Fall stimmt mit der Aufzeichnung überein, nicht nur die Summe.
       for (const r of recs) if (r.summary !== true) expect(out[String(r.id)].outcome, String(r.id)).toBe(r.outcome);
-      expect(findMeasurement(f.model, "refine")).toMatchObject({ good: count(out), of: Object.keys(out).length });
     });
   }
 

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { MEASUREMENTS, failureHint, findMeasurement, qualityLine } from "../../../src/core/shapes/quality";
+import { MEASUREMENTS, failureHint, findMeasurement, qualityLine, type Measurement } from "../../../src/core/shapes/quality";
 import { promptSha } from "../../helpers/prompt-sha";
 import { BASE, REFINE_BASE } from "../../helpers/shapes-cases";
 import { CREATE_CASES } from "../../helpers/shapes-cases";
@@ -29,26 +29,51 @@ describe("quality", () => {
     }
   });
 
+  // Verfeinern-Zeilen sind seit dem Formwechsel zurückgezogen (neuer REFINE_SYSTEM); die Texte werden mit einer
+  // Tabelle aus Test-Zeilen geprüft, bis der Messlauf echte Zeilen liefert.
+  const refineRow = (model: string, good: number): Measurement => ({
+    model, mode: "structured", task: "refine", good, of: 8, measuredAt: "2026-10-04", promptSha: promptSha("refine"), source: "test row",
+  });
+  const REFINE_TABLE: readonly Measurement[] = [...MEASUREMENTS, refineRow("qwen/qwen3.8-27b", 8), refineRow("google/gemma-4-e4b", 6)];
+
   it("has no cross-task guess: a create row never answers a refine question", () => {
     expect(findMeasurement("verdigado-pro", "refine")).toBeNull();
-    expect(qualityLine("qwen/qwen3.8-27b", "refine").text).toBe("Measured: 8 of 8 test change requests were applied correctly (qwen/qwen3.8-27b, 2026-10-03, n=1 per request).");
-    expect(qualityLine("google/gemma-4-e4b", "refine").text).toBe("Measured: 6 of 8 test change requests were applied correctly (google/gemma-4-e4b, 2026-10-03, n=1 per request).");
+    expect(findMeasurement("qwen/qwen3.8-27b", "refine", MEASUREMENTS.filter((m) => m.task === "create"))).toBeNull();
+    expect(qualityLine("qwen/qwen3.8-27b", "refine", REFINE_TABLE).text).toBe("Measured: 8 of 8 test change requests were applied correctly (qwen/qwen3.8-27b, 2026-10-04, n=1 per request).");
+    expect(qualityLine("google/gemma-4-e4b", "refine", REFINE_TABLE).text).toBe("Measured: 6 of 8 test change requests were applied correctly (google/gemma-4-e4b, 2026-10-04, n=1 per request).");
   });
 
   it("uses task-aware texts for refine", () => {
-    expect(qualityLine("verdigado-pro", "refine")).toEqual({
+    expect(qualityLine("verdigado-pro", "refine", REFINE_TABLE)).toEqual({
       measured: false,
       text: "Not measured for this model — the one small model tested (gemma-4-e4b) got 6 of 8 test change requests right.",
     });
   });
 
+  it("with no refine row in the shipped table, refine falls back to the create sentence and never claims a measurement", () => {
+    const shipped = MEASUREMENTS.filter((m) => m.task === "refine");
+    for (const m of shipped) expect(m.promptSha, `${m.model} refine`).toBe(promptSha("refine"));
+    if (shipped.length === 0) {
+      expect(qualityLine("qwen/qwen3.8-27b", "refine")).toEqual({
+        measured: false,
+        text: "Not measured for this model — the one small model tested (gemma-4-e4b) got 4 of 10 test prompts plausible.",
+      });
+    }
+  });
+
   it("refine failure hint: best refine model, never the create statistics", () => {
-    expect(failureHint("google/gemma-4-e4b", "refine")).toBe(
+    expect(failureHint("google/gemma-4-e4b", "refine", REFINE_TABLE)).toBe(
       "The change list could not be applied. A larger model may do better — measured best: qwen/qwen3.8-27b, 8 of 8 test change requests applied correctly.",
     );
-    expect(failureHint("qwen/qwen3.8-27b", "refine")).toBe(
+    expect(failureHint("qwen/qwen3.8-27b", "refine", REFINE_TABLE)).toBe(
       "The change list could not be applied. In the test this model got 8 of 8 test change requests applied correctly — try a simpler wording or a smaller change.",
     );
+  });
+
+  it("refine failure hint with no refine row does not throw and gives the bare sentence", () => {
+    const createOnly = MEASUREMENTS.filter((m) => m.task === "create");
+    expect(failureHint("google/gemma-4-e4b", "refine", createOnly)).toBe("The change list could not be applied.");
+    if (!MEASUREMENTS.some((m) => m.task === "refine")) expect(failureHint("x", "refine")).toBe("The change list could not be applied.");
   });
 
   it("points to a larger model when another model's answer fails", () => {
@@ -113,7 +138,7 @@ describe("quality", () => {
   });
 
   it("falls back to the create sentence when there is no small refine row", () => {
-    const table = MEASUREMENTS.filter((m) => !(m.task === "refine" && m.model === "google/gemma-4-e4b"));
+    const table = REFINE_TABLE.filter((m) => !(m.task === "refine" && m.model === "google/gemma-4-e4b"));
     expect(qualityLine("x", "refine", table).text).toContain("4 of 10 test prompts plausible");
   });
 

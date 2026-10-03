@@ -284,11 +284,11 @@ describe("unsupported or unknown keys on `change` (I-1)", () => {
     return r.ok ? [] : r.problems;
   };
 
-  it("a `change` with `shape` is dropped and the whole answer refused, naming the key", () => {
-    const p = refuse('{"changes":[{"op":"change","name":"Bein-1","shape":"sphere","size":[0.1]}]}');
-    expect(p.join(" ")).toContain("`change` with `shape` is not supported yet");
-    const q = refuse('{"changes":[{"op":"change","name":"Bein-1","shape":"cylinder","position":[-0.55,0.35,-0.3]}]}');
-    expect(q.join(" ")).toContain("`shape`");
+  it("an unknown key on `change` (`colour`, `at`, `Shape`) still refuses the whole answer, naming the key", () => {
+    for (const key of ["colour", "at", "Shape"]) {
+      const p = refuse(`{"changes":[{"op":"change","name":"Bein-1","${key}":"x","size":[1,1,1]}]}`);
+      expect(p.join(" "), key).toContain(`\`${key}\``);
+    }
   });
 
   it("any other unknown key is dropped too, with its name", () => {
@@ -297,9 +297,11 @@ describe("unsupported or unknown keys on `change` (I-1)", () => {
     expect(a.ok && a.dropped[0].reason).toContain("`scale`");
   });
 
-  it("known keys and add items stay as before", () => {
-    const a = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","position":[0,0,0],"size":[1,1,1],"rotation_deg":[0,0,0],"color":"#fff"},{"op":"add","name":"X","shape":"box","size":[1,1,1],"extra":1}]}');
+  it("known keys stay accepted; an `add` with an unknown key is refused like a `change` (Plan 3b symmetry)", () => {
+    const a = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","position":[0,0,0],"size":[1,1,1],"rotation_deg":[0,0,0],"color":"#fff"},{"op":"add","name":"X","shape":"box","size":[1,1,1]}]}');
     expect(a.ok && a.dropped).toEqual([]);
+    const p = refuse('{"changes":[{"op":"add","name":"X","shape":"box","size":[1,1,1],"at":[0,0,0]}]}');
+    expect(p.join(" ")).toContain("`add` has an unknown key `at`");
   });
 
   it("an answer that changes nothing is refused explicitly", () => {
@@ -338,5 +340,89 @@ describe("unnamed adds (M-5)", () => {
     const t = text(r);
     expect(t).toContain("box box-4 size 1 1 1");
     expect(t).toContain("box box-5 size 2 2 2");
+  });
+});
+
+describe("shape change (Plan 3b)", () => {
+  const LEG = "box Bein-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3";
+  const refused = (changes: Parameters<typeof applyChanges>[1], src = TABLE): string[] => {
+    const r = applyChanges(src, changes);
+    expect(r.ok).toBe(false);
+    return r.ok ? [] : r.problems;
+  };
+
+  it("changes the shape when size comes along, keeping position and colour", () => {
+    const r = applyChanges(TABLE, [{ op: "change", name: "Bein-1", shape: "cylinder", size: [0.03, 0.7] }]);
+    expect(r.ok && r.text.split("\n")[3]).toBe("cylinder Bein-1 size 0.03 0.7 at -0.55 0.35 -0.3");
+  });
+
+  it("keeps colour, rotation and line position exactly (full text)", () => {
+    const src = ["title: T", "box A size 1 1 1", "box B size 1 2 3 at 1 2 3 rot 0 90 0 color #112233", "box C size 1", ""].join("\n");
+    const r = applyChanges(src, [{ op: "change", name: "B", shape: "cone", size: [0.5, 2] }]);
+    expect(text(r)).toBe(["title: T", "box A size 1 1 1", "cone B size 0.5 2 at 1 2 3 rot 0 90 0 color #112233", "box C size 1", ""].join("\n"));
+    expect(r.ok && r.after[1]).toMatchObject({ kind: "cone", name: "B", color: "#112233", rot: [0, 90, 0] });
+  });
+
+  it("refuses a shape change without a size for the new shape", () => {
+    expect(refused([{ op: "change", name: "Bein-1", shape: "sphere" }])).toEqual(["change 1: `Bein-1`: changing the shape needs a `size` for a sphere"]);
+  });
+
+  it("refuses an unknown shape", () => {
+    expect(refused([{ op: "change", name: "Bein-1", shape: "torus", size: [1] }])).toEqual(["change 1: `Bein-1`: unknown shape `torus`"]);
+  });
+
+  it("validates the size against the NEW kind (3 numbers for a sphere is refused, naming the kind)", () => {
+    const p = refused([{ op: "change", name: "Bein-1", shape: "sphere", size: [1, 2, 3] }]);
+    expect(p).toHaveLength(1);
+    expect(p[0]).toContain("sphere");
+  });
+
+  it("same-kind shape is a no-op on the shape and size stays optional", () => {
+    const r = applyChanges(TABLE, [{ op: "change", name: "Bein-1", shape: "box", color: "#ff0000" }]);
+    expect(text(r)).toBe(TABLE.replace(LEG, `${LEG} color #ff0000`));
+    const q = applyChanges(TABLE, [{ op: "change", name: "Bein-1", shape: "box" }]);
+    expect(q.ok).toBe(true);
+  });
+
+  it("accepts shape in other case / with whitespace, like the parser does for kinds", () => {
+    const r = applyChanges(TABLE, [{ op: "change", name: "Bein-1", shape: " Cylinder ", size: [0.03, 0.7] }]);
+    expect(r.ok && r.after[1].kind).toBe("cylinder");
+  });
+
+  it("still refuses a shape change on a line with unrecognised words", () => {
+    const src = "box A size 1 1 1 bogus\n";
+    const p = refused([{ op: "change", name: "A", shape: "sphere", size: [1] }], src);
+    expect(p.join(" ")).toContain("unrecognised words");
+  });
+
+  it("works cumulatively: shape change then size change on the same part", () => {
+    const r = applyChanges(TABLE, [
+      { op: "change", name: "Bein-1", shape: "cylinder", size: [0.03, 0.7] },
+      { op: "change", name: "Bein-1", size: [0.05, 0.9] },
+    ]);
+    expect(r.ok && r.text.split("\n")[3]).toBe("cylinder Bein-1 size 0.05 0.9 at -0.55 0.35 -0.3");
+  });
+
+  it("a second change after a shape change is validated against the new kind", () => {
+    const p = refused([
+      { op: "change", name: "Bein-1", shape: "cylinder", size: [0.03, 0.7] },
+      { op: "change", name: "Bein-1", size: [1, 1, 1] },
+    ]);
+    expect(p.join(" ")).toContain("cylinder");
+  });
+
+  it("remove + add under the same name still works", () => {
+    const r = applyChanges(TABLE, [
+      { op: "remove", name: "Bein-1" },
+      { op: "add", part: { op: "add", name: "Bein-1", shape: "cylinder", position: [-0.55, 0.35, -0.3], size: [0.03, 0.7] } },
+    ]);
+    expect(r.ok && r.after.find((d) => d.name === "Bein-1")?.kind).toBe("cylinder");
+  });
+
+  it("the round-trip guard sees the new line (answer path: reader + applier)", () => {
+    const a = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","shape":"cylinder","size":[0.03,0.7]}]}');
+    const r = applyChangesAnswer(TABLE, a);
+    expect(r.ok && r.after[1]).toEqual({ kind: "cylinder", name: "Bein-1", size: [0.03, 0.7], at: [-0.55, 0.35, -0.3], rot: [0, 0, 0], color: null });
+    expect(r.ok && r.before[1].kind).toBe("box");
   });
 });

@@ -184,4 +184,43 @@ describe("readChangesAnswer", () => {
       dropped: [],
     });
   });
+
+  it("reads a shape change (Plan 3b)", () => {
+    const r = readChangesAnswer('{"changes":[{"op":"change","name":"Bein-1","shape":"cylinder","size":[0.03,0.7]}]}');
+    expect(r).toMatchObject({ ok: true, changes: [{ op: "change", name: "Bein-1", shape: "cylinder", size: [0.03, 0.7] }], dropped: [] });
+  });
+
+  it("a shape alone counts as a change; a non-string shape is dropped with a reason, never coerced", () => {
+    expect(readChangesAnswer('[{"op":"change","name":"A","shape":"box"}]')).toMatchObject({ ok: true, changes: [{ op: "change", name: "A", shape: "box" }] });
+    expect(readChangesAnswer('[{"op":"change","name":"A","shape":5,"size":[1]},{"op":"change","name":"B","shape":["box"]}]')).toEqual({
+      ok: true,
+      changes: [],
+      dropped: [
+        { index: 0, reason: "`shape` must be text" },
+        { index: 1, reason: "`shape` must be text" },
+      ],
+    });
+  });
+
+  it("every other unknown key on `change` is still dropped, naming the key", () => {
+    for (const key of ["colour", "at", "Shape"]) {
+      const r = readChangesAnswer(`[{"op":"change","name":"A","${key}":"x","size":[1]}]`);
+      expect(r, key).toEqual({ ok: true, changes: [], dropped: [{ index: 0, reason: `\`change\` has an unknown key \`${key}\`` }] });
+    }
+  });
+
+  it("`add` is as strict as `change`: an unknown key drops the item, naming the key", () => {
+    for (const key of ["at", "colour", "extra"]) {
+      const r = readChangesAnswer(`[{"op":"add","name":"X","shape":"box","size":[1],"${key}":1}]`);
+      expect(r, key).toEqual({ ok: true, changes: [], dropped: [{ index: 0, reason: `\`add\` has an unknown key \`${key}\`` }] });
+    }
+    const ok = readChangesAnswer('[{"op":"add","name":"X","shape":"box","position":[0,0,0],"size":[1],"rotation_deg":[0,0,0],"color":"#fff"}]');
+    expect(ok).toMatchObject({ ok: true, dropped: [] });
+  });
+
+  it("REFINE_SYSTEM tells the model it may change the shape", () => {
+    expect(REFINE_SYSTEM).toContain('"name":"<vorhandener Name>","shape":"box|cylinder|sphere|cone","position"');
+    expect(REFINE_SYSTEM).toContain('Wechselst du die Form ("shape"), gib "size" für die neue Form mit.');
+    expect(REFINE_SYSTEM).not.toContain("entfernt und unter demselben Namen");
+  });
 });
