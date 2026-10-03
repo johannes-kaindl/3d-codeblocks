@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   BlockChangedError,
+  replaceLines,
   writeBlockBody,
   type BlockLocation,
 } from "../../src/obsidian/block-writer";
@@ -233,5 +234,135 @@ describe("writeBlockBody", () => {
       await writeBlockBody(ports, loc, "file: a.glb", "file: a.glb\nview: top");
       expect(state.content).toBe(["```3d extra", "file: a.glb", "view: top", "```"].join("\n"));
     });
+  });
+});
+
+describe("replaceLines", () => {
+  const RNOTE = "# T\n```shapes\nbox A size 1\n```\nEnde";
+  const FENCE = "```shapes\nbox A size 1\n```";
+
+  it("replaces a whole fence through the vault", async () => {
+    const { state, ports } = makePorts(RNOTE);
+    await replaceLines(ports, "note.md", 1, 3, FENCE, "```3d\nfile: a.shapes\n```");
+    expect(state.content).toBe("# T\n```3d\nfile: a.shapes\n```\nEnde");
+  });
+
+  it("replaces through an open editor", async () => {
+    const { state, editor, ports } = makePorts(RNOTE, true);
+    await replaceLines(ports, "note.md", 1, 3, FENCE, "X");
+    expect(editor.replaceRange).toHaveBeenCalled();
+    expect(state.content).toBe("# T\nX\nEnde");
+  });
+
+  it("refuses when the lines changed in the meantime (vault and editor, buffer untouched)", async () => {
+    const changed = RNOTE.replace("size 1", "size 2");
+    for (const withEditor of [false, true]) {
+      const { state, editor, ports } = makePorts(changed, withEditor);
+      await expect(replaceLines(ports, "note.md", 1, 3, FENCE, "X")).rejects.toBeInstanceOf(
+        BlockChangedError,
+      );
+      expect(editor.replaceRange).not.toHaveBeenCalled();
+      expect(state.content).toBe(changed);
+    }
+  });
+
+  it("refuses when the note is shorter than `to`", async () => {
+    const { state, ports } = makePorts("# T\n```shapes");
+    await expect(replaceLines(ports, "note.md", 1, 3, FENCE, "X")).rejects.toBeInstanceOf(
+      BlockChangedError,
+    );
+    expect(state.content).toBe("# T\n```shapes");
+  });
+
+  it("refuses when the range moved by one line (line inserted above)", async () => {
+    for (const withEditor of [false, true]) {
+      const moved = "new\n" + RNOTE;
+      const { state, ports } = makePorts(moved, withEditor);
+      await expect(replaceLines(ports, "note.md", 1, 3, FENCE, "X")).rejects.toBeInstanceOf(
+        BlockChangedError,
+      );
+      expect(state.content).toBe(moved);
+    }
+  });
+
+  it("refuses when expected differs only in trailing whitespace", async () => {
+    const { state, ports } = makePorts(RNOTE.replace("size 1", "size 1 "));
+    await expect(replaceLines(ports, "note.md", 1, 3, FENCE, "X")).rejects.toBeInstanceOf(
+      BlockChangedError,
+    );
+    expect(state.content).toBe(RNOTE.replace("size 1", "size 1 "));
+  });
+
+  it("keeps CRLF notes CRLF (LF expected is a match), vault and editor", async () => {
+    for (const withEditor of [false, true]) {
+      const { state, ports } = makePorts(RNOTE.replace(/\n/g, "\r\n"), withEditor);
+      await replaceLines(ports, "note.md", 1, 3, FENCE, "a\nb");
+      expect(state.content).toBe("# T\r\na\r\nb\r\nEnde");
+    }
+  });
+
+  it("treats CRLF in `expected` against an LF note as a match", async () => {
+    const { state, ports } = makePorts(RNOTE);
+    await replaceLines(ports, "note.md", 1, 3, FENCE.replace(/\n/g, "\r\n"), "a\r\nb");
+    expect(state.content).toBe("# T\na\nb\nEnde");
+  });
+
+  it("aborts when the content changes between the check and the write (inside process)", async () => {
+    const state = { content: RNOTE };
+    const racing = {
+      editorFor: () => null,
+      vault: {
+        read: async () => state.content,
+        process: async (_p: string, fn: (t: string) => string) => {
+          state.content = RNOTE.replace("size 1", "size 9"); // sync/linter strikes here
+          state.content = fn(state.content);
+        },
+      },
+    };
+    await expect(replaceLines(racing, "note.md", 1, 3, FENCE, "X")).rejects.toBeInstanceOf(
+      BlockChangedError,
+    );
+    expect(state.content).toBe(RNOTE.replace("size 1", "size 9"));
+  });
+
+  it("refuses from > to, negative from, non-integers, without writing", async () => {
+    for (const [from, to] of [[3, 1], [-1, 2], [1.5, 3], [1, Number.NaN]] as const) {
+      const { state, ports } = makePorts(RNOTE);
+      await expect(replaceLines(ports, "note.md", from, to, FENCE, "X")).rejects.toBeInstanceOf(
+        BlockChangedError,
+      );
+      expect(state.content).toBe(RNOTE);
+    }
+  });
+
+  it("keeps a BOM at the start of the note", async () => {
+    const { state, ports } = makePorts("\uFEFF" + RNOTE);
+    await replaceLines(ports, "note.md", 1, 3, FENCE, "X");
+    expect(state.content).toBe("\uFEFF# T\nX\nEnde");
+  });
+
+  it("does not add a final newline when the note has none, and keeps one when present", async () => {
+    const a = makePorts("a\nb");
+    await replaceLines(a.ports, "note.md", 1, 1, "b", "X\nY");
+    expect(a.state.content).toBe("a\nX\nY");
+    const b = makePorts("a\nb\n");
+    await replaceLines(b.ports, "note.md", 1, 1, "b", "X");
+    expect(b.state.content).toBe("a\nX\n");
+    const c = makePorts("a\nb\n", true);
+    await replaceLines(c.ports, "note.md", 1, 1, "b", "X");
+    expect(c.state.content).toBe("a\nX\n");
+  });
+
+  // Entscheidung: eine leere Ersetzung ist erlaubt und ersetzt den Bereich durch EINE
+  // leere Zeile (Zeilenzahl-Logik: "" ist eine Zeile). Wer Zeilen loeschen will, nimmt
+  // einen anderen Weg; hier wird nie still eine Zeilenzahl veraendert, die ein
+  // Aufrufer nicht erwartet.
+  it("an empty replacement leaves one empty line (documented behaviour)", async () => {
+    const { state, ports } = makePorts(RNOTE);
+    await replaceLines(ports, "note.md", 1, 3, FENCE, "");
+    expect(state.content).toBe("# T\n\nEnde");
+    const e = makePorts(RNOTE, true);
+    await replaceLines(e.ports, "note.md", 1, 3, FENCE, "");
+    expect(e.state.content).toBe("# T\n\nEnde");
   });
 });

@@ -209,3 +209,53 @@ export async function writeBlockBody(
     return replaceBody(current, loc, styledNextBody);
   });
 }
+
+function linesAt(content: string, from: number, to: number): string | null {
+  const lines = normalizeLineEndings(content).split("\n");
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to >= lines.length)
+    return null;
+  return lines.slice(from, to + 1).join("\n");
+}
+
+/** Ganze Zeilen `from..to` (0-basiert, inklusive) ersetzen — fürs Umwandeln Block ↔ Datei,
+    wo sich die Sprache des Zauns ändert und `writeBlockBody` deshalb nicht reicht. Dieselbe
+    Vorsicht wie dort: stimmt der Bereich nicht mehr, wird nichts geschrieben. Eine leere
+    Ersetzung ergibt EINE leere Zeile (kein Zeilenverlust). */
+export async function replaceLines(
+  ports: WritePorts,
+  path: string,
+  from: number,
+  to: number,
+  expected: string,
+  replacement: string,
+): Promise<void> {
+  const want = normalizeLineEndings(expected);
+  const editor = ports.editorFor(path);
+
+  if (editor) {
+    const content = editor.getValue();
+    if (linesAt(content, from, to) !== want) throw new BlockChangedError();
+    const style = lineEndingSignal(content) ?? "lf";
+    const lines = content.split("\n");
+    editor.replaceRange(
+      applyLineEndingStyle(replacement, style).replace(/\r$/, ""),
+      { line: from, ch: 0 },
+      { line: to, ch: lines[to].replace(/\r$/, "").length },
+    );
+    return;
+  }
+
+  // Prüfung und Schreiben in EINEM `process`-Aufruf: kein Fenster dazwischen.
+  await ports.vault.process(path, (current) => {
+    if (linesAt(current, from, to) !== want) throw new BlockChangedError();
+    const style = lineEndingSignal(current) ?? "lf";
+    const eol = style === "crlf" ? "\r\n" : "\n";
+    const lines = normalizeLineEndings(current).split("\n");
+    const next = [
+      ...lines.slice(0, from),
+      ...normalizeLineEndings(replacement).split("\n"),
+      ...lines.slice(to + 1),
+    ];
+    return next.join(eol);
+  });
+}
