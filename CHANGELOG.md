@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **shapes models** (hand-written, no LLM): describe a model as one part per line (`box`, `cylinder`, `sphere`, `cone` with `size`, `at`, `rot`, `color`) in a ```shapes code block or a `.shapes` file. A broken line only drops that part and is reported with its line number. Files work in the 3D view, as `![[…]]` embeds and via ```3d `file:`. This release candidate needs no new Kit module.
+- Command **Export shapes model as glTF**: writes a self-contained `.gltf` to the attachment folder; an existing file is only overwritten after you confirm.
 - The GitHub release now also carries a ready-to-unpack `three-d-codeblocks.zip` (the plugin folder with `main.js`, `manifest.json` and `styles.css`) and a `checksums.sha256` file. For a manual install, download the zip and unpack it into `.obsidian/plugins/` instead of creating the folder and saving three files by hand.
 
 ## [0.5.0] — 2026-09-26

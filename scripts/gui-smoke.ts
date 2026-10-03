@@ -114,6 +114,23 @@ const SMOKE_MODEL_STL = "_tdcb-smoke-model.stl";
 const SMOKE_MODEL_SPLIT = "_tdcb-smoke-split.gltf";
 const SMOKE_BIN_SPLIT = "_tdcb-smoke-split.bin";
 const SMOKE_NOTE_SPLIT = "_tdcb-gui-smoke-split.md";
+/** shapes-DSL (SH1–SH5). Der Titel `Tisch` bestimmt den Namen der Export-Datei
+    (`Tisch.gltf`, src/core/shapes/export.ts exportBaseName); sie landet im Attachment-
+    Ordner und traegt deshalb kein `_tdcb-`-Praefix — SH5 prueft vorher, dass keine fremde
+    `Tisch.gltf` im Vault liegt, statt sie mitzumessen. */
+const SMOKE_NOTE_SHAPES = "_tdcb-gui-smoke-shapes.md";
+const SMOKE_MODEL_SHAPES = "_tdcb-smoke-model.shapes";
+const SHAPES_EXPORT_NAME = "Tisch.gltf";
+const SHAPES_TABLE = [
+  "title: Tisch",
+  "box Platte size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b",
+  "box Bein-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3",
+  "box Bein-2 size 0.05 0.7 0.05 at 0.55 0.35 -0.3",
+  "box Bein-3 size 0.05 0.7 0.05 at -0.55 0.35 0.3",
+  "box Bein-4 size 0.05 0.7 0.05 at 0.55 0.35 0.3",
+].join("\n");
+/** Zeile 1 Kopf + 5 Teile → die kaputte Zeile ist Zeile 7 DES BLOCKS. */
+const SHAPES_BROKEN_LINE = 7;
 const FALLBACK_STL = [
   "solid tdcb",
   "facet normal 0 0 -1",
@@ -2074,6 +2091,148 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
       "F7. Kaputtes glTF-JSON sagt genau das",
       gltfBlocks !== null && gltfBlocks.message.includes("not valid JSON"),
       gltfBlocks ? gltfBlocks.message.slice(0, 72) || "keine Meldung" : "nicht prüfbar",
+    );
+  }
+
+  // --- SH1–SH5. shapes-DSL ------------------------------------------------
+  // Vier Bloecke in dieser Reihenfolge: (1) ```shapes mit absichtlich kaputter Zeile 7,
+  // (2) ```shapes ohne gueltiges Teil, (3) ```3d file: auf die .shapes-Datei, (4) Embed
+  // derselben Datei. Bloecke 1, 3, 4 muessen zeichnen, Block 2 darf NICHT zeichnen — ein
+  // Lauf, der nur "irgendwo ein Canvas" zaehlt, wuerde auch ohne shapes gruen.
+  await cdp.evaluate(`
+    const path = ${JSON.stringify(SMOKE_MODEL_SHAPES)};
+    const body = ${JSON.stringify(SHAPES_TABLE)};
+    const current = app.vault.getAbstractFileByPath(path);
+    if (current) await app.vault.modify(current, body);
+    else await app.vault.create(path, body);
+    await new Promise((r) => setTimeout(r, 300));
+    return true;
+  `);
+  createdNotes.add(SMOKE_MODEL_SHAPES);
+  await closeExtraLeaves(cdp);
+  await openNote(
+    cdp,
+    SMOKE_NOTE_SHAPES,
+    [
+      "# GUI-Smoke shapes (automatisch erzeugt)",
+      "",
+      `${fence}shapes`,
+      SHAPES_TABLE,
+      "box Kaputt size 1 2",
+      fence,
+      "",
+      `${fence}shapes`,
+      "boxx Nichts size 1",
+      fence,
+      "",
+      `${fence}3d`,
+      `file: ${SMOKE_MODEL_SHAPES}`,
+      fence,
+      "",
+      `![[${SMOKE_MODEL_SHAPES}]]`,
+      "",
+    ].join("\n"),
+    "preview",
+  );
+  const shapes = await pollUntil<{
+    blocks: number;
+    colors: (number | null)[];
+    canvasInBad: boolean;
+    inEmbed: boolean;
+    info: string;
+    error: string;
+  }>(
+    cdp,
+    `
+      ${SAMPLER}
+      const preview = document.querySelector(".markdown-preview-view");
+      const blocks = [...(preview?.querySelectorAll(".tdcb-block") ?? [])];
+      if (blocks.length < 4) return null;
+      // Blöcke 1, 3, 4 zeichnen; Block 2 trägt eine Fehlermeldung statt einer Szene.
+      const drawing = [blocks[0], blocks[2], blocks[3]];
+      const colors = drawing.map((b) => {
+        const canvas = b.querySelector("canvas");
+        return canvas ? (sample(canvas)?.colors ?? 0) : null;
+      });
+      if (colors.some((c) => c === null || c < 3)) return null;
+      const error = blocks[1].querySelector(".tdcb-message-error")?.textContent?.trim() ?? "";
+      if (error === "") return null;
+      return {
+        blocks: blocks.length,
+        colors,
+        canvasInBad: !!blocks[1].querySelector("canvas"),
+        inEmbed: !!blocks[3].closest(".internal-embed"),
+        info: blocks[0].querySelector(".tdcb-message-info")?.textContent?.trim() ?? "",
+        error,
+      };
+    `,
+    40_000,
+  );
+  record(
+    "SH1. Ein ```shapes-Block rendert seine Teile",
+    shapes !== null && (shapes.colors[0] ?? 0) >= 3,
+    shapes ? `${shapes.colors[0]} Farbtöne` : "kein gerenderter shapes-Block (oder Block 2 ohne Fehlermeldung)",
+  );
+  record(
+    "SH2. Eine kaputte Zeile kostet nur sich selbst und wird mit Nummer gemeldet",
+    shapes !== null && shapes.info.includes(`Line ${SHAPES_BROKEN_LINE}:`) && (shapes.colors[0] ?? 0) >= 3,
+    shapes ? shapes.info.slice(0, 80) || "keine Meldung im ersten Block" : "nicht prüfbar",
+  );
+  record(
+    "SH3. Ein Block ohne gültiges Teil sagt das und zeichnet nichts",
+    shapes !== null && shapes.error.includes("no valid part") && !shapes.canvasInBad,
+    shapes ? `${shapes.error.slice(0, 70)} · Canvas im Fehlerblock: ${shapes.canvasInBad}` : "nicht prüfbar",
+  );
+  record(
+    "SH4. Dieselbe DSL als Datei rendert über ```3d file: und als Embed",
+    shapes !== null && shapes.blocks === 4 && shapes.inEmbed && (shapes.colors[1] ?? 0) >= 3 && (shapes.colors[2] ?? 0) >= 3,
+    shapes
+      ? `${shapes.blocks} Blöcke · Farbtöne file:/Embed: ${shapes.colors[1]}/${shapes.colors[2]} · im Embed-Container: ${shapes.inEmbed}`
+      : "nicht prüfbar",
+  );
+
+  // SH5: der Name der Export-Datei kommt aus `title:` und lebt im Attachment-Ordner, ohne
+  // Smoke-Praefix. Liegt dort schon eine Tisch.gltf (Fremdbestand oder Rest), wuerde der
+  // Befehl nach Ueberschreiben fragen und der Lauf haengen oder fremde Daten treffen: nicht
+  // messen, sondern melden.
+  const foreignExport = await cdp.evaluate<string | null>(`
+    return app.vault.getFiles().find((f) => f.name === ${JSON.stringify(SHAPES_EXPORT_NAME)})?.path ?? null;
+  `);
+  if (foreignExport !== null) {
+    skipped("SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt", `${foreignExport} liegt schon im Vault — nicht überschrieben, nicht gemessen`);
+  } else {
+    await closeExtraLeaves(cdp);
+    await cdp.evaluate(`
+      const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_MODEL_SHAPES)});
+      await app.workspace.getLeaf(true).openFile(file, { active: true });
+      await new Promise((r) => setTimeout(r, 500));
+      return app.workspace.getActiveFile()?.path ?? null;
+    `);
+    await cdp.evaluate(`
+      app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:export-shapes-gltf`)});
+      return true;
+    `);
+    const exported = await pollUntil<{ path: string; generatedFrom: string; nodes: number }>(
+      cdp,
+      `
+        const out = app.vault.getFiles().find((f) => f.name === ${JSON.stringify(SHAPES_EXPORT_NAME)});
+        if (!out) return null;
+        const doc = JSON.parse(await app.vault.read(out));
+        return {
+          path: out.path,
+          generatedFrom: doc.asset?.extras?.generatedFrom ?? "",
+          nodes: Array.isArray(doc.nodes) ? doc.nodes.length : 0,
+        };
+      `,
+      15_000,
+    );
+    if (exported) createdNotes.add(exported.path);
+    record(
+      "SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt",
+      exported !== null && exported.generatedFrom === SMOKE_MODEL_SHAPES && exported.nodes === 5,
+      exported
+        ? `${exported.path} · Quelle: ${exported.generatedFrom || "(leer)"} · ${exported.nodes} Knoten (erwartet 5)`
+        : `keine ${SHAPES_EXPORT_NAME} nach dem Befehl`,
     );
   }
 

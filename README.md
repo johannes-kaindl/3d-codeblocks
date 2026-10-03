@@ -47,7 +47,7 @@ Install, then Enable.
 
 ## Usage
 
-### Four ways to show a model
+### Ways to show a model
 
 **1. Open a file.** Click a `.gltf`, `.glb` or `.stl` in the file explorer — it opens
 in its own pane, full size, fully interactive.
@@ -81,10 +81,21 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 ```
 ````
 
+**5. The `shapes` code block** — a model described as one part per line (`box`, `cylinder`, `sphere`, `cone`), no JSON and no file. A broken line only drops its own part and is reported with its line number. The same text in a `.shapes` file works like any model file.
+
+````markdown
+```shapes
+title: Table
+box Top size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b
+box Leg-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3
+```
+````
+
 <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/code-and-render.png" width="820" alt="A 3d code block in the editor on the left, the rendered model on the right">
 
 ### Guides
 
+- [Modelling with shapes](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md) — describe a model as one part per line and export it as glTF.
 - [Writing a 3D model by hand](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/writing-gltf-by-hand.md) — build a model as text
   inside a note, and learn to read any `.gltf` file along the way. Every example is
   verified on every commit.
@@ -94,6 +105,7 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 | Extension | Notes |
 |---|---|
 | `.glb`, `.gltf` | Materials and colours come from the file |
+| `.shapes` | Text, one part per line (box, cylinder, sphere, cone); see [Modelling with shapes](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md) |
 | `.stl` | No materials in the format; the plugin applies a theme-aware default, unless the file carries per-facet colours |
 
 <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/colored-stl.png" width="380" alt="An STL model with its own per-facet colours, each face a different colour instead of the theme default">
