@@ -35,9 +35,16 @@ export const MEASUREMENTS: readonly Measurement[] = [
     model: "google/gemma-4-e4b", mode: "structured", task: "create", good: 4, of: 10, measuredAt: "2026-10-01", promptSha: "6d29c7c76d4532f2",
     source: "Spike A 2026-10-01, tests/fixtures/shapes-spike/a-e4b-dsl.jsonl, evaluated via tests/helpers/shapes-spike-eval.ts (golden-spike.test.ts). The spike recorded 5/10 without the hole check; 4/10 is re-derived (2026-10-03) with the stricter hole check on A01",
   },
-  // Verfeinern: keine Zeilen. Die zwei Zeilen vom 2026-10-03 (qwen 8/8, gemma 6/8) maßen den alten REFINE_SYSTEM
-  // und sind seit dem Formwechsel per `change` zurückgezogen (docs/LAB.md, Retired rows); neue Zeilen kommen
-  // aus dem Messlauf mit dem jetzigen Prompt.
+  // Verfeinern: gemessen mit dem Prompt nach dem Formwechsel (REFINE_SYSTEM sha16 959905acad152013). Die Zeilen vom
+  // 2026-10-03 mit dem alten Prompt (qwen 8/8, gemma 6/8, promptSha 8bd865943b3454d1) sind zurückgezogen (docs/LAB.md).
+  {
+    model: "qwen/qwen3.8-27b", mode: "structured", task: "refine", good: 8, of: 8, measuredAt: "2026-10-03", promptSha: "71051822eb114cf6",
+    source: "Lab run 2026-10-03 (n=1 per case, temperature 0.2), tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03-71051822.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
+  },
+  {
+    model: "google/gemma-4-e4b", mode: "structured", task: "refine", good: 6, of: 8, measuredAt: "2026-10-03", promptSha: "71051822eb114cf6",
+    source: "Lab run 2026-10-03 (n=1 per case, temperature 0.2), tests/fixtures/shapes-lab/gemma-4-e4b-refine-2026-10-03-71051822.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
+  },
 ];
 
 /** Bezugszahl für ungemessene Modelle: das eine gemessene kleine Modell, nie als dessen eigenes Ergebnis gezeigt. */

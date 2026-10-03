@@ -34,7 +34,7 @@ describe("quality", () => {
   const refineRow = (model: string, good: number): Measurement => ({
     model, mode: "structured", task: "refine", good, of: 8, measuredAt: "2026-10-04", promptSha: promptSha("refine"), source: "test row",
   });
-  const REFINE_TABLE: readonly Measurement[] = [...MEASUREMENTS, refineRow("qwen/qwen3.8-27b", 8), refineRow("google/gemma-4-e4b", 6)];
+  const REFINE_TABLE: readonly Measurement[] = [...MEASUREMENTS.filter((m) => m.task === "create"), refineRow("qwen/qwen3.8-27b", 8), refineRow("google/gemma-4-e4b", 6)];
 
   it("has no cross-task guess: a create row never answers a refine question", () => {
     expect(findMeasurement("verdigado-pro", "refine")).toBeNull();
@@ -60,8 +60,13 @@ describe("quality", () => {
     expect(qualityLine("x", "create", createOnly).text).toContain("4 of 10 test prompts plausible");
   });
 
-  it("every shipped refine row (if any) carries the current refine promptSha", () => {
-    for (const m of MEASUREMENTS.filter((x) => x.task === "refine")) expect(m.promptSha, m.model).toBe(promptSha("refine"));
+  it("the shipped refine rows exist, carry the current refine promptSha and show as measured", () => {
+    const rows = MEASUREMENTS.filter((x) => x.task === "refine");
+    expect(rows.map((m) => [m.model, m.good, m.of])).toEqual([["qwen/qwen3.8-27b", 8, 8], ["google/gemma-4-e4b", 6, 8]]);
+    for (const m of rows) expect(m.promptSha, m.model).toBe(promptSha("refine"));
+    expect(qualityLine("qwen/qwen3.8-27b", "refine").text).toBe("Measured: 8 of 8 test change requests were applied correctly (qwen/qwen3.8-27b, 2026-10-03, n=1 per request).");
+    expect(qualityLine("verdigado-pro", "refine").text).toBe("Not measured for this model — the one small model tested (gemma-4-e4b) got 6 of 8 test change requests right.");
+    expect(failureHint("google/gemma-4-e4b", "refine")).toContain("measured best: qwen/qwen3.8-27b, 8 of 8");
   });
 
   it("refine failure hint: best refine model, never the create statistics", () => {
