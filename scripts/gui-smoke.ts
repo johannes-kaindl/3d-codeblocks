@@ -97,6 +97,9 @@ const EDIT_BLOCK_TITLE = "Edit-Probe";
 /** Eigenes Prüfmodell für den Edit-Modus: eine Kopie, in der ein Top-Level-Knoten das
  *  gesperrte Präfix trägt. Beide Seiten des Locked-Prüfpunkts sind so beim Namen
  *  bekannt, ohne etwas über das Vault-Modell anzunehmen. */
+// Festes Prüfmodell aus dem Fixture (`docs/images/fixture/make-models.mjs`): mehrere Top-Level-
+// Knoten, darunter ungeteilte meshes — Voraussetzung der Edit-Mode-Punkte E1-E8.
+const PREFERRED_MODEL = "models/ground-floor.gltf";
 const SMOKE_MODEL_EDIT = "_tdcb-smoke-edit.gltf";
 /** Notfall-STL, falls im Vault keine liegt: ein Wuerfel in ASCII-STL (sechs Normalen, damit
  *  mehr als eine Flaechenhelligkeit im Bild landet und der Pruefpunkt nicht an seiner
@@ -1670,7 +1673,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   // an, statt den Punkt zu überspringen — sonst fährt die STL-Kette in einem Vault ohne
   // STL nie jemand, und "übersprungen" liest sich nach dem dritten Mal wie "abgedeckt".
   const stl = await cdp.evaluate<string>(`
-    const existing = app.vault.getFiles().find((f) => /\\.stl$/i.test(f.path));
+    const existing = app.vault.getFiles().filter((f) => /\\.stl$/i.test(f.path)).sort((a, b) => a.path.localeCompare(b.path))[0];
     if (existing) return existing.path;
     const path = ${JSON.stringify(SMOKE_MODEL_STL)};
     const current = app.vault.getAbstractFileByPath(path);
@@ -1935,7 +1938,7 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
   // `.gltf` ist Text, `.glb` ein Container — sie gehen durch verschiedene Loader.
   // Ein Punkt, der nur eines von beiden anfasst, spricht nicht für "die Endungen".
   const other = await cdp.evaluate<string | null>(`
-    const file = app.vault.getFiles().find((f) => /\\.(glb|stl)$/i.test(f.path) && !/\\.edit\\./.test(f.path));
+    const file = app.vault.getFiles().filter((f) => /\\.(glb|stl)$/i.test(f.path) && !/\\.edit\\./.test(f.path)).sort((a, b) => a.path.localeCompare(b.path))[0];
     return file ? file.path : null;
   `);
   if (!other) {
@@ -3364,9 +3367,16 @@ async function main(): Promise<void> {
         }
       };
 
+      // ⚠️ Feste Reihenfolge statt der von getFiles(): Obsidian legt sie nicht fest, und je nach
+      // Instanzstart war das erste ladbare Modell eines ohne auswählbaren Knoten (E1-E8
+      // übersprungen: 68 gegenüber 78 Punkten, gemessen 2026-10-01). Die benannte Fixture-Datei
+      // geht vor, der Rest wird nach Pfad sortiert.
+      const preferred = ${JSON.stringify(PREFERRED_MODEL)};
+      const candidates = app.vault.getFiles()
+        .filter((f) => /\\.(glb|gltf)$/i.test(f.path) && !/\\.edit\\./.test(f.path))
+        .sort((a, b) => (a.path === preferred ? -1 : b.path === preferred ? 1 : a.path.localeCompare(b.path)));
       const skipped = [];
-      for (const file of app.vault.getFiles()) {
-        if (!/\\.(glb|gltf)$/i.test(file.path) || /\\.edit\\./.test(file.path)) continue;
+      for (const file of candidates) {
         const bytes = await app.vault.readBinary(file);
         let ok = false;
         if (/\\.gltf$/i.test(file.path)) {
