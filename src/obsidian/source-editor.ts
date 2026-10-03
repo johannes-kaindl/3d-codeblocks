@@ -7,6 +7,10 @@
 // (REGISTRY „CM6-Zeilen-Highlight per StateField“, Vorbild neurovim-obsidian/src/diffHighlight.ts).
 // `setValue` und `applyExternalEdit` entsprechen dem Original: eine externe Änderung (Sync) kommt als minimale
 // Spanne an, der Cursor bleibt stehen.
+// Ebenfalls weggelassen gegenüber dem Original: die Test-Helfer `_dispatchInsertForTest`, `_setSelectionForTest`
+// und `_selectionHeadForTest` sowie der Konstruktor-Parameter `initial` (der Text kommt über `setValue`);
+// hinzugefügt: `focus()`/`hasFocus()` für die Pillen der Dateiansicht und try/finally um jedes
+// `suppressChange`-Fenster (ein werfendes `dispatch` darf `onChange` nicht dauerhaft stummschalten).
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { EditorState, StateEffect, StateField, Transaction, type Range } from "@codemirror/state";
@@ -55,6 +59,8 @@ export interface SourceEditorLike {
   applyExternalEdit(text: string): void;
   getValue(): string;
   setIssues(issues: IssueLine[]): void;
+  focus(): void;
+  hasFocus(): boolean;
   destroy(): void;
 }
 
@@ -87,11 +93,14 @@ export class SourceEditor implements SourceEditorLike {
   setValue(text: string): void {
     if (!this.view) return;
     this.suppressChange = true;
-    this.view.dispatch({
-      changes: { from: 0, to: this.view.state.doc.length, insert: text },
-      annotations: Transaction.addToHistory.of(false),
-    });
-    this.suppressChange = false;
+    try {
+      this.view.dispatch({
+        changes: { from: 0, to: this.view.state.doc.length, insert: text },
+        annotations: Transaction.addToHistory.of(false),
+      });
+    } finally {
+      this.suppressChange = false;
+    }
   }
 
   /** Externe Änderung (Sync) als minimale Spanne — der Cursor bleibt außerhalb stehen. */
@@ -99,15 +108,26 @@ export class SourceEditor implements SourceEditorLike {
     if (!this.view) return;
     const span = diffReplaceSpan(this.getValue(), text);
     this.suppressChange = true;
-    this.view.dispatch({
-      changes: { from: span.from, to: span.to, insert: span.insert },
-      annotations: Transaction.addToHistory.of(false),
-    });
-    this.suppressChange = false;
+    try {
+      this.view.dispatch({
+        changes: { from: span.from, to: span.to, insert: span.insert },
+        annotations: Transaction.addToHistory.of(false),
+      });
+    } finally {
+      this.suppressChange = false;
+    }
   }
 
   setIssues(issues: IssueLine[]): void {
     this.view?.dispatch({ effects: setIssues.of(issues) });
+  }
+
+  focus(): void {
+    this.view?.focus();
+  }
+
+  hasFocus(): boolean {
+    return this.view?.hasFocus ?? false;
   }
 
   getValue(): string {

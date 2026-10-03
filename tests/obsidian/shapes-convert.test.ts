@@ -24,6 +24,10 @@ interface Opts {
   extraEditors?: Record<string, string>;
   /** Pfade, die der Adapter als vorhanden meldet (ohne dass die Datei im Store steht). */
   adapterExists?: string[];
+  /** Wert von `vault.getConfig("trashOption")`; ohne Angabe fehlt die Funktion. */
+  trashOption?: string;
+  /** Offene Markdown-Ansicht der Referenz-Notiz n.md (save wird protokolliert). */
+  noteView?: { saveThrows?: boolean };
 }
 
 function setup(files: Record<string, string>, opts: Opts = {}) {
@@ -59,13 +63,28 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
         detach: vi.fn(() => { events.push("detach"); }),
       }
     : null;
+  const noteLeaf = opts.noteView
+    ? {
+        view: {
+          file: { path: "n.md" },
+          save: vi.fn(async () => {
+            events.push("save-note");
+            if (opts.noteView!.saveThrows) throw new Error("disk busy");
+          }),
+        },
+      }
+    : null;
   const app = {
     workspace: {
-      getLeavesOfType: () => (leaf ? [leaf] : []),
+      getLeavesOfType: (type: string) =>
+        type === "markdown"
+          ? noteLeaf ? [noteLeaf] : []
+          : leaf ? [leaf] : [],
       getActiveViewOfType: () => (opts.activeFile ? null : { file: tfile(editorPath), editor, getMode: () => "source" }),
       getActiveFile: () => (opts.activeFile ? tfile(opts.activeFile) : tfile(editorPath)),
     },
     vault: {
+      ...(opts.trashOption !== undefined ? { getConfig: (key: string) => (key === "trashOption" ? opts.trashOption : undefined) } : {}),
       getFiles: () => Object.keys(store).map(tfile),
       read: async (f: TFile) => {
         if (f.extension === "shapes") {
@@ -113,7 +132,7 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
       },
     },
   };
-  return { app: app as never, env: { app: app as never, ports: ports as never, notice: (m: string) => notices.push(m) }, store, trashed, notices, events, cursor, trashFile: app.fileManager.trashFile, leaf };
+  return { app: app as never, env: { app: app as never, ports: ports as never, notice: (m: string) => notices.push(m) }, store, trashed, notices, events, cursor, trashFile: app.fileManager.trashFile, leaf, noteLeaf };
 }
 
 const NOTE = "# Möbel\n```shapes\ntitle: Tisch\nbox A size 1\n```\nEnde";
@@ -205,6 +224,19 @@ describe("convertBlockToFile", () => {
     expect(Object.keys(open.store)).toEqual(["n.md"]);
   });
 
+  it("(M4) an unclosed ```shapes whose last line is ~~~ does not count as closed", async () => {
+    const { env, store, notices } = setup({ "n.md": "```shapes\nbox A size 1\n~~~" }, { cursorLine: 1 });
+    expect(await convertBlockToFile(env)).toBe(false);
+    expect(notices[0]).toMatch(/closing fence/);
+    expect(Object.keys(store)).toEqual(["n.md"]);
+  });
+
+  it("(M4) a longer closing fence of the same kind still closes (````shapes ... ````)", async () => {
+    const { env, store } = setup({ "n.md": "````shapes\nbox A size 1\n`````" }, { cursorLine: 1 });
+    expect(await convertBlockToFile(env)).toBe(true);
+    expect(store["Anhänge/Tisch.shapes"] ?? store["Anhänge/n.shapes"]).toBeDefined();
+  });
+
   it("works for a BOM on line 0, with the BOM in the editor buffer", async () => {
     const note = "\uFEFF```shapes\ntitle: Tisch\nbox A size 1\n```\nEnde";
     const { env, store } = setup({ "n.md": note }, { cursorLine: 1 });
@@ -234,7 +266,7 @@ describe("convertFileToBlock", () => {
   const withFile = (extra: Record<string, string> = {}) => ({ "n.md": REF_NOTE, "Anhänge/Tisch.shapes": SHAPES, ...extra });
 
   it("moves a file used by exactly one reference back into a block and trashes it", async () => {
-    const { env, store, trashed, notices } = setup(withFile(), { cursorLine: 2 });
+    const { env, store, trashed, notices } = setup(withFile(), { cursorLine: 2, trashOption: "system" });
     expect(await convertFileToBlock(env)).toBe(true);
     expect(store["n.md"]).toBe("# Möbel\n```shapes\nbox A size 1\n```\nEnde");
     expect(trashed).toEqual(["Anhänge/Tisch.shapes"]);
@@ -300,8 +332,8 @@ describe("convertFileToBlock", () => {
     expect(notices[0]).toMatch(/other settings/);
   });
 
-  it("still converts a 3d block with only the file line, comments and blank lines (CRLF too)", async () => {
-    const note = "```3d\r\n# Hinweis\r\n\r\nfile: Anhänge/Tisch.shapes\r\n```";
+  it("still converts a 3d block with only the file line and blank lines (CRLF too)", async () => {
+    const note = "```3d\r\n\r\nfile: Anhänge/Tisch.shapes\r\n```";
     const { env, store, trashed } = setup({ "n.md": note, "Anhänge/Tisch.shapes": SHAPES }, { cursorLine: 1 });
     expect(await convertFileToBlock(env)).toBe(true);
     expect(trashed).toEqual(["Anhänge/Tisch.shapes"]);
@@ -493,6 +525,84 @@ describe("convertFileToBlock", () => {
     expect(await convertFileToBlock(env)).toBe(false);
     expect(notices[0]).toMatch(/not used in any note/);
     expect(trashed).toEqual([]);
+  });
+
+  it.each([
+    ["local", /\.trash folder of the vault/],
+    ["system", /system trash/],
+    ["none", /Deleted files setting.*not recoverable/],
+    [undefined, /Deleted files setting.*not recoverable/],
+  ])("(I1) the success notice tells the truth about trashOption=%s", async (option, pattern) => {
+    const { env, notices } = setup(withFile(), { cursorLine: 2, ...(option !== undefined ? { trashOption: option } : {}) });
+    expect(await convertFileToBlock(env)).toBe(true);
+    expect(notices[0]).toMatch(pattern);
+    if (option === "none" || option === undefined) expect(notices[0]).not.toMatch(/restore/);
+  });
+
+  it.each([
+    ["|400", "![[Tisch.shapes|400]]"],
+    ["|Alias", "![[Tisch.shapes|Alias]]"],
+    ["#Kopf", "![[Tisch.shapes#Kopf]]"],
+  ])("(I2a) refuses an embed with display options %s and names them", async (opts, note) => {
+    const files = { "n.md": note, "Anhänge/Tisch.shapes": SHAPES };
+    const { env, store, trashed, notices } = setup(files, { cursorLine: 0 });
+    expect(await convertFileToBlock(env)).toBe(false);
+    expect(store).toEqual(files);
+    expect(trashed).toEqual([]);
+    expect(notices[0]).toContain(`display options (${opts})`);
+    expect(notices[0]).toMatch(/remove them first/);
+  });
+
+  it("(I2a) a plain embed still converts", async () => {
+    const { env, store } = setup({ "n.md": "![[Tisch.shapes]]", "Anhänge/Tisch.shapes": SHAPES }, { cursorLine: 0 });
+    expect(await convertFileToBlock(env)).toBe(true);
+    expect(store["n.md"]).toBe("```shapes\nbox A size 1\n```");
+  });
+
+  it("(I2b) refuses a 3d block with a # comment line; nothing written or trashed", async () => {
+    const files = { "n.md": "```3d\n# Hinweis\nfile: Anhänge/Tisch.shapes\n```", "Anhänge/Tisch.shapes": SHAPES };
+    const { env, store, trashed, notices } = setup(files, { cursorLine: 2 });
+    expect(await convertFileToBlock(env)).toBe(false);
+    expect(store).toEqual(files);
+    expect(trashed).toEqual([]);
+    expect(notices[0]).toMatch(/comment lines that would be lost/);
+  });
+
+  it("(M3) saves the note's open view before the file is trashed", async () => {
+    const { env, events, noteLeaf } = setup(withFile(), { cursorLine: 2, noteView: {} });
+    expect(await convertFileToBlock(env)).toBe(true);
+    expect(noteLeaf!.view.save).toHaveBeenCalled();
+    expect(events.indexOf("replace")).toBeLessThan(events.indexOf("save-note"));
+    expect(events.indexOf("save-note")).toBeLessThan(events.indexOf("trash:Anhänge/Tisch.shapes"));
+  });
+
+  it("(M3) keeps the file when saving the note fails", async () => {
+    const { env, store, trashed, notices } = setup(withFile(), { cursorLine: 2, noteView: { saveThrows: true } });
+    expect(await convertFileToBlock(env)).toBe(true);
+    expect(trashed).toEqual([]);
+    expect(store["Anhänge/Tisch.shapes"]).toBe(SHAPES);
+    expect(notices[0]).toMatch(/could not be saved yet/);
+    expect(notices[0]).toContain("Anhänge/Tisch.shapes");
+  });
+
+  it("(M7) a standalone ![](x.shapes) names the Markdown-style embed, not 'middle of a sentence'", async () => {
+    const files = { "n.md": "![](Tisch.shapes)", "Anhänge/Tisch.shapes": SHAPES };
+    const { env, store, notices } = setup(files, { cursorLine: 0, activeFile: "Anhänge/Tisch.shapes" });
+    expect(await convertFileToBlock(env)).toBe(false);
+    expect(store).toEqual(files);
+    expect(notices[0]).toMatch(/Markdown-style embed/);
+    expect(notices[0]).toContain("![[…]]");
+    expect(notices[0]).not.toMatch(/middle of a sentence/);
+  });
+
+  it("(M8) with only a canvas mention and no structured reference, says 'another mention', not 'not used'", async () => {
+    const files = { "n.md": "nichts", "Board.canvas": '{"file":"Anhänge/Tisch.shapes"}', "Anhänge/Tisch.shapes": SHAPES };
+    const { env, store, notices } = setup(files, { activeFile: "Anhänge/Tisch.shapes" });
+    expect(await convertFileToBlock(env)).toBe(false);
+    expect(store).toEqual(files);
+    expect(notices[0]).toMatch(/another mention/);
+    expect(notices[0]).toContain("Board.canvas");
+    expect(notices[0]).not.toMatch(/not used in any note/);
   });
 
   it("availability: 3d block or embed line pointing at .shapes, or the open .shapes file", () => {

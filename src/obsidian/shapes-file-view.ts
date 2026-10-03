@@ -141,8 +141,14 @@ export class ShapesFileView extends TextFileView implements TrackedView {
   }
 
   setMode(mode: ShapesMode): void {
+    // Fokus vor dem Umschalten messen: ein ausgeblendetes Element verliert ihn sofort.
+    const editorHadFocus = this.editor?.hasFocus() ?? false;
     this.stored = mode;
-    this.applyLayout();
+    const layout = this.applyLayout();
+    // Text/Split: wer die Pille drueckt, will tippen. Modell, waehrend der Editor den Fokus hatte: der Fokus
+    // wandert auf die gedrueckte Pille, nie auf ein verstecktes Element.
+    if (mode !== "model" && layout.showText) this.editor?.focus();
+    else if (editorHadFocus && !layout.showText) this.pills.get(layout.active)?.focus();
   }
 
   /** Nur für Tests: die Breite setzen, die sonst der ResizeObserver meldet. */
@@ -235,7 +241,7 @@ export class ShapesFileView extends TextFileView implements TrackedView {
     });
   }
 
-  private applyLayout(): void {
+  private applyLayout(): ReturnType<typeof layoutFor> {
     // Vor der ersten Messung ist `stored` evtl. null: nur Modell zeigen, nichts festlegen.
     const layout = layoutFor(this.stored ?? "model", this.width);
     for (const [mode, pill] of this.pills) {
@@ -247,6 +253,7 @@ export class ShapesFileView extends TextFileView implements TrackedView {
     this.modelEl?.toggleClass("is-hidden", !layout.showModel);
     this.textEl?.toggleClass("is-hidden", !layout.showText);
     this.bodyEl?.toggleClass("is-split", layout.showModel && layout.showText);
+    return layout;
   }
 }
 

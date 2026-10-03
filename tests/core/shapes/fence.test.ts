@@ -20,6 +20,11 @@ describe("findFenceAt", () => {
   it("treats an unclosed fence as running to the end", () => {
     expect(findFenceAt("```shapes\nbox A size 1", 1)).toEqual({ lang: "shapes", openLine: 0, closeLine: 1, body: "box A size 1" });
   });
+  it("does not open a backtick fence from a prose line whose info string holds a backtick", () => {
+    expect(listFences("```shapes``` text\nbox A size 1")).toEqual([]);
+    expect(findFenceAt("```shapes``` text\nbox A size 1", 1)).toBeNull();
+    expect(listFences("~~~shapes ~ ok\nx\n~~~")).toHaveLength(1);
+  });
   it("does not see fences nested in a callout or list item", () => {
     expect(findFenceAt("> ```shapes\n> box A size 1\n> ```", 1)).toBeNull();
     expect(findFenceAt("- item\n    ```shapes\n    box A size 1\n    ```", 2)).toBeNull();

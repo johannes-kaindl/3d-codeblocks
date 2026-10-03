@@ -12,7 +12,7 @@ export interface NoteText {
   text: string;
 }
 
-export type AloneReason = "list" | "quote" | "indent" | "inline" | "table" | "continuation";
+export type AloneReason = "list" | "quote" | "indent" | "inline" | "table" | "continuation" | "markdown-embed";
 
 /**
  * `nested`: der Block steht in einem Zitat/Callout oder einer Liste. Obsidian
@@ -22,7 +22,7 @@ export type AloneReason = "list" | "quote" | "indent" | "inline" | "table" | "co
  */
 export type ModelReference =
   | { notePath: string; kind: "block"; from: number; to: number; text: string; nested: boolean }
-  | { notePath: string; kind: "embed"; from: number; to: number; text: string; alone: boolean; aloneReason?: AloneReason }
+  | { notePath: string; kind: "embed"; from: number; to: number; text: string; alone: boolean; aloneReason?: AloneReason; options?: string }
   | { notePath: string; kind: "link"; from: number; to: number; text: string };
 
 // `\|` (maskierter Strich in Tabellen) wird akzeptiert; der Linktext verliert den Backslash.
@@ -200,6 +200,8 @@ export function findModelReferences(
           continue;
         }
         const reason = aloneReason(lines, index, match[0], fences);
+        // Anzeigeoptionen (`|400`, `|alias`, `#Ueberschrift`, `^id`) hinter dem Linktext: ein Zaun kann sie nicht tragen.
+        const options = match[0].slice(3, -2).slice(match[2].length).trim();
         refs.push({
           notePath: note.path,
           kind: "embed",
@@ -208,6 +210,7 @@ export function findModelReferences(
           text: line,
           alone: reason === undefined,
           ...(reason ? { aloneReason: reason } : {}),
+          ...(options !== "" ? { options } : {}),
         });
       }
       for (const match of line.matchAll(MD_EMBED)) {
@@ -218,7 +221,7 @@ export function findModelReferences(
           // kein gültiges Prozent-Muster: Rohtext verwenden
         }
         if (!hit(link)) continue;
-        refs.push({ notePath: note.path, kind: "embed", from: index, to: index, text: line, alone: false, aloneReason: "inline" });
+        refs.push({ notePath: note.path, kind: "embed", from: index, to: index, text: line, alone: false, aloneReason: "markdown-embed" });
       }
     });
   }

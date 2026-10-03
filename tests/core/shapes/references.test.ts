@@ -20,7 +20,7 @@ describe("findModelReferences", () => {
     expect(refs).toEqual([
       { notePath: "a.md", kind: "block", from: 1, to: 4, text: "```3d\nfile: tisch.shapes\ntitle: T\n```", nested: false },
       { notePath: "b.md", kind: "embed", from: 0, to: 0, text: "![[tisch.shapes]]", alone: true },
-      { notePath: "b.md", kind: "embed", from: 1, to: 1, text: "Siehe ![[tisch.shapes|200]] oben.", alone: false, aloneReason: "inline" },
+      { notePath: "b.md", kind: "embed", from: 1, to: 1, text: "Siehe ![[tisch.shapes|200]] oben.", alone: false, aloneReason: "inline", options: "|200" },
     ]);
   });
 
@@ -222,6 +222,18 @@ describe("findModelReferences: fix round 1", () => {
     expect(reason("    ![[tisch.shapes]]")).toBe("indent");
     expect(reason("Siehe ![[tisch.shapes]] oben")).toBe("inline");
     expect(reason("![[tisch.shapes]]")).toBeUndefined();
+    expect(reason("![](tisch.shapes)")).toBe("markdown-embed");
+  });
+
+  it("reports display options of an embed, and none for a plain embed", () => {
+    const opt = (text: string) => {
+      const r = run(text, () => TARGET)[0];
+      return r && r.kind === "embed" ? r.options : "none";
+    };
+    expect(opt("![[tisch.shapes|400]]")).toBe("|400");
+    expect(opt("![[tisch.shapes|Alias]]")).toBe("|Alias");
+    expect(opt("![[tisch.shapes#Kopf]]")).toBe("#Kopf");
+    expect(opt("![[tisch.shapes]]")).toBeUndefined();
   });
 
   it("counts plain wikilinks as kind link, never inside other fences", () => {

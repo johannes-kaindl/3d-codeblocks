@@ -31,7 +31,13 @@ export interface ConvertEnv {
   notice: (message: string) => void;
 }
 
-const CLOSE_FENCE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+/** Schlusszeile passend zum Oeffner: gleiches Zeichen, mindestens so lang (`~~~` schliesst keinen Backtick-Zaun). */
+function closesFence(openLine: string, closeLine: string): boolean {
+  const open = /^\s*(`{3,}|~{3,})/.exec(openLine.replace(/^\uFEFF/, ""));
+  if (!open) return false;
+  const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(closeLine);
+  return close !== null && close[1][0] === open[1][0] && close[1].length >= open[1].length;
+}
 
 function sourceEditor(app: App): { view: MarkdownView; file: TFile } | null {
   const view = app.workspace.getActiveViewOfType(MarkdownView);
@@ -50,7 +56,7 @@ function shapesFenceAtCursor(src: { view: MarkdownView }): { fence: Fence; lines
   if (/^\s/.test(open)) {
     return { problem: "The ```shapes block is indented (probably inside a list or quote). A file reference cannot replace it there without breaking the structure — nothing was changed." };
   }
-  if (fence.closeLine <= fence.openLine || !CLOSE_FENCE.test(lines[fence.closeLine])) {
+  if (fence.closeLine <= fence.openLine || !closesFence(lines[fence.openLine], lines[fence.closeLine])) {
     return { problem: "The ```shapes block has no closing fence — close it first. Nothing was changed." };
   }
   if (fence.body.trim() === "") {
@@ -160,20 +166,26 @@ const REASON_TEXT: Record<AloneReason, string> = {
   inline: "is in the middle of a sentence (a code block cannot split a sentence)",
   table: "sits in a table",
   continuation: "continues a paragraph",
+  "markdown-embed": "is a Markdown-style embed — change it to ![[…]] first",
 };
 
 const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:/;
 
-/** Schluessel (oder Zeilentext) jeder Zeile des ```3d-Blocks ausser der EINEN Datei-Zeile. Leerzeilen und
- *  `#`-Kommentare zaehlen nicht, eine unbekannte Schluesselzeile schon. */
-function extraBlockKeys(blockText: string): string[] {
+/** Schluessel (oder Zeilentext) jeder Zeile des ```3d-Blocks ausser der EINEN Datei-Zeile, dazu ob `#`-Kommentare
+ *  darin stehen (sie gingen mit dem Block verloren). Leerzeilen zaehlen nicht, eine unbekannte Schluesselzeile schon. */
+function extraBlockKeys(blockText: string): { keys: string[]; comments: boolean } {
   const lines = blockText.split(/\r?\n/);
   const body = lines.slice(1, /^\s*(`{3,}|~{3,})\s*$/.test(lines[lines.length - 1] ?? "") ? -1 : undefined);
   const extras: string[] = [];
   let fileSeen = false;
+  let comments = false;
   for (const raw of body) {
     const line = raw.trim();
-    if (line === "" || line.startsWith("#")) continue;
+    if (line === "") continue;
+    if (line.startsWith("#")) {
+      comments = true;
+      continue;
+    }
     const key = KEY_LINE.exec(line)?.[1].toLowerCase();
     if (key === "file" || key === undefined) {
       // `key === undefined` ist die Pfad-Kurzform; die erste Datei-Zeile ist der Verweis selbst.
@@ -184,7 +196,7 @@ function extraBlockKeys(blockText: string): string[] {
       extras.push(key ?? line);
     } else extras.push(key);
   }
-  return [...new Set(extras)];
+  return { keys: [...new Set(extras)], comments };
 }
 
 function refusal(file: TFile, refs: ModelReference[]): string | null {
@@ -204,13 +216,22 @@ function refusal(file: TFile, refs: ModelReference[]): string | null {
   }
   if (ref.kind === "block") {
     const extras = extraBlockKeys(ref.text);
-    if (extras.length > 0) {
-      return `The \`\`\`3d block that uses ${name} (${at}) has other settings (${extras.join(", ")}) that a code block of the shapes language cannot keep — remove them or move the file by hand — nothing was changed.`;
+    if (extras.keys.length > 0) {
+      return `The \`\`\`3d block that uses ${name} (${at}) has other settings (${extras.keys.join(", ")}) that a code block of the shapes language cannot keep — remove them or move the file by hand — nothing was changed.`;
+    }
+    if (extras.comments) {
+      return `The \`\`\`3d block that uses ${name} (${at}) has comment lines that would be lost — remove them or move the file by hand — nothing was changed.`;
     }
   }
   if (ref.kind === "embed" && !ref.alone) {
+    if (ref.aloneReason === "markdown-embed") {
+      return `The embed of ${name} at ${at} ${REASON_TEXT["markdown-embed"]} — nothing was changed.`;
+    }
     const reason = ref.aloneReason ? REASON_TEXT[ref.aloneReason] : "is not on its own line";
     return `The embed of ${name} at ${at} ${reason}. Move it onto its own line at the top level first — nothing was changed.`;
+  }
+  if (ref.kind === "embed" && ref.options) {
+    return `The embed of ${name} at ${at} has display options (${ref.options}) that a code block cannot keep — remove them first — nothing was changed.`;
   }
   return null;
 }
@@ -230,6 +251,20 @@ export async function convertFileToBlock(env: ConvertEnv): Promise<boolean> {
   }
 }
 
+function mentionNotice(file: TFile, mentions: { notePath: string; line: number }[]): string {
+  const list = mentions.slice(0, 3).map((m) => `${m.notePath}, line ${m.line + 1}`).join("; ");
+  const more = mentions.length > 3 ? ` (and ${mentions.length - 3} more)` : "";
+  return `${file.name} has another mention: ${list}${more}. A mention by file name alone (in text, in a canvas or base file, or a differently located file of the same name) blocks the conversion, because deleting the file could break it — nothing was changed.`;
+}
+
+/** Was mit der Datei passiert, sagt die Obsidian-Einstellung "Deleted files" (trashOption), nicht wir. */
+function trashOutcome(app: App): string {
+  const option = (app.vault as unknown as { getConfig?: (key: string) => unknown }).getConfig?.("trashOption");
+  if (option === "local") return "The file was moved to the .trash folder of the vault — restore it from there if you need it.";
+  if (option === "system") return "The file was moved to the system trash — restore it from there if you need it.";
+  return "The file was removed according to your Deleted files setting (it is not recoverable if that is set to permanently delete).";
+}
+
 async function run(app: App, ports: WritePorts, notice: (m: string) => void, file: TFile): Promise<boolean> {
   // Markdown UND Canvas/Base: eine Canvas-Datei oder eine Base kann die Datei einbetten. Gelesen wird
   // von der Platte (read), nicht aus dem Cache: ein veralteter Cache liesse einen Verweis verschwinden.
@@ -242,7 +277,9 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
   const markdown = notes.filter((n) => /\.md$/i.test(n.path));
   const refs = findModelReferences(markdown, file.path, (link, sourcePath) => resolveModelPath(app, link, sourcePath)?.path ?? null);
 
-  const refused = refusal(file, refs);
+  const mentions = unaccountedMentions(notes, file.path, refs);
+  // Ohne strukturierten Verweis, aber mit einer Erwaehnung (Canvas, Base, Text): "nicht verwendet" waere falsch.
+  const refused = refs.length === 0 && mentions.length > 0 ? mentionNotice(file, mentions) : refusal(file, refs);
   if (refused) {
     notice(refused);
     return false;
@@ -251,13 +288,8 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
 
   // Sicherheitsnetz: jede Erwaehnung des Dateinamens, die kein gefundener Verweis ist (Text, gleichnamige
   // Datei woanders, Canvas, Base). Im Zweifel bleibt die Datei, wo sie ist.
-  const mentions = unaccountedMentions(notes, file.path, refs);
   if (mentions.length > 0) {
-    const list = mentions.slice(0, 3).map((m) => `${m.notePath}, line ${m.line + 1}`).join("; ");
-    const more = mentions.length > 3 ? ` (and ${mentions.length - 3} more)` : "";
-    notice(
-      `${file.name} has another mention: ${list}${more}. A mention by file name alone (in text, in a canvas or base file, or a differently located file of the same name) blocks the conversion, because deleting the file could break it — nothing was changed.`,
-    );
+    notice(mentionNotice(file, mentions));
     return false;
   }
 
@@ -294,11 +326,22 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
     // Offene Ansicht schliessen, solange die Datei noch existiert: ihr Schlusssichern schreibt dann
     // denselben Text, und kein veralteter Puffer kann die Datei nach dem Papierkorb neu anlegen.
     for (const leaf of leaves) leaf.detach();
+    // Die Notiz mit dem neuen Block muss auf der Platte stehen, bevor die Datei geht (ein offener Editor
+    // sichert verzoegert). Scheitert das Sichern, bleibt die Datei.
+    try {
+      for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+        const view = leaf.view as unknown as { file?: TFile | null; save?: () => Promise<void> };
+        if (view.file?.path === ref.notePath) await view.save?.();
+      }
+    } catch (error) {
+      notice(`${file.name} is now a code block in ${ref.notePath}, but the note could not be saved yet (${errorText(error)}), so the file was left in place at ${file.path}.`);
+      return true;
+    }
     await app.fileManager.trashFile(file);
   } catch (error) {
     notice(`${file.name} is now a code block in ${ref.notePath}, but the file could not be moved to the trash (${errorText(error)}). It is still at ${file.path}.`);
     return true;
   }
-  notice(`${file.name} is now a code block in ${ref.notePath}. The file went to the trash — restore it from the system trash or the .trash folder if you need it.`);
+  notice(`${file.name} is now a code block in ${ref.notePath}. ${trashOutcome(app)}`);
   return true;
 }

@@ -23,6 +23,11 @@ export function listFences(text: string): Fence[] {
       continue;
     }
     const marker = open[1];
+    // CommonMark: der Info-String eines Backtick-Zauns darf keinen Backtick enthalten ("```shapes``` text" ist kein Zaun).
+    if (marker[0] === "`" && lines[i].slice(lines[i].indexOf(marker) + marker.length).includes("`")) {
+      i += 1;
+      continue;
+    }
     const closeRe = new RegExp(`^\\s{0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
     let j = i + 1;
     while (j < lines.length && !closeRe.test(lines[j])) j += 1;

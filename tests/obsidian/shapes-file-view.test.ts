@@ -14,6 +14,8 @@ function fakeEditor() {
     }),
     getValue: () => value,
     setIssues: vi.fn(),
+    focus: vi.fn(),
+    hasFocus: vi.fn(() => false),
     destroy: vi.fn(),
     type: (t: string) => {
       value = t;
@@ -275,6 +277,36 @@ describe("ShapesFileView", () => {
     expect(view.issueSummaryForTest()).toContain("Line 2");
     view.setViewData("box A size 1", true);
     expect(view.issueSummaryForTest()).toBe("");
+  });
+
+  it("(M9) choosing Text or Split focuses the editor", async () => {
+    const { view, editor } = makeView();
+    await view.onOpen();
+    view.setWidthForTest(900);
+    view.setMode("text");
+    expect(editor.focus).toHaveBeenCalledTimes(1);
+    view.setMode("split");
+    expect(editor.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it("(M9) choosing Model while the editor has focus moves focus to the pressed pill", async () => {
+    const { view, editor } = makeView();
+    await view.onOpen();
+    view.setWidthForTest(900);
+    editor.hasFocus.mockReturnValue(true);
+    view.setMode("model");
+    const pills = (view as unknown as { pills: Map<string, { focus: ReturnType<typeof vi.fn> }> }).pills;
+    expect(pills.get("model")?.focus).toHaveBeenCalledTimes(1);
+    expect(editor.focus).not.toHaveBeenCalled();
+  });
+
+  it("(M9) choosing Model without editor focus leaves focus alone", async () => {
+    const { view } = makeView();
+    await view.onOpen();
+    view.setWidthForTest(900);
+    view.setMode("model");
+    const pills = (view as unknown as { pills: Map<string, { focus: ReturnType<typeof vi.fn> }> }).pills;
+    expect(pills.get("model")?.focus).not.toHaveBeenCalled();
   });
 
   it("cleans up on close", async () => {

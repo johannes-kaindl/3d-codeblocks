@@ -82,6 +82,7 @@ export function makeFakeEl(): any {
       for (const child of children) setParent(child, null);
       children.length = 0;
     },
+    focus: vi.fn(),
     click: () => {
       for (const fn of handlers.click ?? []) fn({ stopPropagation: () => {} });
     },
