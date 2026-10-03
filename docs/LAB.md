@@ -30,6 +30,8 @@ The final line of the JSONL file is the summary: `{"summary": true, "run": …, 
 
 Use one OUT file per run. A reader matches the summary's `run` to the case lines of the same run: a later run that was killed does not own the summary of an earlier one in the same file.
 
+The harness posts with `node:http` and not with `fetch`. Measured on 2026-10-03: a refine case that generated for more than 300 s failed with `UND_ERR_HEADERS_TIMEOUT`, because `fetch` (undici) caps the wait for response headers at 300 s and a non-streaming server only sends headers when generation is done. `node:http` has no such cap, so the 15-minute per-case limit really is 15 minutes. A case slower than that is recorded as `timeout`, a legitimate labelled result that counts as not good and does not make the run incomplete.
+
 The lab test fails loudly on bad environment values (unknown task, a task spelled with different case, a temperature that is not a plain decimal between 0 and 2, a URL without a model or one that does not start with http:// or https://).
 
 Refine case R07 depends on the model keeping the part name `Bein-1` when it replaces the leg; a model that renames it fails that case by construction.

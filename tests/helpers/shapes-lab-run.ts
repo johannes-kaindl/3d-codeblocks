@@ -1,6 +1,8 @@
 // Ablauf eines Messlauf-Falls, geteilt von Messlauf (echtes Modell) und Trockenlauf-Test im Gate.
 // `chat` wird eingespeist: der Messlauf ruft HTTP, der Trockenlauf liefert Fixture-Antworten.
 // Derselbe Produktionsweg wie im Panel: Prompt → Antwort lesen → Text → Konverter → loadModel.
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { applyChangesAnswer } from "../../src/core/shapes/changes";
 import { buildCreateMessages, buildRefineMessages, readChangesAnswer, type PromptMessage } from "../../src/core/shapes/protocol";
 import { CREATE_CASES, REFINE_BASE, REFINE_CASES } from "./shapes-cases";
@@ -30,22 +32,42 @@ export interface RunContext { run: string; dry: boolean }
 
 const msg = (e: unknown): string => String((e as Error)?.message ?? e).slice(0, 300);
 
+/** POST mit node:http(s). Bewusst KEIN fetch: gemessen 2026-10-03 scheiterte ein Verfeinern-Fall, der länger als
+ *  300 s generierte, mit UND_ERR_HEADERS_TIMEOUT, weil fetch/undici das Warten auf die Antwort-Header auf 300 s
+ *  begrenzt (bei stream:false kommen die Header erst nach der ganzen Generierung). node:http hat diese Grenze nicht;
+ *  das einzige Zeitlimit ist das Signal des Falls (kein `timeout`-Option, kein Keep-Alive-Agent). */
+function post(url: string, body: string, signal: AbortSignal): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const request = u.protocol === "https:" ? httpsRequest : httpRequest;
+    const req = request(u, {
+      method: "POST",
+      agent: false,
+      signal,
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+      res.on("error", reject);
+      res.on("close", () => { if (!res.complete) reject(Object.assign(new Error("connection closed before the response was complete"), { code: "ECONNRESET" })); });
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
 /** HTTP-Chat gegen einen OpenAI-kompatiblen Endpunkt. Wirft nie; ein Fehler steht im Ergebnis. */
-export function httpChat(url: string, model: string, temperature: number): Chat {
+export function httpChat(url: string, model: string, temperature: number, timeoutMs: number = CASE_TIMEOUT_MS): Chat {
   return async (messages) => {
     const t0 = Date.now();
+    const ms = () => Date.now() - t0;
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, temperature, max_tokens: 14000, stream: false, messages }),
-        signal: AbortSignal.timeout(CASE_TIMEOUT_MS),
-      });
-      const ms = () => Date.now() - t0;
-      if (res.status !== 200) return { text: "", ms: ms(), status: res.status, error: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
+      const res = await post(url, JSON.stringify({ model, temperature, max_tokens: 14000, stream: false, messages }), AbortSignal.timeout(timeoutMs));
+      if (res.status !== 200) return { text: "", ms: ms(), status: res.status, error: `HTTP ${res.status}: ${res.body.slice(0, 200)}` };
       let json: { choices?: { message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown }; finish_reason?: unknown }[]; usage?: unknown };
       try {
-        json = (await res.json()) as typeof json;
+        json = JSON.parse(res.body) as typeof json;
       } catch {
         return { text: "", ms: ms(), status: res.status, error: "invalid JSON body" };
       }
@@ -66,11 +88,11 @@ export function httpChat(url: string, model: string, temperature: number): Chat 
       const why = Array.isArray(content) ? "content is an array of parts, not text" : "response has no choices[0].message.content text";
       return { text: "", ms: ms(), ...meta, error: why };
     } catch (e) {
-      const name = (e as Error)?.name;
-      const timedOut = name === "TimeoutError" || name === "AbortError";
-      const cause = (e as { cause?: { code?: unknown; message?: unknown } })?.cause;
-      const detail = cause ? ` (${String(cause.code ?? cause.message ?? "").slice(0, 120)})` : "";
-      return { text: "", ms: Date.now() - t0, timedOut, error: timedOut ? `timeout after ${CASE_TIMEOUT_MS / 1000} s` : `${msg(e)}${detail}` };
+      const err = e as { name?: string; code?: unknown; cause?: { code?: unknown; message?: unknown } };
+      const timedOut = err?.name === "TimeoutError" || err?.name === "AbortError" || err?.code === "ABORT_ERR";
+      const code = err?.code ?? err?.cause?.code ?? err?.cause?.message;
+      const detail = code !== undefined && code !== "" ? ` (${String(code).slice(0, 120)})` : "";
+      return { text: "", ms: ms(), timedOut, error: timedOut ? `timeout after ${timeoutMs / 1000} s` : `${msg(e)}${detail}` };
     }
   };
 }

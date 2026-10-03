@@ -1,6 +1,8 @@
 // Trockenlauf des Messlauf-Ablaufs ohne Modell: derselbe Code (runCreateCase/runRefineCase) mit
 // eingespeister Chat-Funktion. Ein Fehler im Messlauf soll hier auffallen, nicht in einem echten Lauf.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo, Socket } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
 import { CREATE_CASES, REFINE_CASES } from "../../helpers/shapes-cases";
 import { changesAsAnswerText } from "../../helpers/shapes-refine-answers";
 import { dryChat, httpChat, readLabEnv, runCreateCase, runRefineCase, summarize, type Chat } from "../../helpers/shapes-lab-run";
@@ -114,15 +116,79 @@ describe("lab harness (dry, no model, no network)", () => {
     expect(readLabEnv({ SHAPES_LAB_URL: "http://u", SHAPES_LAB_MODEL: "m", SHAPES_LAB_TASK: "refine", SHAPES_LAB_TEMPERATURE: "0" })).toMatchObject({ ok: true, task: "refine", temperature: 0 });
   });
 
-  describe("httpChat against a stubbed fetch (no network)", () => {
-    afterEach(() => vi.unstubAllGlobals());
-    const stub = (body: unknown, status = 200) =>
-      vi.stubGlobal("fetch", async () => ({ status, text: async () => String(body), json: async () => { if (body === "NOT JSON") throw new SyntaxError("x"); return body; } }));
-    const call = () => httpChat("http://stub/v1", "m", 0.2)([{ role: "user", content: "hi" }]);
+  describe("httpChat against a local fake server (127.0.0.1, random port, no model)", () => {
+    type Handler = (req: IncomingMessage, res: ServerResponse) => void;
+    const sockets = new Set<Socket>();
+    const servers: Server[] = [];
+    const serve = async (handler: Handler): Promise<{ url: string; server: Server }> => {
+      const server = createServer(handler);
+      server.on("connection", (s) => { sockets.add(s); s.on("close", () => sockets.delete(s)); });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      servers.push(server);
+      return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/chat/completions`, server };
+    };
+    const json = (body: unknown, status = 200): Handler => (_req, res) => { res.statusCode = status; res.end(typeof body === "string" ? body : JSON.stringify(body)); };
+    const ask = (url: string, timeoutMs?: number) => httpChat(url, "m", 0.2, timeoutMs)([{ role: "user", content: "hi" }]);
+    afterEach(async () => {
+      for (const s of sockets) s.destroy();
+      await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+    });
 
-    it("content null + finish_reason length (reasoning model out of budget) is bad, reasoning length recorded, not its text", async () => {
-      stub({ choices: [{ message: { content: null, reasoning_content: "x".repeat(123) }, finish_reason: "length" }], usage: { completion_tokens: 14000 } });
-      const r = await call();
+    it("valid 200 gives the text, status, finish_reason and usage; the request body is as specified", async () => {
+      let seen: { body: Record<string, unknown>; ct?: string; cl?: string } | undefined;
+      const { url } = await serve((req, res) => {
+        let b = "";
+        req.on("data", (c) => (b += c));
+        req.on("end", () => {
+          seen = { body: JSON.parse(b) as Record<string, unknown>, ct: req.headers["content-type"], cl: req.headers["content-length"] };
+          json({ choices: [{ message: { content: "hello" }, finish_reason: "stop" }], usage: { completion_tokens: 3 } })(req, res);
+        });
+      });
+      const r = await ask(url);
+      expect(r).toMatchObject({ text: "hello", status: 200, finishReason: "stop", usage: { completion_tokens: 3 } });
+      expect(r.error).toBeUndefined();
+      expect(seen?.body).toMatchObject({ model: "m", temperature: 0.2, max_tokens: 14000, stream: false });
+      expect(seen?.ct).toBe("application/json");
+      expect(Number(seen?.cl)).toBeGreaterThan(0);
+    });
+
+    it("200 with an error object is infra", async () => {
+      const { url } = await serve(json({ error: { message: "model not loaded" } }));
+      const r = await ask(url);
+      expect(r).toMatchObject({ status: 200 });
+      expect(r.error).toContain("no choices[0].message.content");
+      expect((await runCreateCase(CREATE_CASES[0], async () => r, ctx)).outcome).toBe("infra");
+    });
+
+    it("HTTP 500 is infra with the status", async () => {
+      const { url } = await serve(json("boom", 500));
+      const r = await ask(url);
+      expect(r).toMatchObject({ status: 500, text: "" });
+      expect(r.error).toContain("HTTP 500");
+    });
+
+    it("connection refused is infra with the error code", async () => {
+      const { url, server } = await serve(json({}));
+      await new Promise((r) => server.close(r));
+      const r = await ask(url);
+      expect(r.error).toContain("ECONNREFUSED");
+      expect(r.timedOut).toBeFalsy();
+      expect((await runCreateCase(CREATE_CASES[0], async () => r, ctx)).outcome).toBe("infra");
+    });
+
+    it("an invalid JSON body keeps status 200 and says so", async () => {
+      const { url } = await serve(json("NOT JSON"));
+      expect(await ask(url)).toMatchObject({ status: 200, error: "invalid JSON body" });
+    });
+
+    it("content as an array of parts is infra", async () => {
+      const { url } = await serve(json({ choices: [{ message: { content: [{ type: "text", text: "x" }] }, finish_reason: "stop" }] }));
+      expect((await ask(url)).error).toContain("array of parts");
+    });
+
+    it("content null + finish_reason length is bad, reasoning length recorded, not its text", async () => {
+      const { url } = await serve(json({ choices: [{ message: { content: null, reasoning_content: "x".repeat(123) }, finish_reason: "length" }], usage: { completion_tokens: 14000 } }));
+      const r = await ask(url);
       expect(r).toMatchObject({ text: "", status: 200, finishReason: "length", reasoningChars: 123 });
       expect(r.error).toBeUndefined();
       const rec = await runCreateCase(CREATE_CASES[0], async () => r, ctx);
@@ -130,29 +196,31 @@ describe("lab harness (dry, no model, no network)", () => {
       expect(JSON.stringify(rec)).not.toContain("xxxxxxxx");
     });
 
-    it("content absent without finish_reason length stays infra", async () => {
-      stub({ choices: [{ message: { content: null, reasoning_content: "thinking" }, finish_reason: "stop" }] });
-      const r = await call();
+    it("content null without finish_reason length stays infra", async () => {
+      const { url } = await serve(json({ choices: [{ message: { content: null, reasoning_content: "thinking" }, finish_reason: "stop" }] }));
+      const r = await ask(url);
       expect(r.error).toContain("no choices[0].message.content");
       expect((await runCreateCase(CREATE_CASES[0], async () => r, ctx)).outcome).toBe("infra");
     });
 
-    it("an invalid JSON body keeps status 200 and says so", async () => {
-      stub("NOT JSON");
-      expect(await call()).toMatchObject({ status: 200, error: "invalid JSON body" });
+    it("headers delayed by 1.5 s still give a good result (no header timeout in the request)", async () => {
+      const answer = JSON.stringify({ changes: [{ op: "remove", name: "Bein-4" }] });
+      const { url } = await serve((_req, res) => {
+        setTimeout(() => res.end(JSON.stringify({ choices: [{ message: { content: answer }, finish_reason: "stop" }] })), 1500);
+      });
+      const rec = await runRefineCase(REFINE_CASES[2], httpChat(url, "m", 0.2), ctx);
+      expect(rec).toMatchObject({ id: "R03", outcome: "good", good: true });
+      expect(Number(rec.ms)).toBeGreaterThanOrEqual(1400);
     });
 
-    it("fetch failed carries the cause code", async () => {
-      vi.stubGlobal("fetch", async () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); });
-      const r = await call();
-      expect(r.error).toBe("fetch failed (ECONNREFUSED)");
-      expect(r.timedOut).toBeFalsy();
-    });
-
-    it("a non-200 status is infra with the status", async () => {
-      stub("boom", 503);
-      expect(await call()).toMatchObject({ status: 503 });
-    });
+    it("a server that never answers gives outcome timeout after the injected limit, and the run stays COMPLETE", async () => {
+      const { url } = await serve(() => { /* never answers */ });
+      const rec = await runRefineCase(REFINE_CASES[0], httpChat(url, "m", 0.2, 300), ctx);
+      expect(rec).toMatchObject({ outcome: "timeout", good: false });
+      expect(Number(rec.ms)).toBeGreaterThanOrEqual(250);
+      expect(Number(rec.ms)).toBeLessThan(3000);
+      expect(sum([rec]).summary).toMatchObject({ complete: true, timeouts: 1 });
+    }, 10_000);
   });
 
   it("env: whitespace URL, non-http URL, temperature out of range or not a plain decimal are rejected", () => {
