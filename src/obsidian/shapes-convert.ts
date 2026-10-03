@@ -23,6 +23,7 @@ import {
 } from "../core/shapes/references";
 import { BlockChangedError, replaceLines, type WritePorts } from "./block-writer";
 import { resolveModelPath } from "./file-source";
+import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
 
 export interface ConvertEnv {
   app: App;
@@ -85,7 +86,8 @@ export async function convertBlockToFile(env: ConvertEnv): Promise<boolean> {
     const name = `${exportBaseName(parseShapes(fence.body).header, src.file.basename)}.shapes`;
     path = await app.fileManager.getAvailablePathForAttachment(name, src.file.path);
     // Nie ueberschreiben, auch nicht bei einer Schreibweise, die die Pfadvergabe uebersieht.
-    if (app.vault.getAbstractFileByPath(path)) {
+    // Zweiter Gurt: die Schreibweisen-Regeln (Gross/Klein) kennt der Adapter, nicht wir.
+    if (app.vault.getAbstractFileByPath(path) || (await app.vault.adapter.exists(path))) {
       notice(`${path} already exists — nothing was changed.`);
       return false;
     }
@@ -143,6 +145,12 @@ export function canConvertFileToBlock(app: App): boolean {
   return targetFile(app) !== null;
 }
 
+interface OpenShapesView {
+  file: TFile | null;
+  save(): Promise<void>;
+  getViewData(): string;
+}
+
 const SCANNED_EXTENSIONS = new Set(["md", "canvas", "base"]);
 
 const REASON_TEXT: Record<AloneReason, string> = {
@@ -195,7 +203,11 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
   // Markdown UND Canvas/Base: eine Canvas-Datei oder eine Base kann die Datei einbetten. Gelesen wird
   // von der Platte (read), nicht aus dem Cache: ein veralteter Cache liesse einen Verweis verschwinden.
   const scanned = app.vault.getFiles().filter((f) => SCANNED_EXTENSIONS.has(f.extension.toLowerCase()));
-  const notes: NoteText[] = await Promise.all(scanned.map(async (f) => ({ path: f.path, text: await app.vault.read(f) })));
+  if (scanned.length > 300) notice(`Checking ${scanned.length} notes…`);
+  // Ungespeichertes Tippen in einer offenen Notiz steht nur im Editor-Puffer, nicht auf der Platte.
+  const notes: NoteText[] = await Promise.all(
+    scanned.map(async (f) => ({ path: f.path, text: ports.editorFor(f.path)?.getValue() ?? (await app.vault.read(f)) })),
+  );
   const markdown = notes.filter((n) => /\.md$/i.test(n.path));
   const refs = findModelReferences(markdown, file.path, (link, sourcePath) => resolveModelPath(app, link, sourcePath)?.path ?? null);
 
@@ -218,6 +230,11 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
     return false;
   }
 
+  // Offene Ansichten der Datei: ungespeicherte Eingaben zuerst auf die Platte (save), sonst zoege der
+  // Umzug den veralteten Plattentext in die Notiz und die Eingaben gingen mit dem Papierkorb verloren.
+  const leaves = app.workspace.getLeavesOfType(VIEW_TYPE_SHAPES).filter((l) => (l.view as unknown as OpenShapesView).file?.path === file.path);
+  const views = leaves.map((l) => l.view as unknown as OpenShapesView);
+  for (const view of views) await view.save();
   const text = await app.vault.read(file);
   // Unmittelbar vor dem Schreiben: hat sich die Datei seit dem Lesen geaendert, wuerde der Umzug
   // fremde Aenderungen verlieren.
@@ -238,10 +255,14 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
   // Die Notiz traegt den Block. Aenderte sich die Datei seit dem Lesen, bleibt sie stehen (sonst gingen
   // die Aenderungen mit dem Papierkorb verloren).
   try {
-    if ((await app.vault.read(file)) !== text) {
+    // Auch Tippen waehrend des Umzugs zaehlt: der Ansichtspuffer muss noch dem gelesenen Text entsprechen.
+    if ((await app.vault.read(file)) !== text || views.some((v) => v.getViewData() !== text)) {
       notice(`${file.name} is now a code block in ${ref.notePath}, but the file changed meanwhile, so it was left in place at ${file.path}.`);
       return true;
     }
+    // Offene Ansicht schliessen, solange die Datei noch existiert: ihr Schlusssichern schreibt dann
+    // denselben Text, und kein veralteter Puffer kann die Datei nach dem Papierkorb neu anlegen.
+    for (const leaf of leaves) leaf.detach();
     await app.fileManager.trashFile(file);
   } catch (error) {
     notice(`${file.name} is now a code block in ${ref.notePath}, but the file could not be moved to the trash (${errorText(error)}). It is still at ${file.path}.`);

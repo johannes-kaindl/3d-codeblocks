@@ -18,6 +18,12 @@ interface Opts {
   /** Wird bei jedem Lesen der .shapes-Datei aufgerufen (Aufrufnummer ab 1). */
   onShapesRead?: (store: Record<string, string>, call: number) => void;
   trashThrows?: boolean;
+  /** Offene ShapesFileView der Datei Anhänge/Tisch.shapes: `data` ist ihr Puffer. */
+  shapesView?: { data: string };
+  /** Offene Editor-Puffer weiterer Notizen (Pfad -> ungespeicherter Text). */
+  extraEditors?: Record<string, string>;
+  /** Pfade, die der Adapter als vorhanden meldet (ohne dass die Datei im Store steht). */
+  adapterExists?: string[];
 }
 
 function setup(files: Record<string, string>, opts: Opts = {}) {
@@ -42,8 +48,20 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
       store[editorPath] = head + text + tail;
     },
   };
+  const viewPath = "Anhänge/Tisch.shapes";
+  const leaf = opts.shapesView
+    ? {
+        view: {
+          file: { path: viewPath },
+          save: vi.fn(async () => { events.push("save"); store[viewPath] = opts.shapesView!.data; }),
+          getViewData: () => opts.shapesView!.data,
+        },
+        detach: vi.fn(() => { events.push("detach"); }),
+      }
+    : null;
   const app = {
     workspace: {
+      getLeavesOfType: () => (leaf ? [leaf] : []),
       getActiveViewOfType: () => (opts.activeFile ? null : { file: tfile(editorPath), editor, getMode: () => "source" }),
       getActiveFile: () => (opts.activeFile ? tfile(opts.activeFile) : tfile(editorPath)),
     },
@@ -64,6 +82,9 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
         return tfile(path);
       }),
       getAbstractFileByPath: (path: string) => (path in store ? tfile(path) : null),
+      adapter: {
+        exists: async (path: string) => (opts.adapterExists ?? []).includes(path) || Object.keys(store).some((p) => p.toLowerCase() === path.toLowerCase()),
+      },
     },
     metadataCache: {
       getFirstLinkpathDest: (link: string) => {
@@ -83,7 +104,7 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
     },
   };
   const ports = {
-    editorFor: (path: string) => (path === editorPath && !opts.activeFile && opts.vaultOnlyBuffer === undefined ? editor : null),
+    editorFor: (path: string) => (opts.extraEditors && path in opts.extraEditors ? { getValue: () => opts.extraEditors![path], replaceRange: () => {} } : null) ?? (path === editorPath && !opts.activeFile && opts.vaultOnlyBuffer === undefined ? editor : null),
     vault: {
       read: async (path: string) => store[path],
       process: async (path: string, fn: (t: string) => string) => {
@@ -92,7 +113,7 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
       },
     },
   };
-  return { app: app as never, env: { app: app as never, ports: ports as never, notice: (m: string) => notices.push(m) }, store, trashed, notices, events, cursor, trashFile: app.fileManager.trashFile };
+  return { app: app as never, env: { app: app as never, ports: ports as never, notice: (m: string) => notices.push(m) }, store, trashed, notices, events, cursor, trashFile: app.fileManager.trashFile, leaf };
 }
 
 const NOTE = "# Möbel\n```shapes\ntitle: Tisch\nbox A size 1\n```\nEnde";
@@ -123,6 +144,14 @@ describe("convertBlockToFile", () => {
     expect(await convertBlockToFile(env)).toBe(false);
     expect(store["Anhänge/Tisch.shapes"]).toBe("alt");
     expect(store["n.md"]).toBe(NOTE);
+    expect(notices[0]).toMatch(/already exists/);
+  });
+
+  it("(m2) refuses when the adapter reports the path under another case", async () => {
+    const { env, store, notices } = setup({ "n.md": NOTE }, { cursorLine: 3, adapterExists: ["Anhänge/Tisch.shapes"] });
+    expect(await convertBlockToFile(env)).toBe(false);
+    expect(store["n.md"]).toBe(NOTE);
+    expect(Object.keys(store)).toEqual(["n.md"]);
     expect(notices[0]).toMatch(/already exists/);
   });
 
@@ -292,16 +321,82 @@ describe("convertFileToBlock", () => {
   });
 
   it("replaces the note BEFORE trashing the file", async () => {
-    const { env, events, trashFile } = setup(withFile(), { cursorLine: 2 });
+    const { env, events, trashFile, store } = setup(withFile(), { cursorLine: 2 });
     let noteAtTrash = "";
     trashFile.mockImplementationOnce(async () => {
       events.push("trash");
-      noteAtTrash = "recorded";
+      noteAtTrash = store["n.md"];
     });
     await convertFileToBlock(env);
     expect(events.indexOf("replace")).toBeGreaterThanOrEqual(0);
     expect(events.indexOf("replace")).toBeLessThan(events.indexOf("trash"));
-    expect(noteAtTrash).toBe("recorded");
+    expect(noteAtTrash).toContain("```shapes");
+    expect(noteAtTrash).not.toContain("```3d");
+  });
+
+  describe("open .shapes views", () => {
+    it("(i) flushes unsaved edits first, so the note receives the NEW text", async () => {
+      const view = { data: "box A size 7" };
+      const { env, store, events, leaf } = setup(withFile(), { cursorLine: 2, shapesView: view });
+      expect(await convertFileToBlock(env)).toBe(true);
+      expect(leaf!.view.save).toHaveBeenCalled();
+      expect(events.indexOf("save")).toBeLessThan(events.indexOf("replace"));
+      expect(store["n.md"]).toBe("# Möbel\n```shapes\nbox A size 7\n```\nEnde");
+    });
+
+    it("(ii) keeps the file when the view buffer changes between read and trash", async () => {
+      const view = { data: SHAPES };
+      const { env, store, trashed, notices, leaf } = setup(withFile(), {
+        cursorLine: 2,
+        shapesView: view,
+        onShapesRead: (_s, call) => { if (call === 3) view.data = "box A size 9"; },
+      });
+      expect(await convertFileToBlock(env)).toBe(true);
+      expect(trashed).toEqual([]);
+      expect(leaf!.detach).not.toHaveBeenCalled();
+      expect(store["Anhänge/Tisch.shapes"]).toBeDefined();
+      expect(store["n.md"]).toContain("```shapes");
+      expect(notices[0]).toContain("Anhänge/Tisch.shapes");
+      expect(notices[0]).toMatch(/left in place/);
+    });
+
+    it("(iii) without an open view the behaviour is unchanged", async () => {
+      const { env, store, trashed, leaf } = setup(withFile(), { cursorLine: 2 });
+      expect(leaf).toBeNull();
+      expect(await convertFileToBlock(env)).toBe(true);
+      expect(trashed).toEqual(["Anhänge/Tisch.shapes"]);
+      expect(store["n.md"]).toContain("```shapes");
+    });
+
+    it("detaches the view after the compare and before trashing; the file is gone at the end", async () => {
+      const view = { data: SHAPES };
+      const { env, store, events } = setup(withFile(), { cursorLine: 2, shapesView: view });
+      expect(await convertFileToBlock(env)).toBe(true);
+      const at = (e: string) => events.indexOf(e);
+      expect(at("replace")).toBeLessThan(at("detach"));
+      expect(at("detach")).toBeLessThan(at("trash:Anhänge/Tisch.shapes"));
+      expect(store["Anhänge/Tisch.shapes"]).toBeUndefined();
+    });
+  });
+
+  it("(m1) prefers the open editor text over disk: an unsaved embed elsewhere blocks the conversion", async () => {
+    const files = withFile({ "m.md": "nichts hier" });
+    const { env, store, trashed, notices } = setup(files, { cursorLine: 2, extraEditors: { "m.md": "![[Tisch.shapes]]" } });
+    expect(await convertFileToBlock(env)).toBe(false);
+    expect(trashed).toEqual([]);
+    expect(store).toEqual(files);
+    expect(notices[0]).toContain("m.md");
+  });
+
+  it("(m3) announces the scan for large vaults only", async () => {
+    const many: Record<string, string> = {};
+    for (let i = 0; i < 301; i++) many[`x${i}.md`] = "leer";
+    const big = setup(withFile(many), { cursorLine: 2 });
+    await convertFileToBlock(big.env);
+    expect(big.notices[0]).toMatch(/Checking 302 notes/);
+    const small = setup(withFile(), { cursorLine: 2 });
+    await convertFileToBlock(small.env);
+    expect(small.notices[0]).not.toMatch(/Checking/);
   });
 
   it("trashes nothing when the note changed between search and write (Focus 2)", async () => {
