@@ -26,6 +26,7 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 - **Bearbeitungsmodus:** die obersten Knoten eines glTF-/GLB-Modells verschieben und
   skalieren. Änderungen landen in einer eigenen `.edit.gltf` — das Original wird nie
   verändert.
+- **Modell per Prompt:** ein Modell in Worten beschreiben oder eine Änderung an einem vorhandenen shapes-Modell wünschen, in einem Seitenpanel; Vorschau prüfen und als Codeblock oder Datei übernehmen. [So funktioniert es](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md#modelling-with-a-prompt) *(englisch)*.
 - Theme-treues Standardmaterial für STL, das selbst keines mitbringt.
 - Keine dauerhafte Render-Schleife: gezeichnet wird nur, wenn sich etwas ändert.
 
@@ -34,6 +35,7 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 ## Voraussetzungen
 
 - **Obsidian 1.11.4** oder neuer.
+- Optional, für *Modell per Prompt*: ein OpenAI-kompatibler Sprachmodell-Endpunkt (siehe [Einrichtungsanleitung](https://uplink.jkaindl.de/llm-setup)). Alles andere braucht keinen.
 - WebGL-Unterstützung im Renderer — auf dem Desktop Standard. Auf Mobilgeräten
   funktioniert es, aber große Modelle sind langsam und das Browser-Limit für
   gleichzeitige 3D-Ansichten ist früher erreicht.

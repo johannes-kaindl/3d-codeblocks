@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
 - A ```` ```shapes ```` fence whose info line contains a backtick (for example a prose line like ```` ```shapes``` text ````) is no longer treated as the start of a code block, following the CommonMark rule. This only matters for Export and Move shapes block into a file with such an unusual line.
 - The GitHub release now also carries a ready-to-unpack `three-d-codeblocks.zip` (the plugin folder with `main.js`, `manifest.json` and `styles.css`) and a `checksums.sha256` file. For a manual install, download the zip and unpack it into `.obsidian/plugins/` instead of creating the folder and saving three files by hand.
 
+- **Model by prompt:** a prompt panel (command **Open prompt panel**, or the sparkles button **Edit in prompt panel** on a shapes model) creates a shapes model from a description or changes an existing one (move, resize, rotate, recolour, switch shape, add, remove). It streams the answer, shows a preview and the list of changes, keeps every request as a round you can select back, and applies the selected round to a code block, a `.shapes` file or a new model. A quality line says whether the chosen model was measured. Stop works at any moment.
+- Setting **Apply new models as** (code block at the cursor, file in the attachment folder, or ask each time).
+- Section **Language model** in the settings: your endpoints (OpenAI-compatible, keys in Obsidian's secret storage) and the request parameters; the optional LLM Endpoint Manager plugin can supply them instead.
+
 ### Changed
 
 - **The minimum Obsidian version is now 1.11.4** (was 1.6.6). The prompt panel stores API keys in Obsidian's secret storage, which Obsidian introduced in 1.11.4.

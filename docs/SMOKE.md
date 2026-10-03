@@ -589,6 +589,32 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 
 **Gegenprobe Plan 2 (CORE-TEST-01):** derselbe Treiber gegen den Plugin-Stand nach Plan 1 (`dedb545`, ohne Dateiansicht) meldet SH1–SH5 grün, SH6 und SH7 rot („keine .tdcb-shapes-view im Blatt“, „kein Editor“) und bricht in SH8 ab — die Punkte können also fehlschlagen und messen das Feature; der Abbruch räumt auf (Vault danach ohne Reste).
 
+### Prompt-Panel (Plan 3b)
+
+> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP9, eigener Abschnitt)
+
+The substitute endpoint checks the wiring, not the LLM.
+
+Der Abschnitt startet einen lokalen HTTP-Server (`node:http`, Port 0), der `GET …/models` mit einem Modell (`smoke-model`) beantwortet und `POST …/chat/completions` als SSE mit aufgezeichneten Antworten in drei Stücken (je 800 ms Abstand): Erzeugen mit Eintrag A02 aus `tests/fixtures/shapes-spike/a-q27-dsl.jsonl`, Verfeinern mit Fall R01 aus `tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03-71051822.jsonl` (Platte um 20 cm nach oben); beide werden vor dem Lauf gegen das aktuelle Protokoll geprüft. Der Server trägt den Endpunkt in die Plugin-Einstellungen ein (`endpoints`, ein Eintrag mit Adresse und Modell) und merkt, ob ein Client eine Chat-Verbindung schloss, bevor er fertig war (PP6). Ist das Plugin `llm-endpoint-manager` im Vault aktiv, gilt dessen Liste und der Ersatz wäre wirkungslos: dann sind alle neun Punkte „nichts gemessen“.
+
+Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurückgesetzt, was der Abschnitt anlegt: die Ersatz-Zeile samt Ersatz-Modell in den Einstellungen, das Panel-Blatt, `acceptAs` (Vorwert zurück), die vier Notizen `_tdcb-gui-smoke-pp-*.md` (jede wird zu Beginn neu geschrieben) und der Server. Was bis zum Abschnittsende nicht verbucht wurde, zählt als „nichts gemessen“, nie als grün.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| PP1 | Der Settings-Tab zeigt eine Endpunkt-Zeile mit der Ersatz-Adresse und den eingeklappten Abschnitt mit dem Titel aus `LLM_CONNECTION_STRINGS_EN.request.title` („Request“). Erster GUI-Beleg für `renderSettings`. Liefert der Tab gar keine Zeilen, ist der Punkt „nichts gemessen“ |
+| PP2 | Befehl `open-prompt-panel`: Hub mit den Tabs Prompt und Versions, Messzeile „Not measured for this model …“ mit `is-warning`, Platzhalter im Eingabefeld mit Beispiel („e.g.“), Knopf „Create“ |
+| PP3 | Erzeugen: der Tail wächst in mindestens zwei Zwischenständen (MutationObserver im Renderer), danach Status `is-ok` und ein Vorschau-Canvas mit mindestens drei Farbtönen; der Ersatz sah genau eine Erzeugen-Anfrage als Stream |
+| PP4 | Übernehmen als Codeblock (`acceptAs: block`, Notiz im Quellmodus, Cursor am Ende): die Notiz trägt einen ```shapes-Block mit der Zeile `box Platte …`, die Runden sind danach leer |
+| PP5 | Ändern über die Aktionsleiste: Klick (`clickReal`) auf „Edit in prompt panel“, Zielzeile „Edit: Tisch“, Diff-Zeile beginnt mit „Platte: at“, nach Apply ändert sich genau eine Zeile der Notiz (die Platte-Zeile mit `0.925`), alle übrigen sind byte-gleich |
+| PP6 | Abbruch: der Ersatz schweigt nach dem ersten Stück; nach 1 s „Stop“ — Status „Stopped.“, keine Runde, der Server sah die geschlossene Verbindung |
+| PP7 | Jeder Knopf der Aktionsleiste eines shapes-Blocks trägt ein `<svg>` mit mindestens einer Form (`path`, `line`, …) — eine unbekannte Icon-ID (`sparkles`, `file-output` waren bis dahin ungeprüft) lässt den Punkt scheitern; der Klick auf „Edit in prompt panel“ öffnet genau ein Blatt vom Typ `tdcb-prompt-panel` |
+| PP8 | Der Block wird zwischen Anfrage und Apply von Hand geändert (eine Bein-Zeile bekommt eine Farbe): Apply meldet „The block changed — nothing was applied.“ und die Notiz bleibt gleich der Handfassung |
+| PP9 | Ein Block, dessen Rumpf mit einer Leerzeile endet: Anfrage und Apply müssen sicher ausgehen — angewendet (bis auf die Platte-Zeile unverändert, ein Zaun) oder abgelehnt (Notiz unverändert). Welcher der beiden Ausgänge eintrat und der Rumpf-Fingerabdruck des Panels stehen im Detail; die Wahl selbst wird nicht gewertet |
+
+Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprungen · nichts gemessen); der Nenner ist die Zahl aller Punkte des Laufs, auch der übersprungenen und nicht gemessenen.
+
+**Balance: to be filled after the run** — die Bilanz und die Gegenprobe trägt der Master nach dem Lauf ein.
+
 ## Befunde
 
 _Hier notieren, was auffällt._

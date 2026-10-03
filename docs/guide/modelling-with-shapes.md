@@ -4,6 +4,8 @@ Write a model as plain text, one part per line, and see it in the note. No Blend
 
 This guide starts with a tutorial (your first model), then lists every rule as a reference.
 
+You do not have to write the lines yourself: with a language model you can describe a model in words and change it with further requests, see [Modelling with a prompt](#modelling-with-a-prompt).
+
 ## Your first model
 
 Paste this into a note and switch to Reading view or Live Preview:
@@ -143,3 +145,75 @@ The command **Export shapes model as glTF** turns a model into an ordinary `.glt
 - **Lines that were left out:** a line with a problem is not exported, just as it is not drawn. The confirmation says so, for example `Exported to Attachments/Tisch.gltf — 1 problem(s) ignored: Line 7: …`; at most three are listed, followed by `… and N more`.
 - **Nothing to export:** if no line produces a part, the command says so and writes nothing.
 - **The export is not a source:** the file records where it came from (`asset.extras.generatedFrom`), but nothing links back. Edit the shapes text and export again; changes made to the `.gltf` do not flow back into the text.
+
+## Modelling with a prompt
+
+Instead of writing the lines yourself you can describe a model in words and let a language model write them. This is optional: it needs a language model that you set up first (see [Setting up a language model](#setting-up-a-language-model)), and everything else in this guide works without one.
+
+Only the endpoint you configure receives your request: your description and, for a change, the current parts of the model as JSON. The result is always the plain shapes text described in this guide, so you can read it, edit it and keep it like any other shapes model.
+
+### Open the panel
+
+- Run the command **Open prompt panel**. The panel opens in the right sidebar.
+- Or click the sparkles button **Edit in prompt panel** in the toolbar at the top right of a ```` ```shapes ```` block (it shows when you hover over the block) or of a `.shapes` file's model. The panel then targets that model.
+- The command **Edit shapes model in prompt panel** does the same for the model you used last. It is only offered when that model is a shapes model.
+
+The first line of the panel shows what a request will work on: `New model`, or `Edit:` followed by the title of the block (the name of the file for a `.shapes` file). The panel follows the model you used last. For a model it cannot change, for example a glTF file, it says that the model can't be changed by prompt. While a request is running or rounds are waiting to be applied, the panel keeps its target even when you move on to another model, and says `Target kept: …` with a reminder to discard to switch.
+
+### Choose a model and read the quality line
+
+The **Model** drop-down lists the models of your endpoint, and the button next to it reloads the list. Under it, one line says what is known about the chosen model:
+
+- `Measured: N of M test prompts gave a plausible 3D model (…, n=1 per prompt).` For a change it reads `N of M test change requests were applied correctly`. These numbers come from the plugin's own test runs, one attempt per test case, and exist only for the models that were tested.
+- `Not measured for this model — the one small model tested (…) got N of M …` means nobody has measured your model. Take it as a rough reference only: small models manage less, and a larger model may do better.
+
+If an answer cannot be turned into a model, the panel says why and adds a hint based on the test results.
+
+### Create a model
+
+Leave the target at `New model`, describe the model in the box, then click **Create** or press Cmd/Ctrl+Enter. The raw answer streams in as it arrives. When it is complete, a preview of the model appears with the message `Done — check the preview, then apply or change further.` The answer is read as a list of parts and written as shapes lines; parts that cannot be used are left out, and an answer without a usable part is reported instead.
+
+### Change a model
+
+With a target `Edit: …`, or after a first round, the button reads **Change**. Describe what should be different. The language model answers with a list of changes to named parts, and these kinds of wishes work:
+
+- **Move**, **resize**, **rotate** or **recolour** an existing part.
+- **Switch the shape** of an existing part, for example a box leg to a cylinder.
+- **Add** a part.
+- **Remove** a part.
+
+Parts are found by their name, so the names in your model matter. Under the preview, **Changes in this round** lists each change, for example `Top: at 0 0.725 0 → 0 0.925 0`. If the answer would change nothing, the panel says `The answer changes nothing.` and adds no round.
+
+### Rounds
+
+Every successful request adds a round to the **Rounds** list, with your words and either `new` or the number of changes. A request that fails adds nothing. Click a round to look at it: the preview and the list of changes switch to it. The next request builds on the round that is selected, and **Apply** applies the selected round together with the rounds it builds on.
+
+### Apply
+
+**Apply** writes the selected round into your notes. What happens depends on the target:
+
+- **A new model** goes where the setting **Apply new models as** (Settings → 3D Codeblocks → Model by prompt) says:
+  - *Code block at the cursor* inserts a ```` ```shapes ```` block at the cursor of the note you used last. The note has to be in an editing view; in Reading view the panel tells you to switch, and without an open note it tells you to open one.
+  - *File in the attachment folder* creates a `.shapes` file named `model.shapes` (numbered if the name is taken) and inserts a ```` ```3d ```` block that points at it. An existing file is never overwritten.
+  - *Ask each time* opens a small dialog with the two choices. Closing it applies nothing.
+- **A model you changed** is changed where it is. Creating a model from scratch never replaces an existing one: if that would happen, **Apply** refuses and tells you to use **New**.
+  - For a `.shapes` file the changes are applied to the current text of the file, so edits you made by hand between the request and **Apply** are kept.
+  - For a code block the block must still be exactly the text you clicked. If you edited it, or it moved, in the meantime, **Apply** refuses with `The block changed — nothing was applied.` (or `The block moved — nothing was applied.`) and writes nothing. Ask again to build on the new text.
+
+After a successful **Apply** the rounds are cleared. **Discard** and **New** throw away unapplied rounds; when there are any, they ask first. Every refusal comes with a message, and nothing is written when anything is unclear.
+
+### Time and stopping
+
+A request can take several minutes, especially when the model is loaded first or thinks for a long time; the panel says so while it waits. **Stop** is available at any moment: the request is cancelled, the panel says `Stopped.` and no round is added.
+
+### Without a language model
+
+If you click **Create** or **Change** and no language model is set up, the panel says `No language model is set up yet.`, gives the reason and offers **Open settings**. The box stays usable, so after you have set one up you can send again.
+
+## Setting up a language model
+
+Open Settings → 3D Codeblocks. In the group **Model by prompt**, the **Language model** section lists your endpoints: the address of an OpenAI-compatible server (a local one such as LM Studio, or a hosted provider), an optional API key and the model to use. The first reachable endpoint in the list is used. Keys are kept in Obsidian's secret storage, not in the plugin's data file. A collapsed **Request** section shows which model family and backend were recognised and which parameters are sent.
+
+The central setup guide explains how to run a local model and which one to pick: [LLM setup guide](https://uplink.jkaindl.de/llm-setup).
+
+If the plugin **LLM Endpoint Manager** is installed, it supplies the endpoints and models instead of the list in the settings. It is optional; this plugin works with its own list on its own.

@@ -23,6 +23,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
   itself.
 - **Edit mode:** move and scale the top-level nodes of a glTF/GLB model. Edits go to a
   separate `.edit.gltf` file — the original is never modified.
+- **Model by prompt:** describe a model in words, or ask for a change to an existing shapes model, in a side panel; check the preview and apply it as a code block or a file. [How it works](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md#modelling-with-a-prompt).
 - Theme-aware default material for STL, which carries none of its own.
 - No continuous render loop: a frame is drawn only when something changes.
 
@@ -31,6 +32,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 ## Requirements
 
 - Obsidian **1.11.4** or newer.
+- Optional, for *Model by prompt*: an OpenAI-compatible language model endpoint (see the [setup guide](https://uplink.jkaindl.de/llm-setup)). Nothing else needs one.
 - WebGL support in the renderer — standard on desktop. Mobile works, but large models
   are slow and the browser's limit on simultaneous 3D views is reached sooner.
 - **No Draco compression.** Meshopt-compressed files work; Draco-compressed ones cannot be

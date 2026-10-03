@@ -56,9 +56,13 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
+import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
+import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
   Cdp,
   clearNotices,
@@ -264,6 +268,15 @@ let skippedCount = 0;
 function skipped(name: string, reason: string): void {
   skippedCount++;
   console.log(`  – ${name} — übersprungen: ${reason}`);
+}
+
+/** Dritter Zustand neben gruen/rot/uebersprungen: ein Punkt, der NICHT laufen konnte, weil eine
+ *  Voraussetzung fehlt (CORE-TEST-19: „nichts gemessen“ ist ein eigener Zustand und nie gruen).
+ *  `skipped` heisst „bewusst nicht gemessen“, dies heisst „haette gemessen werden sollen und konnte nicht“. */
+let nothingMeasuredCount = 0;
+function nothingMeasured(name: string, reason: string): void {
+  nothingMeasuredCount++;
+  console.log(`  ○ ${name} — nichts gemessen: ${reason}`);
 }
 
 /** Im Renderer: warten, bis `check()` wahr wird (Rendering ist asynchron). */
@@ -3910,12 +3923,693 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
   }
 }
 
+// --- PP1–PP9. Prompt-Panel gegen einen Ersatz-Endpunkt --------------------------
+// Eigener Abschnitt (`--section promptpanel`). **Der Ersatz-Endpunkt prüft die Verdrahtung, nicht das LLM:**
+// ein lokaler HTTP-Server (`node:http`, Port 0) antwortet mit AUFGEZEICHNETEN Modellantworten aus den
+// Fixtures (Erzeugen: Spike A, Eintrag A02; Verfeinern: Lab-Lauf 2026-10-03, Fall R01). Er sagt nichts über
+// die Qualität eines Modells — dafür gibt es die Messzeile und docs/LAB.md.
+//
+// Zustand, den dieser Abschnitt anlegt, wird VOR dem Lauf zurückgesetzt UND beim Aufräumen entfernt
+// (CORE-TEST-21: ein `finally` erreicht einen Abbruch nicht — `ppCleanup` hängt deshalb auch in `cleanupState`):
+// die Ersatz-Endpunktzeile in den Plugin-Einstellungen, das Panel-Blatt, `acceptAs`, die vier Notizen
+// (`_tdcb-gui-smoke-pp-*.md`, jede wird zu Beginn neu geschrieben) und der Server.
+const PANEL_VIEW_TYPE = "tdcb-prompt-panel";
+const SMOKE_NOTE_PP_NEW = "_tdcb-gui-smoke-pp-new.md";
+const SMOKE_NOTE_PP_EDIT = "_tdcb-gui-smoke-pp-edit.md";
+const SMOKE_NOTE_PP_STALE = "_tdcb-gui-smoke-pp-stale.md";
+const SMOKE_NOTE_PP_BLANK = "_tdcb-gui-smoke-pp-blank.md";
+const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK];
+const PP_ENDPOINT_ID = "tdcb-smoke-ep";
+const PP_MODEL = "smoke-model";
+/** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
+ *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
+const PP_CHUNK_DELAY_MS = 800;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9"] as const;
+const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
+const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
+const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
+const PP_EDIT_LABEL = "Edit in prompt panel";
+/** Selektor der Formen, die ein Lucide-Icon in seinem `<svg>` trägt — ein leeres `<svg>` (unbekannte Icon-ID) hat keine. */
+const PP_ICON_SHAPE = "svg path, svg line, svg circle, svg rect, svg polyline, svg polygon, svg ellipse";
+
+/** Punkte, die dieser Lauf gemessen oder als „nichts gemessen“ verbucht hat. Was am Ende fehlt (Abbruch
+ *  mitten im Abschnitt), wird im `finally` als „nichts gemessen“ nachgetragen, nie als gruen. */
+const ppDone = new Set<string>();
+function ppRecord(id: string, title: string, passed: boolean, detail: string): void {
+  ppDone.add(id);
+  record(`${id}. ${title}`, passed, detail);
+}
+function ppNothing(id: string, title: string, reason: string): void {
+  ppDone.add(id);
+  nothingMeasured(`${id}. ${title}`, reason);
+}
+
+interface Substitute {
+  url: string;
+  /** Wahr: nach dem ersten Stück schweigen (PP6) — die Verbindung bleibt offen, bis der Client sie schliesst. */
+  hang: boolean;
+  requests: { kind: "create" | "refine" | "models"; stream: boolean }[];
+  /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
+  clientClosed: number;
+  close(): Promise<void>;
+}
+
+let ppSubstitute: Substitute | null = null;
+let ppOriginalAcceptAs: unknown = null;
+
+/** Der Ersatz-Endpunkt. `GET …/models` kennt genau ein Modell, `POST …/chat/completions` antwortet je nach
+ *  System-Prompt mit der Erzeugen- oder der Verfeinern-Antwort, in drei `data:`-Stücken. CORS-Köpfe, weil der
+ *  Renderer (app://obsidian.md) per XHR streamt und der Browser sonst vorab fragt. */
+function startSubstitute(answers: { create: string; refine: string }): Promise<Substitute> {
+  const sub: Substitute = {
+    url: "",
+    hang: false,
+    requests: [],
+    clientClosed: 0,
+    close: async () => undefined,
+  };
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Private-Network": "true",
+  };
+  const timers = new Set<NodeJS.Timeout>();
+
+  const chat = (res: ServerResponse, raw: string): void => {
+    let body: { messages?: { role?: string; content?: unknown }[]; stream?: boolean } = {};
+    try {
+      body = JSON.parse(raw) as typeof body;
+    } catch {
+      body = {};
+    }
+    const system = body.messages?.find((m) => m.role === "system")?.content;
+    const kind = typeof system === "string" && system.includes("Du änderst") ? "refine" : "create";
+    const stream = body.stream !== false;
+    sub.requests.push({ kind, stream });
+    const answer = kind === "refine" ? answers.refine : answers.create;
+    const third = Math.ceil(answer.length / 3);
+    const pieces = [answer.slice(0, third), answer.slice(third, 2 * third), answer.slice(2 * third)].filter((p) => p !== "");
+    res.on("close", () => {
+      if (!res.writableEnded) sub.clientClosed++;
+    });
+    if (!stream) {
+      res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ model: PP_MODEL, choices: [{ index: 0, message: { role: "assistant", content: answer }, finish_reason: "stop" }] }));
+      return;
+    }
+    res.writeHead(200, { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+    const send = (delta: Record<string, unknown>, finish: string | null): void => {
+      res.write(`data: ${JSON.stringify({ model: PP_MODEL, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    };
+    send({ role: "assistant", content: pieces[0] ?? "" }, null);
+    if (sub.hang) return;
+    pieces.slice(1).forEach((piece, i) => {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (!res.destroyed) send({ content: piece }, null);
+      }, (i + 1) * PP_CHUNK_DELAY_MS);
+      timers.add(timer);
+    });
+    const endTimer = setTimeout(() => {
+      timers.delete(endTimer);
+      if (res.destroyed) return;
+      send({}, "stop");
+      res.write("data: [DONE]\n\n");
+      res.end();
+    }, pieces.length * PP_CHUNK_DELAY_MS);
+    timers.add(endTimer);
+  };
+
+  const server: Server = createServer((req, res) => {
+    const path = (req.url ?? "").split("?")[0] ?? "";
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors);
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && path.endsWith("/models")) {
+      sub.requests.push({ kind: "models", stream: false });
+      res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: PP_MODEL }] }));
+      return;
+    }
+    if (req.method === "POST" && path.endsWith("/chat/completions")) {
+      const parts: Buffer[] = [];
+      req.on("data", (c: Buffer) => parts.push(c));
+      req.on("end", () => chat(res, Buffer.concat(parts).toString("utf8")));
+      return;
+    }
+    res.writeHead(404, cors);
+    res.end();
+  });
+
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      sub.url = `http://127.0.0.1:${port}/v1`;
+      sub.close = () =>
+        new Promise<void>((done) => {
+          for (const t of timers) clearTimeout(t);
+          timers.clear();
+          server.closeAllConnections();
+          server.close(() => done());
+        });
+      resolve(sub);
+    });
+  });
+}
+
+/** Die aufgezeichneten Antworten aus den Fixtures — oder der Grund, warum es sie nicht gibt. */
+function loadPpAnswers(): { ok: true; create: string; refine: string; sources: string } | { ok: false; reason: string } {
+  const read = (file: string, id: string): string | null => {
+    if (!existsSync(file)) return null;
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (line.trim() === "") continue;
+      const rec = JSON.parse(line) as { id?: string; answer?: string };
+      if (rec.id?.startsWith(id) && typeof rec.answer === "string") return rec.answer;
+    }
+    return null;
+  };
+  const createFile = "tests/fixtures/shapes-spike/a-q27-dsl.jsonl";
+  const refineFile = "tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03-71051822.jsonl";
+  const create = read(createFile, "A02");
+  const refine = read(refineFile, "R01");
+  if (create === null) return { ok: false, reason: `kein Eintrag A02 mit Feld answer in ${createFile}` };
+  if (refine === null) return { ok: false, reason: `kein Eintrag R01 mit Feld answer in ${refineFile}` };
+  // Gegen das AKTUELLE Protokoll prüfen: eine Aufzeichnung, die der heutige Leser ablehnt, würde als
+  // „Plugin-Fehler“ erscheinen, obwohl der Ersatz falsch antwortet.
+  const parts = readPartsAnswer(create);
+  if (!parts.ok || parts.parts.length === 0) return { ok: false, reason: `A02 ist für das aktuelle Protokoll nicht lesbar (${parts.ok ? "keine Teile" : parts.reason})` };
+  const changes = readChangesAnswer(refine);
+  if (!changes.ok || changes.changes.length === 0 || changes.dropped.length > 0) {
+    return { ok: false, reason: `R01 ist für das aktuelle Protokoll nicht lesbar (${changes.ok ? `${changes.dropped.length} verworfen` : changes.reason})` };
+  }
+  return { ok: true, create, refine, sources: `Erzeugen ${createFile} A02.answer · Verfeinern ${refineFile} R01.answer` };
+}
+
+/** Renderer-Schnipsel: Ersatz-Zeile und Ersatz-Modell aus den Einstellungen nehmen, Panel-Blätter schliessen.
+ *  Speichert nur, wenn etwas zu entfernen war. Liefert, was entfernt wurde. */
+const PP_RESET = `
+  const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+  const removed = [];
+  if (plugin) {
+    const isSmoke = (e) => e && (e.id === ${JSON.stringify(PP_ENDPOINT_ID)} || (e.model === ${JSON.stringify(PP_MODEL)} && /^http:\\/\\/127\\.0\\.0\\.1:\\d+\\/v1$/.test(e.url ?? "")));
+    const before = Array.isArray(plugin.settings.endpoints) ? plugin.settings.endpoints : [];
+    const kept = before.filter((e) => !isSmoke(e));
+    let changed = kept.length !== before.length;
+    for (const e of before) if (isSmoke(e)) removed.push(e.url);
+    if (changed) plugin.settings.endpoints = kept;
+    if (plugin.settings.llmModel === ${JSON.stringify(PP_MODEL)}) { plugin.settings.llmModel = ""; changed = true; }
+    if (changed) { await plugin.saveSettings?.(); plugin.llm?.invalidate?.(); }
+  }
+  app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)});
+  await new Promise((r) => setTimeout(r, 200));
+  return removed;
+`;
+
+/** Wie `cleanupState` und das `finally` des Abschnitts es brauchen: schliesst Server, räumt die Einstellungen,
+ *  stellt `acceptAs` zurück. Wirft nie. */
+async function ppCleanup(cdp: Cdp): Promise<void> {
+  const sub = ppSubstitute;
+  ppSubstitute = null;
+  if (sub) await sub.close().catch(() => undefined);
+  await cdp.evaluate(PP_RESET).catch(() => undefined);
+  if (ppOriginalAcceptAs !== null) {
+    const value = ppOriginalAcceptAs;
+    ppOriginalAcceptAs = null;
+    await setSetting(cdp, "acceptAs", value).catch(() => undefined);
+  }
+}
+
+interface PpState {
+  phase: string;
+  status: string;
+  tail: string;
+  target: string;
+  send: string;
+  rounds: number;
+  diff: string[];
+  previewVisible: boolean;
+  colors: number;
+  stopVisible: boolean;
+  applyDisabled: boolean;
+}
+
+/** Renderer-Schnipsel: der sichtbare Stand des Panels (oder `null`, wenn keines offen ist). */
+const PP_READ = `
+  ${SAMPLER}
+  const root = document.querySelector(".tdcb-prompt");
+  if (!root) return null;
+  const statusRow = root.querySelector(".tdcb-prompt-status");
+  const phase = ["checking", "ok", "error", "warning"].find((p) => statusRow?.classList.contains("is-" + p)) ?? "idle";
+  const canvas = root.querySelector(".tdcb-prompt-preview canvas");
+  const wrap = root.querySelector(".tdcb-prompt-preview");
+  return {
+    phase,
+    status: statusRow?.querySelector(".tdcb-prompt-status-label")?.textContent ?? "",
+    tail: root.querySelector(".okit-stream-tail")?.textContent ?? "",
+    target: root.querySelector(".tdcb-prompt-target")?.textContent ?? "",
+    send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
+    rounds: root.querySelectorAll(".okit-vlist-row").length,
+    diff: [...root.querySelectorAll(".tdcb-prompt-diff li")].map((l) => l.textContent ?? ""),
+    previewVisible: !!wrap && !wrap.classList.contains("is-hidden"),
+    colors: canvas ? (sample(canvas)?.colors ?? 0) : 0,
+    stopVisible: !!root.querySelector(".tdcb-prompt-stop:not(.is-hidden)"),
+    applyDisabled: root.querySelector(".tdcb-prompt-apply")?.disabled ?? true,
+  };
+`;
+
+const ppRead = (cdp: Cdp): Promise<PpState | null> => cdp.evaluate<PpState | null>(PP_READ);
+const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Das Panel frisch öffnen (Blatt zu, Befehl `open-prompt-panel`, Ziel „new“) und warten, bis es steht. */
+async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
+  await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
+  await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
+  const up = await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "", 10_000, 250);
+  return up.reached;
+}
+
+/** Text ins Eingabefeld des Panels schreiben (das Panel liest `value` beim Senden). */
+async function ppType(cdp: Cdp, text: string): Promise<boolean> {
+  return cdp.evaluate<boolean>(`
+    const ta = document.querySelector(".tdcb-prompt .tdcb-prompt-input");
+    if (!ta) return false;
+    ta.value = ${JSON.stringify(text)};
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  `);
+}
+
+/** Echter Mausklick auf einen Knopf des Panels. */
+const ppClick = (cdp: Cdp, selector: string): Promise<boolean> =>
+  clickReal(cdp, `document.querySelector(${JSON.stringify(`.tdcb-prompt ${selector}`)})`);
+
+/** Den Knopf mit dieser Beschriftung in der Aktionsleiste des ersten Blocks im Lesemodus klicken. */
+const ppClickActionButton = (cdp: Cdp, label: string): Promise<boolean> =>
+  clickReal(
+    cdp,
+    `([...document.querySelectorAll(".markdown-preview-view .tdcb-block .tdcb-toolbar-button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(label)}))`,
+  );
+
+/** Notiztext von der Platte lesen. */
+const ppReadNote = (cdp: Cdp, path: string): Promise<string> =>
+  cdp.evaluate<string>(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+    return file ? await app.vault.read(file) : "";
+  `);
+
+/** Eine Notiz mit Tisch-Block im Lesemodus öffnen und warten, bis der Block samt Aktionsleiste steht.
+ *  `null` = der Block rendert nicht (Umgebung, nicht Befund). */
+async function ppOpenBlockNote(
+  cdp: Cdp,
+  path: string,
+  body: string,
+): Promise<{ buttons: { label: string; svg: boolean; children: number }[] } | null> {
+  await openNote(cdp, path, body, "preview");
+  const probe = `
+    const bar = document.querySelector(".markdown-preview-view .tdcb-block .tdcb-toolbar");
+    if (!bar) return document.querySelector(".markdown-preview-view .tdcb-block") ? { buttons: [] } : null;
+    return {
+      buttons: [...bar.querySelectorAll("button")].map((b) => ({
+        label: b.getAttribute("aria-label") ?? "",
+        svg: !!b.querySelector("svg"),
+        children: b.querySelectorAll(${JSON.stringify(PP_ICON_SHAPE)}).length,
+      })),
+    };
+  `;
+  const up = await pollState<{ buttons: { label: string; svg: boolean; children: number }[] }>(cdp, probe, (s) => s.buttons.length > 0, 20_000, 400);
+  return up.state;
+}
+
+/** Notiz mit einem Tisch-Block (Platte auf 0,725 m). `after` hängt Zeilen an den Rumpf (Leerzeile für PP9). */
+const ppBlockNote = (title: string, bodySuffix = ""): string =>
+  [`# ${title} (automatisch erzeugt, wird nach dem Lauf gelöscht)`, "", `${fence}shapes`, `${SHAPES_TABLE}${bodySuffix}`, fence, ""].join("\n");
+
+/** Zeilen ohne Leerzeilen — Vergleichsform für „bis auf die Platte unverändert“. */
+const nonBlank = (text: string): string[] => text.split("\n").filter((l) => l.trim() !== "");
+
+/** Panel für eine Notiz mit Block öffnen, Wunsch senden und auf das Ende der Runde warten (PP5, PP8, PP9). */
+async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ ready: boolean; reason: string; round: PpState | null; buttons: { label: string; svg: boolean; children: number }[] }> {
+  const note = await ppOpenBlockNote(cdp, path, body);
+  if (note === null) return { ready: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
+  await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
+  if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar`, round: null, buttons: note.buttons };
+  const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
+  if (!up.reached) return { ready: false, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons: note.buttons };
+  await ppType(cdp, PP_REFINE_PROMPT);
+  await ppClick(cdp, ".tdcb-prompt-send");
+  const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
+  return { ready: done.reached && done.state?.phase === "ok", reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons: note.buttons };
+}
+
+async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
+  ppDone.clear();
+  const T = {
+    PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
+    PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
+    PP3: "Erzeugen streamt in Stücken und zeigt eine Vorschau",
+    PP4: "Übernehmen als Codeblock schreibt einen shapes-Block in die Notiz",
+    PP5: "Ändern über die Aktionsleiste: Ziel, Diff, nur die Platte-Zeile ändert sich",
+    PP6: "Abbruch: „Stopped.“, keine Runde, der Server sah den Abbruch",
+    PP7: "Aktionsleiste: jeder Knopf trägt ein Icon, „Edit in prompt panel“ öffnet das Panel",
+    PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
+    PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
+  } as const;
+  const nothingFor = (reason: string): void => {
+    for (const id of PP_IDS) if (!ppDone.has(id)) ppNothing(id, T[id], reason);
+  };
+
+  // Zustand aus Vorläufen VOR dem Abschnitt zurücksetzen: eine Ersatz-Zeile eines abgebrochenen Laufs zeigt auf
+  // einen toten Port und würde sich als Befund tarnen.
+  const removed = await cdp.evaluate<string[]>(PP_RESET);
+  for (const url of removed) console.log(`  Aufgeräumt (Rest eines früheren Laufs): Ersatz-Endpunkt ${url}`);
+  try {
+    // Voraussetzungen: ohne sie ist nichts gemessen, nicht rot.
+    const manager = await cdp.evaluate<boolean>(`return app.plugins.plugins["llm-endpoint-manager"] !== undefined;`);
+    if (manager) {
+      nothingFor("das Plugin llm-endpoint-manager ist im Vault aktiv — dann gilt dessen Endpunktliste, nicht die lokale; der Ersatz-Endpunkt wäre wirkungslos");
+      return;
+    }
+    const answers = loadPpAnswers();
+    if (!answers.ok) {
+      nothingFor(answers.reason);
+      return;
+    }
+    console.log(`  Ersatz-Antworten: ${answers.sources}`);
+    ppOriginalAcceptAs = await cdp.evaluate<unknown>(`return app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings.acceptAs ?? null;`);
+    const sub = await startSubstitute(answers);
+    ppSubstitute = sub;
+    console.log(`  Ersatz-Endpunkt: ${sub.url} (Modell ${PP_MODEL})`);
+    await cdp.evaluate(`
+      const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+      plugin.settings.endpoints = [{ id: ${JSON.stringify(PP_ENDPOINT_ID)}, url: ${JSON.stringify(sub.url)}, model: ${JSON.stringify(PP_MODEL)} }];
+      plugin.settings.llmModel = "";
+      plugin.settings.acceptAs = "block";
+      await plugin.saveSettings();
+      plugin.llm.invalidate();
+      return true;
+    `);
+
+    // --- PP1. Settings --------------------------------------------------------
+    // Erster GUI-Beleg für `renderSettings`. Der Anfrage-Titel stammt aus dem vendorten Kit-Modul, nicht aus dem Gedächtnis.
+    const requestTitle = LLM_CONNECTION_STRINGS_EN.request.title;
+    const settings = await cdp.evaluate<{ rows: number; endpointRow: boolean; endpointValues: string[]; titles: string[]; group: boolean }>(`
+      app.setting.open();
+      app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
+      const read = () => {
+        const container = app.setting.activeTab?.containerEl;
+        const inputs = [...(container?.querySelectorAll(".okit-ep-row input") ?? [])].map((i) => i.value);
+        return {
+          rows: container?.querySelectorAll(".setting-item").length ?? 0,
+          endpointRow: inputs.some((v) => v.includes(${JSON.stringify(sub.url)})),
+          endpointValues: inputs,
+          titles: [...(container?.querySelectorAll(".okit-collapsible-title") ?? [])].map((t) => t.textContent ?? ""),
+          group: [...(container?.querySelectorAll(".setting-item-heading, .setting-item-name") ?? [])].some((h) => (h.textContent ?? "").includes("Model by prompt")),
+        };
+      };
+      const deadline = Date.now() + 12000;
+      let state = read();
+      while (Date.now() < deadline && !(state.endpointRow && state.titles.length > 0)) {
+        await new Promise((r) => setTimeout(r, 300));
+        state = read();
+      }
+      app.setting.close();
+      await new Promise((r) => setTimeout(r, 300));
+      return state;
+    `);
+    if (settings.rows === 0) {
+      ppNothing("PP1", T.PP1, "der Settings-Tab lieferte keine Zeilen (Einstellungen-Fenster nicht lesbar)");
+    } else {
+      ppRecord(
+        "PP1",
+        T.PP1,
+        settings.endpointRow && settings.titles.includes(requestTitle),
+        `Zeile mit Ersatz-URL: ${settings.endpointRow ? "ja" : `nein (Felder: ${settings.endpointValues.join(" | ") || "keine"})`} · Abschnitt „${requestTitle}“: ${settings.titles.includes(requestTitle) ? "ja" : `nein (Titel: ${settings.titles.join(" | ") || "keine"})`} · Gruppe „Model by prompt“: ${settings.group ? "ja" : "nein"} · ${settings.rows} Zeilen`,
+      );
+    }
+
+    // --- PP2. Panel öffnet ----------------------------------------------------
+    const opened = await ppOpenFresh(cdp);
+    const two = await cdp.evaluate<{ tabs: string[]; quality: string; qualityWarning: boolean; placeholder: string; send: string } | null>(`
+      const root = document.querySelector(".tdcb-prompt");
+      if (!root) return null;
+      const q = root.querySelector(".tdcb-prompt-quality");
+      return {
+        tabs: [...root.querySelectorAll(".okit-hub-tab-label")].map((t) => t.textContent ?? ""),
+        quality: q?.textContent ?? "",
+        qualityWarning: !!q && q.classList.contains("is-warning"),
+        placeholder: root.querySelector(".tdcb-prompt-input")?.getAttribute("placeholder") ?? "",
+        send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
+      };
+    `);
+    if (!opened || two === null) {
+      ppRecord("PP2", T.PP2, false, "kein Panel nach dem Befehl open-prompt-panel");
+    } else {
+      ppRecord(
+        "PP2",
+        T.PP2,
+        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create",
+        `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“`,
+      );
+    }
+
+    // --- PP3. Erzeugen --------------------------------------------------------
+    if (!opened) {
+      ppNothing("PP3", T.PP3, "PP2 öffnete das Panel nicht");
+    } else {
+      await ppType(cdp, PP_CREATE_PROMPT);
+      const armed = await cdp.evaluate<boolean>(`
+        const tail = document.querySelector(".tdcb-prompt .okit-stream-tail");
+        if (!tail) return false;
+        window.__ppTail = [];
+        window.__ppObs?.disconnect();
+        window.__ppObs = new MutationObserver(() => {
+          const n = (tail.textContent ?? "").length;
+          const list = window.__ppTail;
+          if (n > 0 && list[list.length - 1] !== n) list.push(n);
+        });
+        window.__ppObs.observe(tail, { childList: true, characterData: true, subtree: true });
+        return true;
+      `);
+      const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+      const run = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
+      // Vorschau-Canvas braucht einen Moment nach dem Status.
+      const shown = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.colors >= 3, 15_000, 400);
+      const lens = (await cdp.evaluate<number[] | null>(`window.__ppObs?.disconnect(); return window.__ppTail ?? null;`)) ?? [];
+      const finalLen = lens.length > 0 ? Math.max(...lens) : 0;
+      const intermediate = lens.filter((n) => n < finalLen).length;
+      const final = shown.state ?? run.state;
+      const createSeen = sub.requests.some((r) => r.kind === "create" && r.stream);
+      ppRecord(
+        "PP3",
+        T.PP3,
+        armed && clicked && run.reached && intermediate >= 2 && shown.reached && createSeen,
+        `Tail-Stände ${lens.join("→") || "keine"} (${intermediate} Zwischenstände, erwartet ≥ 2) · Status ${final?.phase ?? "?"}: „${final?.status ?? ""}“ · Vorschau ${final?.previewVisible ? "sichtbar" : "nicht sichtbar"}, ${final?.colors ?? 0} Farbtöne (erwartet ≥ 3) · Ersatz sah Erzeugen als Stream: ${createSeen}`,
+      );
+    }
+
+    // --- PP4. Übernehmen als Codeblock ----------------------------------------
+    // Quellmodus und Cursor am Ende: nur dort fügt das Panel einen Block ein. Die Runde aus PP3 steht im Panel.
+    const roundsBefore = (await ppRead(cdp))?.rounds ?? 0;
+    if (roundsBefore === 0) {
+      ppNothing("PP4", T.PP4, "das Panel trägt keine Runde (PP3 lieferte keine)");
+    } else {
+      await setSetting(cdp, "acceptAs", "block");
+      await openNote(cdp, SMOKE_NOTE_PP_NEW, "# PP4 (automatisch erzeugt, wird nach dem Lauf gelöscht)\n\nEine Zeile vor dem Block.\n", "source");
+      await cdp.evaluate(`
+        const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+        const editor = view?.editor;
+        if (!editor) return false;
+        const last = editor.lastLine();
+        editor.setCursor({ line: last, ch: editor.getLine(last).length });
+        return true;
+      `);
+      const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
+      const written = await pollState<{ text: string }>(
+        cdp,
+        `
+          const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_NEW)});
+          const text = file ? await app.vault.read(file) : "";
+          return { text };
+        `,
+        (s) => s.text.includes(`${fence}shapes`),
+        12_000,
+        500,
+      );
+      const after = await ppRead(cdp);
+      const text = written.state?.text ?? "";
+      const block = /```shapes\n([\s\S]*?)\n```/.exec(text)?.[1] ?? "";
+      ppRecord(
+        "PP4",
+        T.PP4,
+        clicked && written.reached && /^box Platte /m.test(block) && after !== null && after.rounds === 0,
+        `Block in der Notiz: ${written.reached ? "ja" : "nein"} (${block.split("\n").length} Zeilen, Platte ${/^box Platte /m.test(block) ? "ja" : "nein"}) · Runden danach ${after?.rounds ?? "?"} (erwartet 0) · Status ${after?.phase ?? "?"}: „${after?.status ?? ""}“`,
+      );
+    }
+    await setSetting(cdp, "acceptAs", ppOriginalAcceptAs ?? "block");
+
+    // --- PP5 + PP7. Ändern über die Aktionsleiste -----------------------------
+    const editBody = ppBlockNote("PP5");
+    const edit = await ppRefineRound(cdp, SMOKE_NOTE_PP_EDIT, editBody);
+    // PP7 zuerst: Icons und Öffnen des Panels sind eigene Punkte, auch wenn der Wunsch danach scheitert.
+    if (edit.buttons.length === 0) {
+      ppNothing("PP7", T.PP7, edit.reason);
+    } else {
+      const panelLeaves = await cdp.evaluate<number>(`return app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}).length;`);
+      const icons = edit.buttons.map((b) => `${b.label || "(ohne Beschriftung)"}: ${b.svg ? `svg, ${b.children} Formen` : "KEIN svg"}`);
+      ppRecord(
+        "PP7",
+        T.PP7,
+        edit.buttons.every((b) => b.svg && b.children > 0) && edit.buttons.some((b) => b.label === PP_EDIT_LABEL) && panelLeaves === 1,
+        `${icons.join(" · ")} · Blätter vom Typ ${PANEL_VIEW_TYPE} nach dem Klick: ${panelLeaves} (erwartet 1)`,
+      );
+    }
+    if (edit.round === null) {
+      ppNothing("PP5", T.PP5, edit.reason);
+    } else {
+      const s = edit.round;
+      const targetOk = /^Edit: Tisch/.test(s.target);
+      const diffOk = s.diff.some((l) => /^Platte: at/.test(l));
+      let applied = false;
+      let detail = "";
+      if (edit.ready && diffOk && targetOk) {
+        await ppClick(cdp, ".tdcb-prompt-apply");
+        const changed = await pollState<{ text: string }>(
+          cdp,
+          `const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_EDIT)}); return { text: file ? await app.vault.read(file) : "" };`,
+          (n) => n.text !== editBody,
+          12_000,
+          500,
+        );
+        const before = editBody.split("\n");
+        const now = (changed.state?.text ?? editBody).split("\n");
+        const differing = before.map((l, i) => i).filter((i) => before[i] !== now[i]);
+        const platte = now.find((l) => l.startsWith("box Platte "));
+        applied = changed.reached && now.length === before.length && differing.length === 1 && platte !== undefined && platte.includes(" 0.925 ");
+        detail = `geänderte Zeilen ${differing.length} (erwartet 1, Länge ${before.length}→${now.length}) · Platte-Zeile „${platte ?? "fehlt"}“`;
+      } else {
+        detail = `Apply nicht gefahren (${edit.ready ? "" : edit.reason}${targetOk ? "" : " · Ziel falsch"}${diffOk ? "" : " · Diff ohne „Platte: at“"})`;
+      }
+      ppRecord("PP5", T.PP5, applied && targetOk && diffOk, `Ziel „${s.target}“ · Diff ${JSON.stringify(s.diff)} · ${detail}`);
+    }
+
+    // --- PP6. Abbruch ---------------------------------------------------------
+    // Ersatz-Endpunkt schweigt nach dem ersten Stück; nach 1 s „Stop“.
+    if (!(await ppOpenFresh(cdp))) {
+      ppNothing("PP6", T.PP6, "das Panel öffnete nicht");
+    } else {
+      const closedBefore = sub.clientClosed;
+      sub.hang = true;
+      try {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        await ppClick(cdp, ".tdcb-prompt-send");
+        const streaming = await pollState<PpState>(cdp, PP_READ, (s) => s.tail.length > 0 && s.stopVisible, 15_000, 250);
+        await sleepMs(1000);
+        const stopClicked = streaming.reached ? await ppClick(cdp, ".tdcb-prompt-stop") : false;
+        const stopped = await pollState<PpState>(cdp, PP_READ, (s) => s.status === "Stopped." && !s.stopVisible, 10_000, 250);
+        const seenAbort = await (async () => {
+          const deadline = Date.now() + 8000;
+          while (Date.now() < deadline) {
+            if (sub.clientClosed > closedBefore) return true;
+            await sleepMs(250);
+          }
+          return false;
+        })();
+        const s = stopped.state;
+        ppRecord(
+          "PP6",
+          T.PP6,
+          streaming.reached && stopClicked && stopped.reached && s?.rounds === 0 && seenAbort,
+          `Lauf sichtbar (Tail + Stop): ${streaming.reached} · Stop geklickt: ${stopClicked} · Status „${s?.status ?? "?"}“ (${s?.phase ?? "?"}) · Runden ${s?.rounds ?? "?"} (erwartet 0) · Server sah die geschlossene Verbindung: ${seenAbort}`,
+        );
+      } finally {
+        sub.hang = false;
+      }
+    }
+
+    // --- PP8. Handänderung zwischen Anfrage und Übernehmen ---------------------
+    const staleBody = ppBlockNote("PP8");
+    const stale = await ppRefineRound(cdp, SMOKE_NOTE_PP_STALE, staleBody);
+    if (!stale.ready) {
+      ppNothing("PP8", T.PP8, stale.reason);
+    } else {
+      const edited = staleBody.replace("box Bein-2 size 0.05 0.7 0.05 at 0.55 0.35 -0.3", "box Bein-2 size 0.05 0.7 0.05 at 0.55 0.35 -0.3 color #112233");
+      await cdp.evaluate(`
+        const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_STALE)});
+        await app.vault.modify(file, ${JSON.stringify(edited)});
+        await new Promise((r) => setTimeout(r, 1500));
+        return true;
+      `);
+      const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
+      const refused = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== stale.round?.status, 8000, 250);
+      const noteNow = await ppReadNote(cdp, SMOKE_NOTE_PP_STALE);
+      ppRecord(
+        "PP8",
+        T.PP8,
+        edited !== staleBody && clicked && refused.state?.status === PP_STALE_MESSAGE && refused.state.phase === "error" && noteNow === edited,
+        `Meldung „${refused.state?.status ?? "keine"}“ (${refused.state?.phase ?? "?"}) · Notiz gleich der Handfassung: ${noteNow === edited}`,
+      );
+    }
+
+    // --- PP9. Leerzeile am Ende des Rumpfs --------------------------------------
+    // Messung, keine Wertung der Wahl: gemessen wird, ob das Ergebnis SICHER ist (angewendet und bis auf die
+    // Platte unverändert, oder abgelehnt und die Notiz unverändert) und welcher der beiden Ausgänge eintrat.
+    const blankBody = ppBlockNote("PP9", "\n");
+    const blank = await ppRefineRound(cdp, SMOKE_NOTE_PP_BLANK, blankBody);
+    if (!blank.ready) {
+      ppNothing("PP9", T.PP9, blank.reason);
+    } else {
+      const target = await cdp.evaluate<{ len: number; endsWithNewline: boolean; tail: string } | null>(`
+        const view = app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)})[0]?.view;
+        const body = view?.state?.().target?.body;
+        return typeof body === "string" ? { len: body.length, endsWithNewline: body.endsWith("\\n"), tail: JSON.stringify(body.slice(-8)) } : null;
+      `);
+      await ppClick(cdp, ".tdcb-prompt-apply");
+      const outcome = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== blank.round?.status, 10_000, 250);
+      await sleepMs(1200);
+      const noteNow = await ppReadNote(cdp, SMOKE_NOTE_PP_BLANK);
+      const message = outcome.state?.status ?? "";
+      const ok = outcome.state?.phase === "ok";
+      const before = nonBlank(blankBody);
+      const now = nonBlank(noteNow);
+      const differing = before.map((_, i) => i).filter((i) => before[i] !== now[i]);
+      const platte = now.find((l) => l.startsWith("box Platte "));
+      const opens = (noteNow.match(/^```shapes$/gm) ?? []).length;
+      const safeApplied = ok && now.length === before.length && differing.length === 1 && platte !== undefined && platte.includes(" 0.925 ") && opens === 1;
+      const safeRefused = !ok && outcome.state !== null && noteNow === blankBody;
+      ppRecord(
+        "PP9",
+        T.PP9,
+        safeApplied || safeRefused,
+        `Ausgang: ${ok ? "angewendet" : "abgelehnt"} — Meldung „${message}“ · Rumpf-Fingerabdruck des Panels: ${target ? `${target.len} Zeichen, endet mit Zeilenumbruch: ${target.endsWithNewline}, Ende ${target.tail}` : "nicht lesbar"} · Notiz: ${noteNow === blankBody ? "unverändert" : `geändert (nicht-leere Zeilen ${before.length}→${now.length}, abweichend ${differing.length}, Leerzeile am Ende ${/\n\n```\n?$/.test(noteNow) ? "erhalten" : "weg"})`}`,
+      );
+    }
+  } finally {
+    await ppCleanup(cdp);
+    await cdp
+      .evaluate(`
+        for (const path of ${JSON.stringify(PP_NOTES)}) {
+          const file = app.vault.getAbstractFileByPath(path);
+          if (file) await app.vault.delete(file);
+        }
+        return true;
+      `)
+      .catch(() => undefined);
+    // Ein Abbruch mitten im Abschnitt: was nicht verbucht wurde, ist nicht gemessen — nie grün.
+    nothingFor("der Abschnitt endete, bevor dieser Punkt lief");
+  }
+}
+
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
   { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
   { key: "shapesfile", title: "shapes-Dateiansicht und Umwandeln (SMOKE.md 2026-10-03)", run: sectionShapesFile },
+  { key: "promptpanel", title: "Prompt-Panel gegen Ersatz-Endpunkt (SMOKE.md 2026-10-03)", run: sectionPromptPanel },
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
   { key: "cameras", title: "Kameras aus der Datei (SMOKE.md 2026-09-02)", run: sectionCameras },
   { key: "clickrace", title: "Klick-Sturm-Probe (Task 'clickReal misst am ersetzten DOM womoeglich vorbei')", run: sectionClickRace },
@@ -4023,6 +4717,9 @@ async function main(): Promise<void> {
         `)
         .catch(() => undefined);
     }
+    // Prompt-Panel-Abschnitt: Ersatz-Endpunkt aus den Einstellungen, Panel-Blatt zu, Server zu. Nach der
+    // Wiederherstellung oben, weil ein Schnappschuss aus einem abgebrochenen Vorlauf den Ersatz mitbringen kann.
+    await ppCleanup(cdp);
     if (!keep && shapesFileOwned) {
       // Nur Weissliste (siehe sectionShapesFile); Ansichten zuerst schliessen, sonst legt ihr
       // Schlusssichern eine geloeschte Datei neu an.
@@ -4257,8 +4954,13 @@ async function main(): Promise<void> {
   }
 
   const failed = results.filter((check) => !check.passed);
-  console.log(`${results.length - failed.length}/${results.length} grün`);
-  console.log(`Bilanz: ${results.length - failed.length} grün · ${failed.length} rot · ${skippedCount} übersprungen`);
+  // Nenner = ALLE Pruefpunkte des Treibers in diesem Lauf, auch uebersprungene und nicht gemessene —
+  // sonst sieht eine Luecke wie Abdeckung aus.
+  const total = results.length + skippedCount + nothingMeasuredCount;
+  console.log(`${results.length - failed.length}/${total} grün`);
+  console.log(
+    `Bilanz: ${results.length - failed.length} grün · ${failed.length} rot · ${skippedCount} übersprungen · ${nothingMeasuredCount} nichts gemessen`,
+  );
   if (failed.length > 0) {
     console.log("Rot:");
     for (const check of failed) console.log(`  - ${check.name}: ${check.detail}`);
