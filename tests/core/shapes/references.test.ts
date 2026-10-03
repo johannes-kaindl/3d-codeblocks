@@ -20,7 +20,7 @@ describe("findModelReferences", () => {
     expect(refs).toEqual([
       { notePath: "a.md", kind: "block", from: 1, to: 4, text: "```3d\nfile: tisch.shapes\ntitle: T\n```" },
       { notePath: "b.md", kind: "embed", from: 0, to: 0, text: "![[tisch.shapes]]", alone: true },
-      { notePath: "b.md", kind: "embed", from: 1, to: 1, text: "Siehe ![[tisch.shapes|200]] oben.", alone: false },
+      { notePath: "b.md", kind: "embed", from: 1, to: 1, text: "Siehe ![[tisch.shapes|200]] oben.", alone: false, aloneReason: "inline" },
     ]);
   });
 
@@ -157,5 +157,89 @@ describe("replacement texts", () => {
     const out = shapesBlock("a ``` b\n`````\n");
     expect(out.startsWith("``````shapes\n")).toBe(true);
     expect(out.endsWith("\n``````")).toBe(true);
+  });
+});
+
+describe("findModelReferences: fix round 1", () => {
+  const run = (text: string, res: (l: string, s: string) => string | null = resolve) => findModelReferences([{ path: "a.md", text }], TARGET, res);
+  const only = (text: string) => run(text)[0];
+
+  it("finds a 3d block nested in a callout, flagged nested, covering exactly its lines", () => {
+    const r = only("x\n> [!note]\n> ```3d\n> file: tisch.shapes\n> ```\ny");
+    expect(r).toEqual({ notePath: "a.md", kind: "block", from: 2, to: 4, text: "> ```3d\n> file: tisch.shapes\n> ```", nested: true });
+  });
+  it("finds 3d blocks nested in list items (indent >= 4, nested list, marker line)", () => {
+    expect(only("1. x\n    ```3d\n    file: tisch.shapes\n    ```")).toMatchObject({ kind: "block", from: 1, to: 3, nested: true });
+    expect(only("- a\n  - b\n      ```3d\n      file: tisch.shapes\n      ```")).toMatchObject({ kind: "block", from: 2, to: 4, nested: true });
+    expect(only("- ```3d\n  file: tisch.shapes\n  ```")).toMatchObject({ kind: "block", from: 0, to: 2, nested: true });
+  });
+  it("plain, tilde, uppercase 3D and quote-less blocks are not nested", () => {
+    expect(only("```3d\nfile: tisch.shapes\n```")).not.toHaveProperty("nested");
+    expect(only("~~~3d\nfile: tisch.shapes\n~~~")).toMatchObject({ kind: "block", from: 0, to: 2 });
+    expect(only("```3D\nfile: tisch.shapes\n```")).toMatchObject({ kind: "block" });
+    expect(only("   ```3d\n   file: tisch.shapes\n   ```")).not.toHaveProperty("nested");
+  });
+  it("ignores an embed shown inside a nested fence of another language", () => {
+    expect(run("> ```md\n> ![[tisch.shapes]]\n> ```")).toEqual([]);
+  });
+
+  it("accepts an escaped pipe in a table and passes the clean link text to resolve", () => {
+    const seen: string[] = [];
+    const refs = run("| a |\n|---|\n| ![[tisch.shapes\\|200]] |", (l) => (seen.push(l), TARGET));
+    expect(seen).toEqual(["tisch.shapes"]);
+    expect(refs[0]).toMatchObject({ kind: "embed", alone: false, aloneReason: "table", from: 2 });
+  });
+
+  it("counts markdown-link embeds incl. %20 and angle brackets, passing decoded text", () => {
+    const seen: string[] = [];
+    const refs = run("![alt](tisch.shapes)\n![](Mein%20Ordner/t.shapes)\n![](<my file.shapes>)", (l) => (seen.push(l), TARGET));
+    expect(seen).toEqual(["tisch.shapes", "Mein Ordner/t.shapes", "my file.shapes"]);
+    expect(refs.map((r) => r.kind)).toEqual(["embed", "embed", "embed"]);
+    expect(refs.every((r) => r.kind === "embed" && !r.alone)).toBe(true);
+  });
+
+  it("does not call a continuation line alone", () => {
+    expect(only("- item\n  ![[tisch.shapes]]")).toMatchObject({ alone: false, aloneReason: "continuation" });
+    expect(only("> quote\n![[tisch.shapes]]")).toMatchObject({ alone: false, aloneReason: "continuation" });
+    expect(only("- item\n\n  ![[tisch.shapes]]")).toMatchObject({ alone: false, aloneReason: "continuation" });
+    expect(only("- item\n![[tisch.shapes]]")).toMatchObject({ alone: false, aloneReason: "continuation" });
+  });
+  it("calls an embed alone after a paragraph break or another standalone embed", () => {
+    expect(only("- item\n\n![[tisch.shapes]]")).toMatchObject({ alone: true });
+    expect(only("> quote\n\n![[tisch.shapes]]")).toMatchObject({ alone: true });
+    expect(only("# Kopf\n![[tisch.shapes]]")).toMatchObject({ alone: true });
+    expect(only("Text\n![[tisch.shapes]]")).toMatchObject({ alone: true });
+    expect(only("```js\nx\n```\n![[tisch.shapes]]")).toMatchObject({ alone: true });
+  });
+
+  it("reports reasons for refusal", () => {
+    const reason = (t: string) => {
+      const r = only(t);
+      return r && r.kind === "embed" ? r.aloneReason : "none";
+    };
+    expect(reason("- ![[tisch.shapes]]")).toBe("list");
+    expect(reason("> ![[tisch.shapes]]")).toBe("quote");
+    expect(reason("    ![[tisch.shapes]]")).toBe("indent");
+    expect(reason("Siehe ![[tisch.shapes]] oben")).toBe("inline");
+    expect(reason("![[tisch.shapes]]")).toBeUndefined();
+  });
+
+  it("counts plain wikilinks as kind link, never inside other fences", () => {
+    const refs = run("[[tisch.shapes]]\nSiehe [[tisch.shapes|Tisch]].\n```md\n[[tisch.shapes]]\n```");
+    expect(refs).toEqual([
+      { notePath: "a.md", kind: "link", from: 0, to: 0, text: "[[tisch.shapes]]" },
+      { notePath: "a.md", kind: "link", from: 1, to: 1, text: "Siehe [[tisch.shapes|Tisch]]." },
+    ]);
+  });
+
+  it("strips a leading BOM in shapesBlock", () => {
+    expect(shapesBlock("\uFEFFbox A size 1\n")).toBe("```shapes\nbox A size 1\n```");
+  });
+
+  it("form matrix: uppercase extension and trailing space still go through resolve", () => {
+    const upper = (l: string) => (l === "TISCH.SHAPES" ? TARGET : null);
+    expect(run("![[TISCH.SHAPES]]", upper)[0]).toMatchObject({ kind: "embed", alone: true });
+    expect(only("![[tisch.shapes]]   ")).toMatchObject({ alone: true });
+    expect(only("![[Modelle/tisch.shapes|300]]")).toMatchObject({ alone: true });
   });
 });
