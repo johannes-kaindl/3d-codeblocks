@@ -94,6 +94,43 @@ file: table.shapes
 
 Edit the file and the views update. The header keys do not apply to files (see above).
 
+## Editing a .shapes file
+
+A `.shapes` file opens in its own view, not in the plain 3D viewer. At the top is a row of buttons that choose what you see: **Model**, **Text** and **Split**.
+
+- **Model** shows the rendered model, **Text** shows an editor with the file's text, and **Split** shows both side by side.
+- **Split** is only offered when the view is at least 700 px wide (the width of the pane, not of the window). In a narrower pane there are just **Model** and **Text**. A new view starts in Split when it is wide enough and in Model otherwise; if you chose Split and the pane gets narrower, the view shows Model and goes back to Split when the pane is wide again.
+- The button that is on is marked as pressed, so the state is not carried by colour alone.
+- Type in the editor and the model redraws after a short pause. The file is saved automatically; there is nothing to press.
+- A line with a problem is marked in the text: errors have a red bar, a wavy underline and a tinted background, warnings a dotted yellow bar and underline. Hover a marked line to read its message. The same first message is also written out next to the buttons, for example `1 error — Line 8: …`, so a problem does not depend on colour.
+- If the file changes from outside (for example through a sync tool) while it is open, the text updates in place and your cursor stays where it was. Undo works in the editor.
+
+The header keys `title`, `height` and `view` still do not apply to files (see above).
+
+## Moving between block and file
+
+Two commands move a model between a ```` ```shapes ```` block and a `.shapes` file. Both are a move, not a copy: afterwards the text exists exactly once. Each command only shows up in the command palette where it applies, and appears in the editor's right-click menu under the same condition.
+
+### Block into a file
+
+**Move shapes block into a .shapes file** (menu entry: *Move shapes block into a file*). Put the cursor inside a ```` ```shapes ```` block in the editing view (Source mode or Live Preview, not Reading view) and run it.
+
+- The file is **always new**. It is created in the attachment folder of the note and named after the `title` header, or after the note if there is no title, with the same character rules as the export. If that name is taken, a number is appended; an existing file is never overwritten.
+- The block in the note is replaced by a ```` ```3d ```` block whose `file:` line points at the new file. The file holds the block's text and ends with one line break.
+- If the new file is created but the note can no longer be changed (for example because it changed in the meantime), the new file is removed again and you are told so.
+- It refuses, with a message and without changing anything, when the block is indented (inside a list or a quote), has no closing fence, or is empty.
+
+### File into a block
+
+**Move .shapes file into a code block** (menu entry: *Move .shapes file into a code block*). Put the cursor in the ```` ```3d ```` block or on the `![[…]]` line that uses the file, or open the `.shapes` file itself, and run it.
+
+- It only happens when **exactly one** place uses the file, and only when that place can become a block: either an embed `![[file.shapes]]` that stands alone on its own line at the top level, or a top-level ```` ```3d ```` block with a `file:` line. That place is replaced by a ```` ```shapes ```` block with the file's text, and the file goes to the trash (what that means follows your Obsidian *Deleted files* setting).
+- It refuses, with a message that names the note and line, when the file is not used anywhere, is used in several places, is only linked with `[[…]]` (no `!`), or when the embed or block sits in a list, a quote or callout, a table, is indented, is in the middle of a sentence, or continues a paragraph.
+- **Other mentions block it too.** If the file name appears anywhere else, the command refuses with *has another mention* and the note and line. That covers the name in running text, in a canvas or a base file, or a different file of the same name in another folder. Known limit: a mention by file name alone, even in prose, is enough to block the move, because deleting the file could break it. Remove or change that mention and run the command again.
+- Notes you have open are read as they are in the editor, so text you have typed but not saved counts. If the file is open in its own view, that view is saved first and closed before the file goes to the trash, so unsaved typing in it is not lost.
+- If the file changes while the command runs, the note keeps the new block, but the file is left where it is and you are told so.
+- **Normalisation:** the block gets the file's text with Windows line breaks (CRLF) turned into LF, a leading byte-order mark dropped and trailing blank lines removed. Moving the text back into a file therefore gives a file that is not byte-identical to the original.
+
 ## Export to glTF
 
 The command **Export shapes model as glTF** turns a model into an ordinary `.gltf` file that other tools can open.

@@ -3271,11 +3271,562 @@ async function sectionClickRace(cdp: Cdp, model: string): Promise<void> {
   `);
 }
 
+// --- SH6–SH12. .shapes-Dateiansicht und Umwandeln -----------------------------
+// Eigener Abschnitt (`--section shapesfile`). Alles, was er anlegt, traegt das Praefix `_tdcb-`
+// im NAMEN — ausser dass `Block -> Datei` die neue Datei in den Attachment-Ordner legt, also
+// nicht an einen vorhersagbaren Pfad. Deshalb raeumt der Abschnitt vorher nach Namenspraefix
+// (ueberall im Vault) auf und beweist, dass nichts uebrig ist (CORE-TEST-21); erst dann
+// gehoert jede Datei mit diesem Praefix diesem Lauf (`shapesFileOwned`, wie `shapesExportOwned`).
+// `cleanupState` loescht nach demselben Praefix — auch bei SIGINT/SIGTERM.
+const SHAPES_VIEW_TYPE = "tdcb-shapes-file";
+const SHAPES_FILE_PREFIXES = [
+  "_tdcb-smoke-view",
+  "_tdcb-smoke-moved",
+  "_tdcb-smoke-live",
+  "_tdcb-gui-smoke-move",
+  "_tdcb-gui-smoke-live",
+];
+const SMOKE_VIEW_SHAPES = "_tdcb-smoke-view.shapes";
+const SMOKE_NOTE_MOVE = "_tdcb-gui-smoke-move.md";
+const SMOKE_NOTE_MOVE2 = "_tdcb-gui-smoke-move2.md";
+const SMOKE_NOTE_MENU = "_tdcb-gui-smoke-move-menu.md";
+const SMOKE_LIVE_SHAPES = "_tdcb-smoke-live.shapes";
+const SMOKE_NOTE_LIVE = "_tdcb-gui-smoke-live.md";
+/** `title:` bestimmt den Dateinamen beim Umzug Block -> Datei (exportBaseName). */
+const MOVED_TITLE = "_tdcb-smoke-moved";
+const CMD_BLOCK_TO_FILE = `${PLUGIN_ID}:convert-shapes-block-to-file`;
+const CMD_FILE_TO_BLOCK = `${PLUGIN_ID}:convert-shapes-file-to-block`;
+/** Wahr erst, wenn der Abschnitt per Vorpruefung BEWIESEN hat, dass vor ihm keine Datei mit
+    diesen Namenspraefixen im Vault lag. Wird VOR dem ersten Anlegen gesetzt. */
+let shapesFileOwned = false;
+
+/** Renderer-Schnipsel: Blatt einer .shapes-Datei und der CodeMirror-View ihres Texteditors. */
+const SHAPES_LEAF = `
+  const leafFor = (path) => app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).find((l) => l.view.file?.path === path);
+  const cmOf = (leaf) => {
+    const c = leaf?.view.containerEl.querySelector(".tdcb-shapes-text .cm-content");
+    return c ? (c.cmView?.view ?? c.cmTile?.view ?? null) : null;
+  };
+  const typeAtEnd = (leaf, text) => {
+    const v = cmOf(leaf);
+    if (v) { v.dispatch({ changes: { from: v.state.doc.length, insert: text } }); return "dispatch"; }
+    const c = leaf?.view.containerEl.querySelector(".tdcb-shapes-text .cm-content");
+    if (!c) return "kein Editor";
+    c.focus();
+    const sel = getSelection();
+    sel.selectAllChildren(c);
+    sel.collapseToEnd();
+    document.execCommand("insertText", false, text);
+    return "execCommand";
+  };
+`;
+
+/** Anteil gruener Pixel im Modell-Canvas (0..1), oder null ohne lesbaren Canvas. Gruen heisst
+    hier: Kanal g klar vorn — Beleuchtung dunkelt #00ff00 ab, deshalb keine feste Untergrenze 200. */
+const GREEN_SHARE = `
+  const greenShare = (leaf) => {
+    const canvas = leaf?.view.containerEl.querySelector(".tdcb-shapes-model canvas");
+    if (!canvas) return null;
+    const off = document.createElement("canvas");
+    off.width = 256;
+    off.height = 192;
+    const ctx = off.getContext("2d");
+    try { ctx.drawImage(canvas, 0, 0, 256, 192); } catch (e) { return null; }
+    const d = ctx.getImageData(0, 0, 256, 192).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 1] > 120 && d[i] < 70 && d[i + 2] < 70 && d[i + 1] > d[i] * 2) n++;
+    return n / (256 * 192);
+  };
+`;
+
+/** Wiederholt eine Messung auf der Node-Seite, bis `done` wahr wird — und liefert in jedem Fall
+    den letzten Stand, damit ein rotes Ergebnis sagen kann, was gemessen wurde. */
+async function pollState<T>(
+  cdp: Cdp,
+  expression: string,
+  done: (state: T) => boolean,
+  timeoutMs: number,
+  stepMs = 500,
+): Promise<{ state: T | null; reached: boolean }> {
+  const deadline = Date.now() + timeoutMs;
+  let state: T | null = null;
+  for (;;) {
+    state = await cdp.evaluate<T | null>(expression);
+    if (state && done(state)) return { state, reached: true };
+    if (Date.now() >= deadline) return { state, reached: false };
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+}
+
+/** Datei in einem Blatt der Hauptflaeche oeffnen (nicht in einem Split), danach aufraeumen. */
+async function openFileInLeaf(cdp: Cdp, path: string): Promise<void> {
+  await cdp.evaluate(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+    const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit) ?? app.workspace.getLeaf(true);
+    await leaf.openFile(file, { active: true });
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    await new Promise((r) => setTimeout(r, 400));
+    return true;
+  `);
+  await closeExtraLeaves(cdp);
+}
+
+/** Cursor im aktiven Quellmodus-Editor auf eine Zeile setzen. */
+async function setCursorLine(cdp: Cdp, line: number): Promise<{ mode: string; line: number } | null> {
+  return cdp.evaluate<{ mode: string; line: number } | null>(`
+    const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+    const view = leaf?.view;
+    if (!view?.editor) return null;
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    view.editor.setCursor({ line: ${line}, ch: 0 });
+    return { mode: view.getMode(), line: view.editor.getCursor().line };
+  `);
+}
+
+async function sectionShapesFile(cdp: Cdp): Promise<void> {
+  // Zustand aus Vorlaeufen VOR dem Abschnitt zuruecksetzen: Ansichten schliessen (sonst schreibt ihr
+  // Schlusssichern eine geloeschte Datei neu), dann alles mit unseren Namenspraefixen loeschen und
+  // nachmessen. Bleibt etwas stehen, ist der Besitz nicht bewiesen — dann wird nichts gemessen.
+  const remaining = await cdp.evaluate<string[]>(`
+    const mine = (f) => ${JSON.stringify(SHAPES_FILE_PREFIXES)}.some((p) => f.name.startsWith(p));
+    app.workspace.detachLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)});
+    await new Promise((r) => setTimeout(r, 300));
+    for (const f of app.vault.getFiles().filter(mine)) await app.vault.delete(f);
+    await new Promise((r) => setTimeout(r, 300));
+    return app.vault.getFiles().filter(mine).map((f) => f.path);
+  `);
+  if (remaining.length > 0) {
+    for (const name of ["SH6", "SH7", "SH8", "SH9", "SH10", "SH11", "SH12"]) {
+      skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
+    }
+    return;
+  }
+  shapesFileOwned = true;
+
+  // Pillen haengen an der Breite der Ansicht (>= 700 px: drei). Seitenleisten einklappen, damit
+  // die Hauptflaeche breit genug ist, und am Ende zurueckstellen.
+  const sidebars = await cdp.evaluate<{ left: boolean; right: boolean }>(`
+    const left = !app.workspace.leftSplit.collapsed;
+    const right = !app.workspace.rightSplit.collapsed;
+    app.workspace.leftSplit.collapse();
+    app.workspace.rightSplit.collapse();
+    await new Promise((r) => setTimeout(r, 400));
+    return { left, right };
+  `);
+  try {
+    await closeExtraLeaves(cdp);
+
+    // --- SH6. Ansicht mit drei Pillen ---------------------------------------
+    await cdp.evaluate(`
+      const path = ${JSON.stringify(SMOKE_VIEW_SHAPES)};
+      if (!app.vault.getAbstractFileByPath(path)) await app.vault.create(path, ${JSON.stringify(SHAPES_TABLE)});
+      return true;
+    `);
+    createdNotes.add(SMOKE_VIEW_SHAPES);
+    await openFileInLeaf(cdp, SMOKE_VIEW_SHAPES);
+    const pillsExpr = `
+      ${SAMPLER}
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      if (!root) return null;
+      const canvas = root.querySelector(".tdcb-shapes-model canvas");
+      return {
+        width: Math.round(root.getBoundingClientRect().width),
+        pills: [...root.querySelectorAll(".tdcb-shapes-pill")].map((p) => ({
+          label: p.textContent.trim(),
+          visible: p.getClientRects().length > 0,
+          pressed: p.getAttribute("aria-pressed"),
+        })),
+        colors: canvas ? (sample(canvas)?.colors ?? 0) : 0,
+        editors: root.querySelectorAll(".tdcb-shapes-text .cm-content").length,
+      };
+    `;
+    interface PillState {
+      width: number;
+      pills: { label: string; visible: boolean; pressed: string | null }[];
+      colors: number;
+      editors: number;
+    }
+    const six = await pollState<PillState>(cdp, pillsExpr, (s) => s.colors >= 3 && s.width > 0, 20_000);
+    if (six.state === null) {
+      record("SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen", false, "keine .tdcb-shapes-view im Blatt");
+    } else {
+      const s = six.state;
+      const wide = s.width >= 700;
+      const expectedLabels = wide ? ["Model", "Text", "Split"] : ["Model", "Text"];
+      const visibleLabels = s.pills.filter((p) => p.visible).map((p) => p.label);
+      const pressed = s.pills.filter((p) => p.pressed === "true");
+      const expectedPressed = wide ? "Split" : "Model";
+      record(
+        "SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen",
+        visibleLabels.join("|") === expectedLabels.join("|") &&
+          pressed.length === 1 &&
+          pressed[0]?.visible === true &&
+          pressed[0]?.label === expectedPressed &&
+          s.colors >= 3 &&
+          s.editors === 1,
+        `Breite ${s.width} px · sichtbar: ${visibleLabels.join("/")} (erwartet ${expectedLabels.join("/")}) · aria-pressed=true: ${pressed.map((p) => p.label).join("/") || "keine"} (erwartet genau ${expectedPressed}) · ${s.colors} Farbtöne · ${s.editors} Texteditor`,
+      );
+      if (!wide) skipped("SH6b. Drei Pillen und Start in Split ab 700 px", `Ansichtsbreite nur ${s.width} px — der breite Fall wurde nicht gemessen`);
+    }
+
+    // --- SH7. Tippen rendert neu --------------------------------------------
+    const greenLine = "box Neu size 0.4 at 0 0.9 0 color #00ff00";
+    const before = await cdp.evaluate<number | null>(`
+      ${GREEN_SHARE}
+      ${SHAPES_LEAF}
+      return greenShare(leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)}));
+    `);
+    const typed = await cdp.evaluate<string>(`
+      ${SHAPES_LEAF}
+      return typeAtEnd(leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)}), ${JSON.stringify(`\n${greenLine}`)});
+    `);
+    const seven = await pollState<{ onDisk: boolean; share: number | null }>(
+      cdp,
+      `
+        ${GREEN_SHARE}
+        ${SHAPES_LEAF}
+        const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_VIEW_SHAPES)});
+        const text = file ? await app.vault.read(file) : "";
+        return { onDisk: text.includes(${JSON.stringify(greenLine)}), share: greenShare(leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})) };
+      `,
+      (s) => s.onDisk && (s.share ?? 0) > 0.003,
+      10_000,
+    );
+    const share = seven.state?.share ?? null;
+    record(
+      "SH7. Tippen schreibt die Datei und rendert das Modell neu",
+      before === 0 && seven.reached,
+      `Eingabe per ${typed} · grüner Anteil vorher ${before === null ? "nicht lesbar" : (before * 100).toFixed(2) + " %"} (erwartet 0), nachher ${share === null ? "nicht lesbar" : (share * 100).toFixed(2) + " %"} (erwartet > 0,3 %) · Zeile auf der Platte: ${seven.state?.onDisk ?? false}`,
+    );
+
+    // --- SH8. Eine kaputte Zeile ist im Text markiert -----------------------
+    await cdp.evaluate(`
+      ${SHAPES_LEAF}
+      const leaf = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)});
+      const root = leaf.view.containerEl;
+      // Im schmalen Fall ist der Text nur ueber die Pille sichtbar.
+      if (root.querySelector(".tdcb-shapes-text")?.classList.contains("is-hidden")) {
+        root.querySelector('.tdcb-shapes-pill[data-mode="text"]')?.click();
+      }
+      typeAtEnd(leaf, "\\nbox Kaputt size 1 2");
+      return true;
+    `);
+    const eight = await pollState<{ lines: { text: string; title: string }[]; summary: string; total: number }>(
+      cdp,
+      `
+        ${SHAPES_LEAF}
+        const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+        if (!root) return null;
+        return {
+          lines: [...root.querySelectorAll(".tdcb-issue-line.is-error")].map((l) => ({ text: l.textContent ?? "", title: l.getAttribute("title") ?? "" })),
+          summary: root.querySelector(".tdcb-shapes-summary")?.textContent ?? "",
+          total: root.querySelectorAll(".tdcb-shapes-text .cm-line").length,
+        };
+      `,
+      (s) => s.lines.length > 0,
+      8_000,
+    );
+    const e8 = eight.state;
+    record(
+      "SH8. Eine kaputte Zeile ist im Text markiert",
+      e8 !== null &&
+        e8.lines.length === 1 &&
+        e8.lines[0]?.title.includes("needs 1 or 3 numbers") === true &&
+        e8.lines[0]?.text.includes("box Kaputt") === true &&
+        e8.summary.startsWith("1 error") &&
+        e8.summary.includes(`Line ${e8.total}:`),
+      e8
+        ? `${e8.lines.length} Fehlerzeile(n) (erwartet genau 1) · Zeile: ${JSON.stringify(e8.lines[0]?.text ?? "")} · title: ${JSON.stringify(e8.lines[0]?.title ?? "")} · Zusammenfassung: ${JSON.stringify(e8.summary)} (letzte Zeile ${e8.total})`
+        : "keine Ansicht",
+    );
+
+    // --- SH9. Block -> Datei -------------------------------------------------
+    const movedBody = [`title: ${MOVED_TITLE}`, "box A size 1", "box B size 0.5 at 1 0 0 color #ff0000"].join("\n");
+    const noteHead = "# GUI-Smoke move (automatisch erzeugt)";
+    await closeExtraLeaves(cdp);
+    await openNote(cdp, SMOKE_NOTE_MOVE, [noteHead, "", `${fence}shapes`, movedBody, fence, ""].join("\n"), "source");
+    await closeExtraLeaves(cdp);
+    const cursor9 = await setCursorLine(cdp, 4);
+    await clearNotices(cdp);
+    const ran9 = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_BLOCK_TO_FILE)});`);
+    const nine = await pollState<{ note: string; files: { path: string; text: string }[] }>(
+      cdp,
+      `
+        const mine = app.vault.getFiles().filter((f) => f.name.startsWith(${JSON.stringify(MOVED_TITLE)}) && f.extension === "shapes");
+        const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_MOVE)}));
+        const files = [];
+        for (const f of mine) files.push({ path: f.path, text: await app.vault.read(f) });
+        return { note, files };
+      `,
+      (s) => s.files.length > 0 && !s.note.includes("```shapes"),
+      10_000,
+    );
+    const n9 = nine.state;
+    const linkMatch = n9 ? /^(.*)\n\n```3d\nfile: (.+)\n```\n?$/s.exec(n9.note) : null;
+    const movedPath = n9?.files[0]?.path ?? "";
+    const linkResolves = linkMatch
+      ? await cdp.evaluate<boolean>(`
+          return app.metadataCache.getFirstLinkpathDest(${JSON.stringify(linkMatch[2])}, ${JSON.stringify(SMOKE_NOTE_MOVE)})?.path === ${JSON.stringify(movedPath)};
+        `)
+      : false;
+    const notice9 = await notices(cdp);
+    record(
+      "SH9. Block → Datei: neue .shapes-Datei mit dem Blocktext, die Notiz verweist darauf",
+      cursor9?.mode === "source" &&
+        ran9 === true &&
+        nine.reached &&
+        n9?.files.length === 1 &&
+        n9.files[0]?.text === `${movedBody}\n` &&
+        linkMatch?.[1] === noteHead &&
+        linkResolves,
+      `Cursor-Zeile ${cursor9?.line ?? "?"} im Modus ${cursor9?.mode ?? "?"} · Befehl lief: ${ran9} · Dateien: ${n9?.files.map((f) => f.path).join(", ") || "keine"} · Text gleich Blocktext+LF: ${n9?.files[0]?.text === `${movedBody}\n`} · Verweis ${linkMatch ? JSON.stringify(linkMatch[2]) : "fehlt"} löst auf die Datei auf: ${linkResolves} · Meldung: ${notice9.slice(0, 80)}`,
+    );
+
+    // --- SH10. Datei -> Block: bei zwei Verweisen abgelehnt, bei einem durchgefuehrt --
+    if (movedPath === "" || !linkMatch) {
+      skipped("SH10. Datei → Block: abgelehnt bei zwei Verweisen, durchgeführt bei einem", "SH9 hat keine Datei erzeugt — nichts zum Zurückwandeln");
+    } else {
+      const link = linkMatch[2];
+      const second = [`# Zweite Notiz`, "", `![[${link}]]`, ""].join("\n");
+      await cdp.evaluate(`
+        await app.vault.create(${JSON.stringify(SMOKE_NOTE_MOVE2)}, ${JSON.stringify(second)});
+        return true;
+      `);
+      createdNotes.add(SMOKE_NOTE_MOVE2);
+      const baseline = await cdp.evaluate<{ move: string; second: string; file: string }>(`
+        const get = (p) => app.vault.read(app.vault.getAbstractFileByPath(p));
+        return { move: await get(${JSON.stringify(SMOKE_NOTE_MOVE)}), second: await get(${JSON.stringify(SMOKE_NOTE_MOVE2)}), file: await get(${JSON.stringify(movedPath)}) };
+      `);
+      const cursorRefuse = await setCursorLine(cdp, 3);
+      await clearNotices(cdp);
+      const ranRefuse = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});`);
+      const refused = await pollState<{ notice: string }>(
+        cdp,
+        `
+          const text = [...document.querySelectorAll(".notice")].map((n) => n.textContent.trim()).join(" | ");
+          return text.includes("is used in") || text.includes("is now a code block") ? { notice: text } : null;
+        `,
+        () => true,
+        8_000,
+        250,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const afterRefuse = await cdp.evaluate<{ move: string; second: string; fileExists: boolean }>(`
+        const get = (p) => app.vault.read(app.vault.getAbstractFileByPath(p));
+        return {
+          move: await get(${JSON.stringify(SMOKE_NOTE_MOVE)}),
+          second: await get(${JSON.stringify(SMOKE_NOTE_MOVE2)}),
+          fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(movedPath)}),
+        };
+      `);
+      const refusalOk =
+        cursorRefuse?.mode === "source" &&
+        ranRefuse === true &&
+        (refused.state?.notice ?? "").includes("is used in 2 places") &&
+        afterRefuse.fileExists &&
+        afterRefuse.move === baseline.move &&
+        afterRefuse.second === baseline.second;
+
+      // Zweite Notiz weg, dann genau ein Verweis: der Umzug laeuft.
+      await cdp.evaluate(`
+        await app.vault.delete(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_MOVE2)}));
+        await new Promise((r) => setTimeout(r, 500));
+        return true;
+      `);
+      await setCursorLine(cdp, 3);
+      await clearNotices(cdp);
+      const ranDone = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});`);
+      const done10 = await pollState<{ note: string; fileExists: boolean; sameName: number }>(
+        cdp,
+        `
+          const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_MOVE)}));
+          return {
+            note,
+            fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(movedPath)}),
+            sameName: app.vault.getFiles().filter((f) => f.name === ${JSON.stringify(movedPath.split("/").pop() ?? "")}).length,
+          };
+        `,
+        (s) => s.note.includes("```shapes") && !s.fileExists,
+        10_000,
+      );
+      const notice10 = await notices(cdp);
+      const expectedNote = [noteHead, "", `${fence}shapes`, movedBody, fence, ""].join("\n");
+      record(
+        "SH10. Datei → Block: abgelehnt bei zwei Verweisen, durchgeführt bei einem",
+        refusalOk && ranDone === true && done10.reached && done10.state?.sameName === 0 && done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, ""),
+        `Ablehnung: Meldung ${JSON.stringify((refused.state?.notice ?? "keine").slice(0, 70))} · Datei blieb: ${afterRefuse.fileExists} · Notizen unverändert: ${afterRefuse.move === baseline.move && afterRefuse.second === baseline.second} · Umzug: Datei weg ${done10.state ? !done10.state.fileExists : "?"} · Dateien gleichen Namens ${done10.state?.sameName ?? "?"} · Notiz wieder mit shapes-Block und Originaltext: ${done10.state ? done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, "") : "?"} · Meldung: ${notice10.slice(0, 60)}`,
+      );
+    }
+
+    // --- SH11. Offene Ansicht mit ungespeichertem Tippen verliert nichts -----
+    const liveLine = "box Frisch size 0.2 at 0 0 1 color #00ff00";
+    await cdp.evaluate(`
+      await app.vault.create(${JSON.stringify(SMOKE_LIVE_SHAPES)}, ${JSON.stringify(SHAPES_TABLE)});
+      await app.vault.create(${JSON.stringify(SMOKE_NOTE_LIVE)}, ${JSON.stringify(["# Live", "", `${fence}3d`, `file: ${SMOKE_LIVE_SHAPES}`, fence, ""].join("\n"))});
+      return true;
+    `);
+    createdNotes.add(SMOKE_LIVE_SHAPES);
+    createdNotes.add(SMOKE_NOTE_LIVE);
+    await openFileInLeaf(cdp, SMOKE_LIVE_SHAPES);
+    const liveReady = await pollUntil<boolean>(
+      cdp,
+      `
+        ${SHAPES_LEAF}
+        const leaf = leafFor(${JSON.stringify(SMOKE_LIVE_SHAPES)});
+        return leaf && cmOf(leaf) && leaf.view.getViewData() === ${JSON.stringify(SHAPES_TABLE)} ? true : null;
+      `,
+      10_000,
+      250,
+    );
+    if (!liveReady) {
+      record("SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts", false, "Ansicht der Live-Datei kam nicht zustande");
+    } else {
+      await clearNotices(cdp);
+      // Tippen, Platte pruefen und Befehl in EINEM Renderer-Aufruf: weit innerhalb der 2 s
+      // Speicherverzoegerung. Steht die Zeile schon auf der Platte, wurde der Fall nicht erzeugt.
+      const fired = await cdp.evaluate<{ method: string; pending: boolean; ran: boolean; ms: number }>(`
+        ${SHAPES_LEAF}
+        const t0 = Date.now();
+        const leaf = leafFor(${JSON.stringify(SMOKE_LIVE_SHAPES)});
+        const method = typeAtEnd(leaf, ${JSON.stringify(`\n${liveLine}`)});
+        const disk = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}));
+        const pending = !disk.includes(${JSON.stringify(liveLine)}) && leaf.view.getViewData().includes(${JSON.stringify(liveLine)});
+        const ran = app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});
+        return { method, pending, ran, ms: Date.now() - t0 };
+      `);
+      const eleven = await pollState<{ note: string; fileExists: boolean; views: number }>(
+        cdp,
+        `
+          const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_LIVE)}));
+          return {
+            note,
+            fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}),
+            views: app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).length,
+          };
+        `,
+        (s) => s.note.includes("```shapes") && !s.fileExists,
+        10_000,
+      );
+      // Wiederauferstehung: ein veralteter Puffer koennte die Datei nach dem Papierkorb neu anlegen.
+      // Ueber 3,5 s alle 250 ms messen; EIN Auftauchen genuegt fuer Rot.
+      let reappeared = false;
+      for (let i = 0; i < 14 && eleven.reached; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const back = await cdp.evaluate<boolean>(`
+          return !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}) ||
+            app.vault.getFiles().some((f) => f.name === ${JSON.stringify(SMOKE_LIVE_SHAPES)});
+        `);
+        if (back) reappeared = true;
+      }
+      const notice11 = await notices(cdp);
+      if (!fired.pending) {
+        skipped(
+          "SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts",
+          `der Ausgangsfall (getippt, noch nicht gespeichert) entstand nicht: Eingabe per ${fired.method}, nach ${fired.ms} ms schon auf der Platte oder nicht im Ansichtspuffer`,
+        );
+      } else {
+        const block = eleven.state?.note.includes(`${fence}shapes\n${SHAPES_TABLE}\n${liveLine}\n${fence}`) ?? false;
+        record(
+          "SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts",
+          fired.ran === true && eleven.reached && block && eleven.state?.fileExists === false && eleven.state.views === 0 && !reappeared,
+          `Eingabe per ${fired.method}, Befehl ${fired.ms} ms nach dem Tippen (Zeile noch nicht auf der Platte) · Befehl lief: ${fired.ran} · Notiz trägt Block samt frischer Zeile: ${block} · Datei weg: ${eleven.state ? !eleven.state.fileExists : "?"} · offene Ansichten danach: ${eleven.state?.views ?? "?"} · Datei binnen 3,5 s wieder aufgetaucht: ${reappeared} · Meldung: ${notice11.slice(0, 70)}`,
+        );
+      }
+    }
+
+    // --- SH12. Befehle, Menüeinträge, Icons ---------------------------------
+    const menuBlock = ["title: Menue", "box A size 1"].join("\n");
+    await closeExtraLeaves(cdp);
+    await openNote(
+      cdp,
+      SMOKE_NOTE_MENU,
+      ["# Menü", "", `${fence}shapes`, ...menuBlock.split("\n"), fence, "", `![[${SMOKE_VIEW_SHAPES}]]`, ""].join("\n"),
+      "source",
+    );
+    await closeExtraLeaves(cdp);
+    // Zeile 0 = Ueberschrift, 3 = im Block, 7 = Embed-Zeile.
+    const probe = async (line: number): Promise<{ block: boolean; file: boolean; items: { title: string; icon: string }[] } | null> => {
+      const placed = await setCursorLine(cdp, line);
+      if (!placed) return null;
+      return cdp.evaluate(`
+        const check = (id) => app.commands.commands[id].checkCallback(true) === true;
+        const items = [];
+        const chain = (target) => new Proxy(target, { get: (t, k) => (k in t ? t[k] : () => chain(t)) });
+        const menu = chain({
+          addItem(cb) {
+            const item = { title: "", icon: "" };
+            cb(chain({ setTitle(x) { item.title = x; return this; }, setIcon(x) { item.icon = x; return this; }, onClick() { return this; } }));
+            items.push(item);
+            return this;
+          },
+        });
+        const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit).view;
+        app.workspace.trigger("editor-menu", menu, view.editor, view);
+        const ours = items.filter((i) => i.title.startsWith("Move "));
+        return { block: check(${JSON.stringify(CMD_BLOCK_TO_FILE)}), file: check(${JSON.stringify(CMD_FILE_TO_BLOCK)}), items: ours };
+      `);
+    };
+    const registered = await cdp.evaluate<{ block: string; file: string }>(`
+      return {
+        block: app.commands.commands[${JSON.stringify(CMD_BLOCK_TO_FILE)}]?.name ?? "",
+        file: app.commands.commands[${JSON.stringify(CMD_FILE_TO_BLOCK)}]?.name ?? "",
+      };
+    `);
+    const onHeading = await probe(0);
+    const inBlock = await probe(3);
+    const onEmbed = await probe(7);
+    const titleBlock = "Move shapes block into a file";
+    const titleFile = "Move .shapes file into a code block";
+    const only = (s: typeof inBlock, title: string, icon: string): boolean =>
+      s !== null && s.items.length === 1 && s.items[0]?.title === title && s.items[0]?.icon === icon;
+    const none = (s: typeof inBlock): boolean => s !== null && s.items.length === 0;
+    const gatingOk =
+      onHeading !== null && inBlock !== null && onEmbed !== null &&
+      !onHeading.block && !onHeading.file &&
+      inBlock.block && !inBlock.file &&
+      !onEmbed.block && onEmbed.file;
+    const menuOk = none(onHeading) && only(inBlock, titleBlock, "file-output") && only(onEmbed, titleFile, "file-input");
+    const namesOk =
+      registered.block.endsWith("Move shapes block into a .shapes file") && registered.file.endsWith("Move .shapes file into a code block");
+
+    // Icons: dieselbe Obsidian-API, die das Menue nutzt. Negativprobe mit erfundenem Namen — liefert
+    // auch der ein <svg>, misst die Probe nichts.
+    const icons = await cdp.evaluate<{ available: boolean; out?: boolean; inn?: boolean; bogus?: boolean; error?: string }>(`
+      try {
+        const ob = require("obsidian");
+        if (typeof ob.setIcon !== "function") return { available: false, error: "obsidian.setIcon fehlt" };
+        const has = (name) => { const el = document.createElement("div"); ob.setIcon(el, name); return !!el.querySelector("svg"); };
+        return { available: true, out: has("file-output"), inn: has("file-input"), bogus: has("tdcb-no-such-icon") };
+      } catch (e) {
+        return { available: false, error: String(e) };
+      }
+    `);
+    record(
+      "SH12. Befehle sind registriert, nur am richtigen Ort verfügbar, Menüeinträge tragen Icons",
+      namesOk && gatingOk && menuOk && (!icons.available || (icons.out === true && icons.inn === true && icons.bogus === false)),
+      `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file} · Menüeinträge ${onHeading?.items.length ?? "?"}|${JSON.stringify(inBlock?.items ?? [])}|${JSON.stringify(onEmbed?.items ?? [])} · Icons: ${icons.available ? `file-output ${icons.out}, file-input ${icons.inn}, erfundener Name ${icons.bogus} (erwartet true/true/false)` : "nicht geprüft"}`,
+    );
+    if (!icons.available) {
+      skipped("SH12b. Icons file-output/file-input existieren", `require("obsidian") im Renderer nicht verfügbar (${icons.error ?? "?"}) — nur der Menü-Teil ist gemessen`);
+    }
+  } finally {
+    await cdp
+      .evaluate(`
+        if (${sidebars.left}) app.workspace.leftSplit.expand();
+        if (${sidebars.right}) app.workspace.rightSplit.expand();
+        return true;
+      `)
+      .catch(() => undefined);
+  }
+}
+
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
   { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
+  { key: "shapesfile", title: "shapes-Dateiansicht und Umwandeln (SMOKE.md 2026-10-03)", run: sectionShapesFile },
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
   { key: "cameras", title: "Kameras aus der Datei (SMOKE.md 2026-09-02)", run: sectionCameras },
   { key: "clickrace", title: "Klick-Sturm-Probe (Task 'clickReal misst am ersetzten DOM womoeglich vorbei')", run: sectionClickRace },
@@ -3378,6 +3929,20 @@ async function main(): Promise<void> {
           if (plugin) {
             Object.assign(plugin.settings, JSON.parse(${JSON.stringify(previousSettings)}));
             await plugin.saveSettings?.();
+          }
+          return true;
+        `)
+        .catch(() => undefined);
+    }
+    if (!keep && shapesFileOwned) {
+      // Ansichten zuerst schliessen: ihr Schlusssichern wuerde eine geloeschte Datei neu anlegen.
+      await cdp
+        .evaluate(`
+          app.workspace.detachLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)});
+          await new Promise((r) => setTimeout(r, 300));
+          const prefixes = ${JSON.stringify(SHAPES_FILE_PREFIXES)};
+          for (const f of app.vault.getFiles().filter((f) => prefixes.some((p) => f.name.startsWith(p)))) {
+            await app.vault.delete(f);
           }
           return true;
         `)

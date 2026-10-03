@@ -81,7 +81,7 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 ```
 ````
 
-**5. The `shapes` code block** — a model described as one part per line (`box`, `cylinder`, `sphere`, `cone`), no JSON and no file. A broken line only drops its own part and is reported with its line number. The same text in a `.shapes` file works like any model file.
+**5. The `shapes` code block** — a model described as one part per line (`box`, `cylinder`, `sphere`, `cone`), no JSON and no file. A broken line only drops its own part and is reported with its line number. The same text in a `.shapes` file works like any model file and opens in its own view with **Model | Text | Split**: edit the text, the model redraws, and broken lines are marked. Two commands move a model between a block and a file.
 
 ````markdown
 ```shapes

@@ -567,6 +567,22 @@ Die Textsprache `shapes` (Teile aus Quader, Zylinder, Kugel, Kegel) wird als ```
 
 **Gegenprobe (CORE-TEST-01):** derselbe Treiber gegen den Plugin-Stand von `main` ohne shapes (Build davor, `59a5734`) meldet 71 grün und genau SH1–SH5 rot — die Punkte können also fehlschlagen und messen das Feature, nicht ihren eigenen Aufbau.
 
+### shapes-Dateiansicht und Umwandeln (Plan 2)
+
+> [!info] Automatisiert — `npm run smoke:gui -- --section shapesfile` (Punkte SH6–SH12, eigener Abschnitt)
+
+Der Abschnitt räumt vor sich selbst alles ab, was einen seiner Namenspräfixe (`_tdcb-smoke-view`, `_tdcb-smoke-moved`, `_tdcb-smoke-live`, `_tdcb-gui-smoke-move`, `_tdcb-gui-smoke-live`) trägt, im ganzen Vault (der Umzug Block → Datei legt seine Datei in den Attachment-Ordner), und misst nur, wenn danach nichts mehr da ist. Dieselbe Löschung läuft im Aufräumen, auch bei Abbruch. Er klappt die Seitenleisten ein, damit die Ansicht breit genug ist, und stellt sie danach zurück.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| SH6 | Die `.shapes`-Datei öffnet in der eigenen Ansicht: bei Breite ab 700 px genau drei sichtbare Pillen (Model, Text, Split), sonst zwei; genau eine Pille mit `aria-pressed="true"` (Split bei breiter, Model bei schmaler Ansicht); Canvas mit mindestens 3 Farbtönen; genau ein Texteditor. Ist die Ansicht schmaler als 700 px, wird der breite Fall als übersprungen gemeldet (SH6b) |
+| SH7 | Eine per Editor angehängte grüne Zeile steht nach dem Speichern auf der Platte, und das Canvas zeigt grüne Pixel (vorher genau 0, nachher über 0,3 %) |
+| SH8 | Eine angehängte Zeile `box Kaputt size 1 2` ergibt genau eine `.tdcb-issue-line.is-error` mit „needs 1 or 3 numbers" im `title`, und die Zusammenfassung neben den Pillen nennt „1 error" und die richtige Zeilennummer |
+| SH9 | Befehl „Move shapes block into a .shapes file" mit Cursor im Block: genau eine neue `.shapes`-Datei mit dem Blocktext plus Zeilenumbruch, die Notiz trägt einen ```3d-Block, dessen `file:`-Wert auf diese Datei auflöst |
+| SH10 | Bei zwei Verweisen lehnt „Move .shapes file into a code block" ab („is used in 2 places"): Datei bleibt, beide Notizen unverändert. Nach dem Löschen der zweiten Notiz läuft der Umzug: die Notiz trägt wieder den ```shapes-Block mit dem Originaltext, die Datei ist weg |
+| SH11 | Datei → Block bei offener Ansicht mit Tippen, das noch nicht gespeichert ist (der Befehl läuft im selben Aufruf, weit innerhalb der 2 s Speicherverzögerung; steht die Zeile schon auf der Platte, wird der Punkt als übersprungen gemeldet): die Notiz trägt den Block samt frischer Zeile, die Datei ist weg, keine offene Ansicht bleibt, und binnen 3,5 s taucht keine Datei gleichen Namens wieder auf |
+| SH12 | Beide Befehle sind registriert; je Cursor-Ort (Überschrift, im Block, auf einer Embed-Zeile) stimmt, ob sie verfügbar sind, und der Menüeintrag erscheint nur am richtigen Ort mit den Icons `file-output` bzw. `file-input`; die Icons existieren (`setIcon` liefert ein `<svg>`, ein erfundener Name nicht). Ist `require("obsidian")` im Renderer nicht erreichbar, wird der Icon-Teil als übersprungen gemeldet (SH12b) |
+
 ## Befunde
 
 _Hier notieren, was auffällt._
