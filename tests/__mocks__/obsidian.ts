@@ -393,6 +393,8 @@ export function makeFakeApp(): any {
       on: vi.fn().mockReturnValue({}),
       offref: vi.fn(),
       getLeavesOfType: vi.fn().mockReturnValue([]),
+      onLayoutReady: vi.fn((fn: () => void) => { fn(); }),
+      getActiveViewOfType: vi.fn().mockReturnValue(null),
     },
     metadataCache: {
       getFirstLinkpathDest: vi.fn().mockReturnValue(null),

@@ -186,9 +186,9 @@ describe("GltfBlock in shapes mode", () => {
       const { deps } = makeDeps();
       let info: { lineStart: number; lineEnd: number } | null = { lineStart: 2, lineEnd: 5 };
       const block = new GltfBlock(makeFakeEl(), SRC, { ...deps, sourcePath: "n.md", sectionInfo: () => info }, "shapes");
-      expect(block.controller.shapesTarget?.()).toEqual({ kind: "shapes-block", path: "n.md", lineStart: 2, lineEnd: 5, label: "Tisch" });
+      expect(block.controller.shapesTarget?.()).toEqual({ kind: "shapes-block", path: "n.md", lineStart: 2, lineEnd: 5, label: "Tisch", body: SRC });
       info = { lineStart: 7, lineEnd: 10 };
-      expect(block.controller.shapesTarget?.()).toEqual({ kind: "shapes-block", path: "n.md", lineStart: 7, lineEnd: 10, label: "Tisch" });
+      expect(block.controller.shapesTarget?.()).toEqual({ kind: "shapes-block", path: "n.md", lineStart: 7, lineEnd: 10, label: "Tisch", body: SRC });
     });
 
     it("labels an untitled shapes block 'shapes code block'", () => {
@@ -226,7 +226,7 @@ describe("GltfBlock in shapes mode", () => {
       expect(move.dataset.icon).toBe("file-output");
       info = { lineStart: 9, lineEnd: 12 };
       edit.click();
-      expect(openInPanel).toHaveBeenCalledWith({ kind: "shapes-block", path: "n.md", lineStart: 9, lineEnd: 12, label: "Tisch" });
+      expect(openInPanel).toHaveBeenCalledWith({ kind: "shapes-block", path: "n.md", lineStart: 9, lineEnd: 12, label: "Tisch", body: SRC });
       move.click();
       expect(moveToFile).toHaveBeenCalledTimes(1);
     });

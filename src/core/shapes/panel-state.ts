@@ -9,7 +9,7 @@ import { activeRound, EMPTY_ROUNDS, type Rounds } from "../../vendor/kit/rounds"
 
 export type PanelTarget =
   | { kind: "new" }
-  | { kind: "shapes-block"; path: string; lineStart: number; lineEnd: number; label: string }
+  | { kind: "shapes-block"; path: string; lineStart: number; lineEnd: number; label: string; body: string }
   | { kind: "shapes-file"; path: string; label: string }
   | { kind: "other"; label: string };
 
@@ -24,7 +24,8 @@ export interface PanelState {
 
 export const INITIAL_PANEL: PanelState = { target: { kind: "new" }, rounds: EMPTY_ROUNDS };
 
-/** Strukturell gleich? Block: Pfad + Zeilen (die Beschriftung zählt nicht). Ein Block, dessen Zeilen
+/** (`body` = Quelltext des Blocks beim Klick: der Fingerabdruck, gegen den der Schreiber prueft; er zaehlt nicht fuer die Gleichheit.)
+ *  Strukturell gleich? Block: Pfad + Zeilen (die Beschriftung zählt nicht). Ein Block, dessen Zeilen
  *  sich verschoben haben, ist bei offenen Runden ein ANDERES Ziel: das Panel bekommt bei jedem Klick ein
  *  frisches Ziel, und der Schreiber (Task 7) findet den Zaun über die Zeilennummer wieder und verweigert,
  *  wenn der Block gewandert ist. */

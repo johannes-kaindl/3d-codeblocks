@@ -68,7 +68,7 @@ export class GltfBlock extends MarkdownRenderChild {
   private target(): PanelTarget | null {
     const info = this.deps.sectionInfo?.();
     if (!info || this.deps.sourcePath === undefined) return null;
-    return { kind: "shapes-block", path: this.deps.sourcePath, lineStart: info.lineStart, lineEnd: info.lineEnd, label: this.label() };
+    return { kind: "shapes-block", path: this.deps.sourcePath, lineStart: info.lineStart, lineEnd: info.lineEnd, label: this.label(), body: this.source };
   }
 
   onload(): void {

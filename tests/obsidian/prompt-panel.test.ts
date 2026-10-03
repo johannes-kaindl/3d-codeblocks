@@ -7,7 +7,7 @@ const MODEL = "tiny/model";
 const TABLE = "box Platte size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b";
 const TIMING = { startedAt: 0, firstTokenAt: 0, endedAt: 0 };
 
-const BLOCK: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 3, lineEnd: 6, label: "Table" };
+const BLOCK: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 3, lineEnd: 6, label: "Table", body: "" };
 const OTHER: PanelTarget = { kind: "other", label: "Elsewhere" };
 
 type Handlers = { onToken?: (t: string) => void; onReasoning?: (t: string) => void; signal?: AbortSignal };
@@ -167,7 +167,7 @@ describe("PromptPanelView", () => {
   });
 
   it("applies via deps.accept and clears the rounds", async () => {
-    const accept = vi.fn(async () => ({ ok: true, message: "n.md" }));
+    const accept = vi.fn(async () => ({ ok: true, message: "Applied to n.md." }));
     const { view } = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'), { accept });
     await view.onOpen();
     await send(view, "a box");
@@ -177,6 +177,31 @@ describe("PromptPanelView", () => {
     expect(accept).toHaveBeenCalledTimes(1);
     expect(view.state().rounds.rounds).toHaveLength(0);
     expect(statusText(view)).toBe("Applied to n.md.");
+  });
+
+  it("shows the real acceptPanel messages unchanged in the status line (no doubled prefix)", async () => {
+    const { acceptPanel } = await import("../../src/obsidian/panel-accept");
+    const inserted: string[] = [];
+    const view0 = { file: { path: "n.md" }, getMode: () => "source", editor: { replaceSelection: (t: string) => { inserted.push(t); } } };
+    const env = {
+      app: {} as never,
+      ports: { editorFor: () => null, vault: { read: async () => "", process: async () => {} } },
+      settings: () => DEFAULT_SETTINGS,
+      lastEditor: () => view0 as never,
+    };
+    const { view } = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'), { accept: (s: never) => acceptPanel(env, s) });
+    await view.onOpen();
+    await send(view, "a box");
+    one(view, "tdcb-prompt-apply").click();
+    await view.settled();
+    expect(inserted).toHaveLength(1);
+    expect(statusText(view)).toBe("Applied to the open note as a code block at the cursor.");
+    // Fehlerfall: die Meldung steht genauso unveraendert da.
+    view0.getMode = () => "preview";
+    await send(view, "another box");
+    one(view, "tdcb-prompt-apply").click();
+    await view.settled();
+    expect(statusText(view)).toBe("The open note is in reading view — switch to editing view to insert a code block.");
   });
 
   // Eine Anfrage, die haengt, bis der Test sie freigibt.
@@ -204,8 +229,8 @@ describe("PromptPanelView", () => {
   });
 
   it("keeps target A while a refine request runs and B is offered", async () => {
-    const A: PanelTarget = { kind: "shapes-block", path: "a.md", lineStart: 0, lineEnd: 2, label: "A" };
-    const B: PanelTarget = { kind: "shapes-block", path: "b.md", lineStart: 0, lineEnd: 2, label: "B" };
+    const A: PanelTarget = { kind: "shapes-block", path: "a.md", lineStart: 0, lineEnd: 2, label: "A", body: "" };
+    const B: PanelTarget = { kind: "shapes-block", path: "b.md", lineStart: 0, lineEnd: 2, label: "B", body: "" };
     const h = held('{"changes":[{"op":"change","name":"Platte","position":[0,0.925,0]}]}');
     const { view } = makeView(h.complete, { readTargetText: vi.fn(async () => TABLE) });
     await view.onOpen();

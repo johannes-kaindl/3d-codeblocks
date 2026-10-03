@@ -434,7 +434,7 @@ export class PromptPanelView extends ItemView {
         this.panel = { ...this.panel, rounds: clearRounds() };
         this.kept = false;
         this.offered = null;
-        this.setStatus("ok", PANEL_TEXTS.applied(r.message));
+        this.setStatus("ok", r.message);
         this.renderAll();
       } else {
         this.setStatus("error", r.message);

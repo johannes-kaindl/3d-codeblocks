@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MarkdownView, TFile } from "obsidian";
+import { acceptText } from "../../src/core/shapes/panel-state";
 import { acceptPanel, AcceptAsModal, readTargetText, type AcceptEnv } from "../../src/obsidian/panel-accept";
 import type { PanelState, PanelTarget, ShapesRound } from "../../src/core/shapes/panel-state";
 import { pushRound, type Rounds } from "../../src/vendor/kit/rounds";
@@ -7,6 +8,11 @@ import { EMPTY_ROUNDS } from "../../src/vendor/kit/rounds";
 import { DEFAULT_SETTINGS, type PluginSettings } from "../../src/core/settings-types";
 import type { RawChange } from "../../src/core/shapes/protocol";
 import { PANEL_TEXTS } from "../../src/i18n/strings";
+
+vi.mock("../../src/core/shapes/panel-state", async (orig) => {
+  const mod = await orig<typeof import("../../src/core/shapes/panel-state")>();
+  return { ...mod, acceptText: vi.fn(mod.acceptText) };
+});
 
 const TABLE = "box Platte size 1.2 0.05 0.7 at 0 0.725 0\nbox Bein-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3";
 const refine = (changes: RawChange[], text = TABLE): ShapesRound => ({
@@ -25,6 +31,8 @@ interface Opts {
   onCreateFails?: boolean;
   replaceSelectionThrows?: boolean;
   noEditorView?: boolean;
+  /** Offene ShapesFileView von Anhänge/Tisch.shapes: `data` ist ihr ungespeicherter Puffer. */
+  shapesView?: { data: string };
   previewMode?: boolean;
 }
 
@@ -33,9 +41,11 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
   const selections: string[] = [];
   const tfile = (path: string) =>
     Object.assign(new TFile(), { path, basename: path.split("/").pop()!.replace(/\.[^.]+$/, ""), extension: path.split(".").pop()!, name: path.split("/").pop()! });
+  const replaceCalls: string[] = [];
   const editor = {
     getValue: () => store["n.md"],
     replaceRange: (text: string, from: { line: number; ch: number }, to: { line: number; ch: number }) => {
+      replaceCalls.push(text);
       const lines = store["n.md"].split("\n");
       const head = [...lines.slice(0, from.line), lines[from.line].slice(0, from.ch)].join("\n");
       const tail = [lines[to.line].slice(to.ch), ...lines.slice(to.line + 1)].join("\n");
@@ -50,7 +60,17 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
   const view = Object.assign(new MarkdownView({} as never), { file: tfile("n.md"), editor });
   (view as unknown as { mode: string }).mode = opts.previewMode ? "preview" : "source";
   const processCalls: string[] = [];
+  const viewLeaf = opts.shapesView
+    ? {
+        view: {
+          file: { path: "Anhänge/Tisch.shapes" },
+          save: vi.fn(async () => { store["Anhänge/Tisch.shapes"] = opts.shapesView!.data; }),
+          getViewData: () => opts.shapesView!.data,
+        },
+      }
+    : null;
   const app = {
+    workspace: { getLeavesOfType: (type: string) => (type === "tdcb-shapes-file" && viewLeaf ? [viewLeaf] : []) },
     vault: {
       getAbstractFileByPath: (p: string) => (p in store ? tfile(p) : null),
       read: async (f: TFile) => store[f.path],
@@ -89,11 +109,11 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
     lastEditor: () => (opts.noEditorView ? null : (view as never)),
     choose: opts.choose,
   };
-  return { env, store, selections, app, processCalls };
+  return { env, store, selections, app, processCalls, replaced: () => replaceCalls.length, viewLeaf };
 }
 
 const NOTE = ["intro", "```shapes", TABLE, "```", "outro"].join("\n");
-const BLOCK: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 1, lineEnd: 4, label: "Tisch" };
+const BLOCK: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 1, lineEnd: 4, label: "Tisch", body: TABLE };
 const FILE: PanelTarget = { kind: "shapes-file", path: "Anhänge/Tisch.shapes", label: "Tisch" };
 
 describe("readTargetText", () => {
@@ -122,7 +142,7 @@ describe("readTargetText", () => {
     const stale = NOTE;
     store["n.md"] = NOTE.replace("1.2", "9.9");
     expect(stale).not.toBe(store["n.md"]);
-    expect(await readTargetText(env, BLOCK)).toContain("9.9");
+    expect(await readTargetText(env, { ...BLOCK, body: TABLE.replace("1.2", "9.9") })).toContain("9.9");
   });
   it("reads a shapes file and returns null for a missing file or another target kind", async () => {
     const { env } = setup({ "Anhänge/Tisch.shapes": TABLE + "\n" });
@@ -133,15 +153,54 @@ describe("readTargetText", () => {
 });
 
 describe("acceptPanel — target shapes-block", () => {
-  it("applies the chain to the CURRENT text and keeps a hand edit elsewhere in the body", async () => {
-    const hand = NOTE.replace("-0.55 0.35 -0.3", "-0.5 0.35 -0.3"); // Handänderung an Bein-1
-    const { env, store } = setup({ "n.md": hand });
+  it("applies to a block whose text still matches the clicked block", async () => {
+    const { env, store } = setup({ "n.md": NOTE });
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
+    expect(r).toEqual({ ok: true, message: "Applied to Tisch." });
+    expect(store["n.md"]).toBe(NOTE.replace("at 0 0.725 0", "at 0 0.925 0"));
+  });
+  it("tolerates CRLF notes and a trailing newline in the clicked body", async () => {
+    const { env, store } = setup({ "n.md": NOTE.replace(/\n/g, "\r\n") });
+    const r = await acceptPanel(env, stateOf({ ...BLOCK, body: TABLE.replace(/\n/g, "\r\n") + "\r\n" }, refine(UP)));
     expect(r.ok).toBe(true);
     expect(store["n.md"]).toContain("at 0 0.925 0");
-    expect(store["n.md"]).toContain("-0.5 0.35 -0.3");
-    expect(store["n.md"].startsWith("intro\n```shapes")).toBe(true);
-    expect(store["n.md"].endsWith("```\noutro")).toBe(true);
+    expect(store["n.md"]).toContain("\r\n");
+  });
+  it("refuses when the block body was hand-edited since the click, and writes nothing", async () => {
+    const hand = NOTE.replace("-0.55 0.35 -0.3", "-0.5 0.35 -0.3");
+    const { env, store } = setup({ "n.md": hand });
+    const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
+    expect(r).toEqual({ ok: false, message: "The block changed — nothing was applied." });
+    expect(store["n.md"]).toBe(hand);
+    expect(await readTargetText(env, BLOCK)).toBeNull();
+  });
+  describe("stale target after a block above was deleted (A deleted, B target now hits C)", () => {
+    const A = ["```shapes", "box A size 1 at 0 0 0", "```"];
+    const B = ["```shapes", "box B size 2 at 0 0 0", "```"];
+    const C = ["```shapes", "box C size 3 at 0 0 0", "```"];
+    const before = ["x", ...A, ...B, ...C].join("\n");
+    const afterDelete = ["x", ...B, ...C].join("\n");
+    // B stand in `before` bei Zeilen 4-6; nach dem Loeschen von A trifft 4-6 jetzt den Block C.
+    const staleB: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 4, lineEnd: 6, label: "B", body: "box B size 2 at 0 0 0" };
+    it("sanity: the stale position really hits C", () => {
+      expect(before.split("\n")[5]).toBe("box B size 2 at 0 0 0");
+      expect(afterDelete.split("\n")[4]).toBe("```shapes");
+      expect(afterDelete.split("\n")[5]).toBe("box C size 3 at 0 0 0");
+    });
+    it("refine chain: refused, C untouched", async () => {
+      const { env, store } = setup({ "n.md": afterDelete });
+      const r = await acceptPanel(env, stateOf(staleB, refine([{ op: "change", name: "C", size: [9, 9, 9] }], "box B size 2 at 0 0 0")));
+      expect(r).toEqual({ ok: false, message: "The block changed — nothing was applied." });
+      expect(store["n.md"]).toBe(afterDelete);
+      expect(await readTargetText(env, staleB)).toBeNull();
+    });
+    it("add-only chain: refused, C untouched", async () => {
+      const { env, store } = setup({ "n.md": afterDelete });
+      const add = [{ op: "add" as const, part: { op: "add", name: "D", shape: "box", size: [1, 1, 1] } }];
+      const r = await acceptPanel(env, stateOf(staleB, refine(add, "box B size 2 at 0 0 0")));
+      expect(r.ok).toBe(false);
+      expect(store["n.md"]).toBe(afterDelete);
+    });
   });
   it("also works through the open editor", async () => {
     const { env, store } = setup({ "n.md": NOTE }, { editorOpen: true });
@@ -152,7 +211,7 @@ describe("acceptPanel — target shapes-block", () => {
     const moved = ["new line", ...NOTE.split("\n")].join("\n");
     const { env, store } = setup({ "n.md": moved });
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
-    expect(r).toEqual({ ok: false, message: expect.stringContaining("the block moved — nothing was applied") });
+    expect(r).toEqual({ ok: false, message: "The block moved — nothing was applied." });
     expect(store["n.md"]).toBe(moved);
   });
   it("reports a changed note (BlockChangedError) and writes nothing", async () => {
@@ -165,14 +224,14 @@ describe("acceptPanel — target shapes-block", () => {
       return text;
     };
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
-    expect(r).toEqual({ ok: false, message: expect.stringContaining("the note changed — nothing was applied") });
+    expect(r).toEqual({ ok: false, message: "The note changed — nothing was applied." });
     expect(store["n.md"]).toBe(NOTE.replace("1.2", "7.7"));
   });
   it("refuses a create root on an existing block", async () => {
     const { env, store } = setup({ "n.md": NOTE });
     const r = await acceptPanel(env, stateOf(BLOCK, create("box Neu size 1 1 1 at 0 0 0")));
     expect(r.ok).toBe(false);
-    expect(r.message).toContain("a new model can't replace an existing one — use New");
+    expect(r.message).toContain("A new model can't replace an existing one — use New");
     expect(store["n.md"]).toBe(NOTE);
   });
   it("refuses an unusable chain without writing", async () => {
@@ -186,6 +245,53 @@ describe("acceptPanel — target shapes-block", () => {
     const r = await acceptPanel(env, stateOf(BLOCK, refine([{ op: "change", name: "Platte", at: [0, 0.725, 0] }])));
     expect(r.ok).toBe(true);
     expect(store["n.md"]).toBe(NOTE);
+  });
+});
+
+describe("acceptPanel — nothing changes", () => {
+  it("a chain that changes nothing writes nothing (block, open editor and vault path)", async () => {
+    const noop = refine([{ op: "change", name: "Platte", at: [0, 0.725, 0] }]);
+    const viaVault = setup({ "n.md": NOTE });
+    expect((await acceptPanel(viaVault.env, stateOf(BLOCK, noop))).ok).toBe(true);
+    expect(viaVault.processCalls).toEqual([]);
+    expect(viaVault.store["n.md"]).toBe(NOTE);
+    const viaEditor = setup({ "n.md": NOTE }, { editorOpen: true });
+    expect((await acceptPanel(viaEditor.env, stateOf(BLOCK, noop))).ok).toBe(true);
+    expect(viaEditor.replaced()).toBe(0);
+    const file = setup({ "Anhänge/Tisch.shapes": TABLE + "\n" });
+    const before = file.store["Anhänge/Tisch.shapes"];
+    expect((await acceptPanel(file.env, stateOf(FILE, noop))).ok).toBe(true);
+    expect(file.store["Anhänge/Tisch.shapes"]).toBe(before);
+  });
+});
+
+describe("acceptPanel — fence closing guard", () => {
+  // Kein Aenderungsweg erzeugt heute eine Zaunzeile im Rumpf; der Wächter ist ein Gurt fuer kuenftige Schreibwege,
+  // deshalb wird `acceptText` hier gezielt ueberschrieben.
+  const note = (marker: string) => ["intro", `${marker}shapes`, TABLE, marker, "outro"].join("\n");
+  const withText = (text: string) =>
+    vi.mocked(acceptText).mockReturnValueOnce({ ok: true, text, unchanged: false });
+  it("refuses a body line that would close the ACTUAL opening fence, writes nothing", async () => {
+    const { env, store } = setup({ "n.md": note("````") });
+    withText(`${TABLE}\n\`\`\`\`\nbox X size 1 at 0 0 0`);
+    const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("would close the code block");
+    expect(store["n.md"]).toBe(note("````"));
+  });
+  it("a shorter fence line is harmless inside a longer fence", async () => {
+    const { env, store } = setup({ "n.md": note("````") });
+    withText(`${TABLE}\n\`\`\`\nbox X size 1 at 0 0 0`);
+    expect((await acceptPanel(env, stateOf(BLOCK, refine(UP)))).ok).toBe(true);
+    expect(store["n.md"]).toContain("box X size 1");
+  });
+  it("a tilde line does not close a backtick fence, but a backtick line closes a 3-backtick fence", async () => {
+    const a = setup({ "n.md": note("```") });
+    withText(`${TABLE}\n~~~`);
+    expect((await acceptPanel(a.env, stateOf(BLOCK, refine(UP)))).ok).toBe(true);
+    const b = setup({ "n.md": note("```") });
+    withText(`${TABLE}\n\`\`\``);
+    expect((await acceptPanel(b.env, stateOf(BLOCK, refine(UP)))).ok).toBe(false);
   });
 });
 
@@ -213,6 +319,19 @@ describe("acceptPanel — target shapes-file", () => {
     expect(r.message).toContain("use New");
     expect(store["Anhänge/Tisch.shapes"]).toBe(orig);
   });
+  it("saves an open ShapesFileView first and applies the chain to its buffer text", async () => {
+    const buffer = TABLE.replace("-0.55", "-0.5") + "\n"; // ungespeicherte Handaenderung im Puffer
+    const { env, store, viewLeaf } = setup({ "Anhänge/Tisch.shapes": TABLE + "\n" }, { shapesView: { data: buffer } });
+    const r = await acceptPanel(env, stateOf(FILE, refine(UP)));
+    expect(r.ok).toBe(true);
+    expect(viewLeaf!.view.save).toHaveBeenCalledOnce();
+    expect(store["Anhänge/Tisch.shapes"]).toContain("-0.5 0.35");
+    expect(store["Anhänge/Tisch.shapes"]).toContain("at 0 0.925 0");
+  });
+  it("readTargetText of a file reads the open view buffer, not the disk", async () => {
+    const { env } = setup({ "Anhänge/Tisch.shapes": TABLE + "\n" }, { shapesView: { data: "box Neu size 1 at 0 0 0\n" } });
+    expect(await readTargetText(env, FILE)).toBe("box Neu size 1 at 0 0 0\n");
+  });
   it("reports a deleted file without throwing", async () => {
     const { env } = setup({});
     const r = await acceptPanel(env, stateOf(FILE, refine(UP)));
@@ -239,7 +358,7 @@ describe("acceptPanel — target new", () => {
   });
   it("as block with a note in reading mode: noNoteOpen", async () => {
     const { env, selections } = setup({ "n.md": "intro" }, { settings: { acceptAs: "block" }, previewMode: true });
-    expect(await acceptPanel(env, stateOf(NEW, create(MODEL)))).toEqual({ ok: false, message: PANEL_TEXTS.noNoteOpen });
+    expect(await acceptPanel(env, stateOf(NEW, create(MODEL)))).toEqual({ ok: false, message: PANEL_TEXTS.noteInReadingView });
     expect(selections).toEqual([]);
   });
   it("as file: creates the file and inserts a reference", async () => {

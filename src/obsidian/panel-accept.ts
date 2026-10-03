@@ -1,8 +1,12 @@
 // Uebernehmen im Prompt-Panel (Spec Modell per Prompt § 6.3/§ 5): schreibt Nutzernotizen und legt Dateien an,
 // deshalb gilt Datenschutz vor Komfort. Jede Unsicherheit ist eine Ablehnung MIT Meldung und ohne Schreibversuch;
-// `acceptPanel` wirft nie. Geschrieben wird nie der gespeicherte Rundentext, sondern die Aenderungskette der
-// aktiven Runde auf den AKTUELLEN Text (Handaenderungen bleiben); alles oder nichts (`acceptText`).
+// `acceptPanel` wirft nie. Meldungen sind ganze Saetze; das Panel zeigt sie unveraendert.
+// Ein BLOCK wird nur geschrieben, wenn sein Text noch der ist, den der Nutzer angeklickt hat (`target.body`):
+// Pfad und Zeilen allein koennen nach einer Aenderung darueber einen ANDEREN shapes-Block treffen. Eine .shapes-
+// DATEI hat eine Identitaet (den Pfad): dort wird die Kette auf den aktuellen Text angewendet, Handaenderungen
+// bleiben erhalten. Alles oder nichts (`acceptText`).
 import { Modal, TFile, type App, type MarkdownView } from "obsidian";
+import type { Fence } from "../core/shapes/fence";
 import { exportBaseName } from "../core/shapes/export";
 import { acceptText, chainOf, type PanelState, type PanelTarget } from "../core/shapes/panel-state";
 import { parseShapes } from "../core/shapes/parse";
@@ -11,6 +15,7 @@ import type { PluginSettings } from "../core/settings-types";
 import { PANEL_TEXTS } from "../i18n/strings";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
 import { locateShapesFence } from "./shapes-convert";
+import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
 
 export interface AcceptEnv {
   app: App;
@@ -22,7 +27,10 @@ export interface AcceptEnv {
 
 export type AcceptOutcome = { ok: boolean; message: string };
 
-const NEW_CANNOT_REPLACE = "a new model can't replace an existing one — use New";
+type BlockTarget = Extract<PanelTarget, { kind: "shapes-block" }>;
+
+const NEW_CANNOT_REPLACE = "A new model can't replace an existing one — use New. Nothing was applied.";
+const UNCHANGED = "The model already looks like this — nothing to change.";
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -31,23 +39,59 @@ async function readNoteText(ports: WritePorts, path: string): Promise<string> {
   return ports.editorFor(path)?.getValue() ?? (await ports.vault.read(path));
 }
 
-/** Aktueller Text des Ziels fuers Panel; `null` = Datei/Block nicht (mehr) auffindbar. Ein Block wird ueber
- *  dieselbe Regel gefunden wie in `convertBlockAt` (Zaun genau an lineStart, Sprache shapes, Schluss an lineEnd). */
-export async function readTargetText(env: AcceptEnv, t: PanelTarget): Promise<string | null> {
-  if (t.kind === "shapes-file") {
-    const file = env.app.vault.getAbstractFileByPath(t.path);
-    return file instanceof TFile ? await env.app.vault.read(file) : null;
-  }
-  if (t.kind !== "shapes-block") return null;
-  const file = env.app.vault.getAbstractFileByPath(t.path);
-  if (!(file instanceof TFile)) return null;
-  const text = await readNoteText(env.ports, t.path);
-  // `listFences` zerlegt an \r?\n und fuegt mit \n zusammen: der Rumpf ist LF-normalisiert.
-  return locateShapesFence(text, t.lineStart, t.lineEnd)?.body ?? null;
+/** Offene Ansichten einer .shapes-Datei (wie `convertFileToBlock`): ihr Puffer kann neuer sein als die Platte. */
+interface OpenShapesView {
+  file: TFile | null;
+  save(): Promise<void>;
+  getViewData(): string;
 }
 
-/** Eine Zeile, die den Zaun des Blocks vorzeitig schliessen wuerde (Rumpf eines BESTEHENDEN Blocks). */
-const FENCE_LINE = /^\s{0,3}(`{3,}|~{3,})\s*$/m;
+function openShapesViews(app: App, path: string): OpenShapesView[] {
+  return app.workspace
+    .getLeavesOfType(VIEW_TYPE_SHAPES)
+    .map((l) => l.view as unknown as OpenShapesView)
+    .filter((v) => v.file?.path === path);
+}
+
+/** Vergleichsform fuer den Fingerabdruck: CRLF -> LF, ein abschliessendes Zeilenende zaehlt nicht
+ *  (`source` aus dem Nachbearbeiter kann eines tragen, siehe `convertBlockAt`, Commit 7b2e418). */
+const norm = (t: string): string => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
+
+type Located = { fence: Fence; text: string } | { problem: "moved" | "changed" };
+
+/** Zaun des Blocks finden UND pruefen, dass es noch der Block ist, den der Nutzer angeklickt hat. Zeilennummern
+ *  allein tragen nicht: nach dem Loeschen eines Blocks darueber trifft eine veraltete Position einen ANDEREN. */
+async function locateBlock(env: AcceptEnv, t: BlockTarget): Promise<Located> {
+  const text = await readNoteText(env.ports, t.path);
+  const fence = locateShapesFence(text, t.lineStart, t.lineEnd);
+  if (!fence) return { problem: "moved" };
+  if (norm(fence.body) !== norm(t.body)) return { problem: "changed" };
+  return { fence, text };
+}
+
+/** Aktueller Text des Ziels fuers Panel; `null` = Datei/Block nicht (mehr) auffindbar oder veraendert. Ein Block
+ *  wird ueber dieselbe Regel gefunden wie in `convertBlockAt` (`locateShapesFence`) und gegen `t.body` geprueft. */
+export async function readTargetText(env: AcceptEnv, t: PanelTarget): Promise<string | null> {
+  if (t.kind !== "shapes-file" && t.kind !== "shapes-block") return null;
+  const file = env.app.vault.getAbstractFileByPath(t.path);
+  if (!(file instanceof TFile)) return null;
+  if (t.kind === "shapes-file") {
+    // Ungespeichertes Tippen in einer offenen Ansicht steht nur im Puffer: der ist der aktuelle Text.
+    const view = openShapesViews(env.app, t.path)[0];
+    return view ? view.getViewData() : await env.app.vault.read(file);
+  }
+  const found = await locateBlock(env, t);
+  // `listFences` zerlegt an \r?\n und fuegt mit \n zusammen: der Rumpf ist LF-normalisiert.
+  return "fence" in found ? found.fence.body : null;
+}
+
+/** Schliesst eine Zeile des neuen Rumpfs den TATSAECHLICHEN Oeffnungszaun des Blocks (gleiches Zeichen, Laenge >=)? */
+function closesOpenFence(noteText: string, fence: Fence, newBody: string): boolean {
+  const open = /^\s{0,3}(`{3,}|~{3,})/.exec((noteText.split(/\r?\n/)[fence.openLine] ?? "").replace(/^\uFEFF/, ""));
+  if (!open) return false;
+  const close = new RegExp(`^ {0,3}${open[1][0] === "`" ? "`" : "~"}{${open[1].length},}\\s*$`, "m");
+  return close.test(newBody);
+}
 
 export async function acceptPanel(env: AcceptEnv, state: PanelState): Promise<AcceptOutcome> {
   try {
@@ -62,27 +106,33 @@ async function accept(env: AcceptEnv, state: PanelState): Promise<AcceptOutcome>
   if (t.kind === "other") return { ok: false, message: PANEL_TEXTS.unsupported(t.label) };
   // Ein `create` baut aus dem Nichts: auf einem bestehenden Modell wuerde es dessen Inhalt kommentarlos ersetzen.
   if ((t.kind === "shapes-block" || t.kind === "shapes-file") && chainOf(state.rounds)[0]?.kind === "create") {
-    return { ok: false, message: `${NEW_CANNOT_REPLACE} — nothing was applied.` };
+    return { ok: false, message: NEW_CANNOT_REPLACE };
   }
   if (t.kind === "shapes-block") return acceptIntoBlock(env, state, t);
   if (t.kind === "shapes-file") return acceptIntoFile(env, state, t);
   return acceptAsNew(env, state);
 }
 
-async function acceptIntoBlock(env: AcceptEnv, state: PanelState, t: Extract<PanelTarget, { kind: "shapes-block" }>): Promise<AcceptOutcome> {
-  const { ports } = env;
-  const text = await readNoteText(ports, t.path);
-  const fence = locateShapesFence(text, t.lineStart, t.lineEnd);
-  if (!fence) return { ok: false, message: "the block moved — nothing was applied" };
+async function acceptIntoBlock(env: AcceptEnv, state: PanelState, t: BlockTarget): Promise<AcceptOutcome> {
+  const found = await locateBlock(env, t);
+  if ("problem" in found) {
+    return {
+      ok: false,
+      message: found.problem === "moved" ? "The block moved — nothing was applied." : "The block changed — nothing was applied.",
+    };
+  }
+  const { fence, text } = found;
   const result = acceptText(state.rounds, fence.body);
   if (!result.ok) return { ok: false, message: `${result.problems.join("; ")} — nothing was applied.` };
-  if (result.unchanged) return { ok: true, message: "The model already looks like this — nothing to change." };
-  if (FENCE_LINE.test(result.text)) return { ok: false, message: "The new text contains a line that would close the code block — nothing was applied." };
+  if (result.unchanged) return { ok: true, message: UNCHANGED };
+  if (closesOpenFence(text, fence, result.text)) {
+    return { ok: false, message: "The new text contains a line that would close the code block — nothing was applied." };
+  }
   try {
     // `fence.body` ist der Text, gegen den der Schreiber vor dem Schreiben prueft (Rumpf unveraendert).
-    await writeBlockBody(ports, { path: t.path, lineStart: fence.openLine, lineEnd: fence.closeLine, fence: "shapes" }, fence.body, result.text);
+    await writeBlockBody(env.ports, { path: t.path, lineStart: fence.openLine, lineEnd: fence.closeLine, fence: "shapes" }, fence.body, result.text);
   } catch (error) {
-    if (error instanceof BlockChangedError) return { ok: false, message: "the note changed — nothing was applied" };
+    if (error instanceof BlockChangedError) return { ok: false, message: "The note changed — nothing was applied." };
     throw error;
   }
   return { ok: true, message: `Applied to ${t.label}.` };
@@ -94,6 +144,9 @@ async function acceptIntoFile(env: AcceptEnv, state: PanelState, t: Extract<Pane
   let problems: string[] | null = null;
   let unchanged = false;
   try {
+    // Ungespeichertes Tippen einer offenen Ansicht zuerst auf die Platte (wie convertFileToBlock): sonst wuerde
+    // die Kette auf den veralteten Plattentext angewendet und der Puffer die Datei danach wieder ueberschreiben.
+    for (const view of openShapesViews(env.app, t.path)) await view.save();
     // Atomar: lesen, Kette anwenden, schreiben in einem Schritt; ein Wurf im Callback schreibt nichts.
     await env.app.vault.process(file, (current) => {
       const r = acceptText(state.rounds, current);
@@ -107,19 +160,22 @@ async function acceptIntoFile(env: AcceptEnv, state: PanelState, t: Extract<Pane
   } catch (error) {
     return { ok: false, message: `${problems ? (problems as string[]).join("; ") : errorText(error)} — nothing was applied.` };
   }
-  return unchanged ? { ok: true, message: "The model already looks like this — nothing to change." } : { ok: true, message: `Applied to ${t.label}.` };
+  return unchanged ? { ok: true, message: UNCHANGED } : { ok: true, message: `Applied to ${t.label}.` };
 }
 
-function sourceView(env: AcceptEnv): MarkdownView | null {
+/** Die zuletzt bediente Notiz im Quellmodus; sonst der Grund (keine Notiz / Lesemodus) als Meldung. */
+function sourceView(env: AcceptEnv): { view: MarkdownView } | { message: string } {
   const view = env.lastEditor();
-  return view?.file && view.getMode() === "source" ? view : null;
+  if (!view?.file) return { message: PANEL_TEXTS.noNoteOpen };
+  return view.getMode() === "source" ? { view } : { message: PANEL_TEXTS.noteInReadingView };
 }
 
 async function acceptAsNew(env: AcceptEnv, state: PanelState): Promise<AcceptOutcome> {
   const result = acceptText(state.rounds, null);
   if (!result.ok) return { ok: false, message: `${result.problems.join("; ")} — nothing was applied.` };
-  let where: "block" | "file" | null = env.settings().acceptAs === "ask" ? null : (env.settings().acceptAs as "block" | "file");
-  if (env.settings().acceptAs === "ask") {
+  const setting = env.settings().acceptAs;
+  let where: "block" | "file" | null = setting === "ask" ? null : setting;
+  if (setting === "ask") {
     where = (await env.choose?.()) ?? null;
     if (where === null) return { ok: false, message: "Cancelled — nothing was applied." };
   }
@@ -127,15 +183,16 @@ async function acceptAsNew(env: AcceptEnv, state: PanelState): Promise<AcceptOut
 }
 
 function insertAsBlock(env: AcceptEnv, text: string): AcceptOutcome {
-  const view = sourceView(env);
-  if (!view) return { ok: false, message: PANEL_TEXTS.noNoteOpen };
-  view.editor.replaceSelection(`\n${shapesBlock(text)}\n`);
-  return { ok: true, message: "Inserted the model as a code block at the cursor." };
+  const src = sourceView(env);
+  if ("message" in src) return { ok: false, message: src.message };
+  src.view.editor.replaceSelection(`\n${shapesBlock(text)}\n`);
+  return { ok: true, message: "Applied to the open note as a code block at the cursor." };
 }
 
 async function createAsFile(env: AcceptEnv, text: string): Promise<AcceptOutcome> {
   const { app } = env;
-  const view = sourceView(env);
+  const src = sourceView(env);
+  const view = "view" in src ? src.view : null;
   const notePath = view?.file?.path ?? "";
   const name = `${exportBaseName(parseShapes(text).header, "model")}.shapes`;
   let path = "";
@@ -151,7 +208,7 @@ async function createAsFile(env: AcceptEnv, text: string): Promise<AcceptOutcome
   } catch (error) {
     return { ok: false, message: `Could not create the file${path ? ` ${path}` : ""}: ${errorText(error)} — nothing was written.` };
   }
-  if (!view) return { ok: true, message: `Saved ${path}. No note is open, so no reference was inserted.` };
+  if (!view) return { ok: true, message: `Saved ${path}. No reference was inserted because no note is open for editing.` };
   try {
     view.editor.replaceSelection(`\n${referenceBlock(app.metadataCache.fileToLinktext(created, notePath, false))}\n`);
   } catch (error) {

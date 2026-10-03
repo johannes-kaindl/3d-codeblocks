@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import ThreeDCodeblocksPlugin, { isPanelVisible } from "../../src/main";
-import { TFile, makeFakeApp } from "../__mocks__/obsidian";
+import { MarkdownView, TFile, makeFakeApp } from "../__mocks__/obsidian";
 import { VIEW_TYPE_3D } from "../../src/obsidian/file-view";
 import { VIEW_TYPE_SHAPES } from "../../src/obsidian/shapes-file-view";
 import { VIEW_TYPE_PROMPT } from "../../src/obsidian/prompt-panel-id";
@@ -237,6 +237,35 @@ describe("LLM connection wiring", () => {
     const hide = vi.spyOn(plugin.llm, "hideSettings");
     plugin.onunload();
     expect(hide).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("lastEditor (target of Apply while the panel has focus)", () => {
+  async function loaded(active: unknown, leaves: unknown[]) {
+    const app = makeFakeApp();
+    app.workspace.getActiveViewOfType = vi.fn(() => active);
+    app.workspace.getLeavesOfType = vi.fn((t: string) => (t === "markdown" ? leaves : []));
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    await plugin.onload();
+    return { plugin, app };
+  }
+  it("is seeded at layout-ready from the already open note", async () => {
+    const view = Object.assign(new MarkdownView({} as never), { file: new TFile() });
+    const { plugin } = await loaded(view, [{ view }]);
+    expect((plugin as any).lastEditor()).toBe(view);
+  });
+  it("is null when nothing is open, or when the remembered view left the workspace", async () => {
+    const view = Object.assign(new MarkdownView({} as never), { file: new TFile() });
+    expect(((await loaded(null, [])).plugin as any).lastEditor()).toBeNull();
+    expect(((await loaded(view, [])).plugin as any).lastEditor()).toBeNull();
+  });
+  it("follows active-leaf-change to a markdown view", async () => {
+    const { plugin, app } = await loaded(null, []);
+    const view = Object.assign(new MarkdownView({} as never), { file: new TFile() });
+    (app.workspace.getLeavesOfType as any) = vi.fn(() => [{ view }]);
+    const handler = (app.workspace.on as any).mock.calls.find((c: unknown[]) => c[0] === "active-leaf-change")[1];
+    handler({ view });
+    expect((plugin as any).lastEditor()).toBe(view);
   });
 });
 

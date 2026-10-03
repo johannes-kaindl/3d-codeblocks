@@ -416,6 +416,10 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         if (leaf?.view instanceof MarkdownView) this.lastMarkdownView = leaf.view;
       }),
     );
+    // Nach dem Start gibt es noch kein active-leaf-change: die schon offene Notiz einmal vormerken.
+    this.app.workspace.onLayoutReady(() => {
+      this.lastMarkdownView ??= this.app.workspace.getActiveViewOfType(MarkdownView);
+    });
     this.registerEvent(this.app.workspace.on("layout-change", () => this.syncAllToolbars()));
 
     // `layout-change` allein reicht NICHT: es feuert, wenn Blaetter entstehen oder
