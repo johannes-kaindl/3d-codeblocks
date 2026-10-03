@@ -10,7 +10,7 @@ describe("findModelReferences", () => {
   it("finds 3d blocks and embeds, and says whether an embed stands alone", () => {
     const refs = findModelReferences(
       [
-        { path: "a.md", text: "# A\n```3d\nfile: tisch.shapes\ntitle: T\n```", nested: false },
+        { path: "a.md", text: "# A\n```3d\nfile: tisch.shapes\ntitle: T\n```" },
         { path: "b.md", text: "![[tisch.shapes]]\nSiehe ![[tisch.shapes|200]] oben." },
         { path: "c.md", text: "```3d\nfile: anderes.glb\n```\n```shapes\n![[tisch.shapes]]\n```" },
       ],
