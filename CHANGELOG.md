@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
 - A ```` ```shapes ```` fence whose info line contains a backtick (for example a prose line like ```` ```shapes``` text ````) is no longer treated as the start of a code block, following the CommonMark rule. This only matters for Export and Move shapes block into a file with such an unusual line.
 - The GitHub release now also carries a ready-to-unpack `three-d-codeblocks.zip` (the plugin folder with `main.js`, `manifest.json` and `styles.css`) and a `checksums.sha256` file. For a manual install, download the zip and unpack it into `.obsidian/plugins/` instead of creating the folder and saving three files by hand.
 
+### Changed
+
+- **The minimum Obsidian version is now 1.11.4** (was 1.6.6). The prompt panel stores API keys in Obsidian's secret storage, which Obsidian introduced in 1.11.4.
+
 ## [0.5.0] — 2026-09-26
 
 ### Added

@@ -6,7 +6,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/LICENSE)
 [![Docs: CC BY-SA 4.0](https://img.shields.io/badge/docs-CC%20BY--SA%204.0-lightgrey.svg)](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/LICENSE-DOCS)
 [![Release](https://img.shields.io/github/v/release/johannes-kaindl/3d-codeblocks?label=release)](https://github.com/johannes-kaindl/3d-codeblocks/releases)
-[![Obsidian](https://img.shields.io/badge/obsidian-1.6.6%2B-purple)](https://obsidian.md)
+[![Obsidian](https://img.shields.io/badge/obsidian-1.11.4%2B-purple)](https://obsidian.md)
 
 *Auch auf Deutsch verfügbar: [`README.de.md`](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/README.de.md).*
 
@@ -30,7 +30,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 
 ## Requirements
 
-- Obsidian **1.6.6** or newer.
+- Obsidian **1.11.4** or newer.
 - WebGL support in the renderer — standard on desktop. Mobile works, but large models
   are slow and the browser's limit on simultaneous 3D views is reached sooner.
 - **No Draco compression.** Meshopt-compressed files work; Draco-compressed ones cannot be
