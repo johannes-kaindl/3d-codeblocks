@@ -7,6 +7,7 @@ import {
 } from "obsidian";
 import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
+import type { PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
@@ -21,9 +22,11 @@ import { SettingsTab } from "./obsidian/settings";
 import {
   canConvertBlockToFile,
   canConvertFileToBlock,
+  convertBlockAt,
   convertBlockToFile,
   convertFileToBlock,
 } from "./obsidian/shapes-convert";
+import { VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel-id";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
 import { SourceEditor } from "./obsidian/source-editor";
@@ -146,7 +149,32 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       this.registerMarkdownCodeBlockProcessor(
         "shapes",
         (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
-          const block = new GltfBlock(el, source, hostDeps, "shapes");
+          // Beim Klick gelesen (nicht beim Rendern): ein Block, der durch Tippen darueber wandert, meldet neue Zeilen.
+          const sectionInfo = () => {
+            const info = ctx.getSectionInfo(el);
+            return info ? { lineStart: info.lineStart, lineEnd: info.lineEnd } : null;
+          };
+          const block = new GltfBlock(
+            el,
+            source,
+            {
+              ...hostDeps,
+              sourcePath: ctx.sourcePath,
+              sectionInfo,
+              openInPanel: (target) => void this.openPromptPanel(target),
+              moveToFile: () => {
+                const info = sectionInfo();
+                if (!info) return;
+                void convertBlockAt(
+                  { app: this.app, ports: obsidianWritePorts(this.app), notice: (m: string) => { new Notice(m); } },
+                  ctx.sourcePath,
+                  info.lineStart,
+                  info.lineEnd,
+                );
+              },
+            },
+            "shapes",
+          );
           this.track(block);
           ctx.addChild(block);
         },
@@ -374,6 +402,36 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     for (const view of this.views) {
       view.refreshAutoRotate?.();
       view.refreshLighting?.();
+    }
+  }
+
+  /** Das Prompt-Panel in der rechten Leiste oeffnen (oder zeigen) und ihm das Ziel geben. Solange die View
+   *  nicht registriert ist (Task 6), meldet das eine Notice statt ein leeres Blatt anzulegen. */
+  async openPromptPanel(target: PanelTarget): Promise<void> {
+    const workspace = this.app.workspace;
+    const unavailable = () => new Notice("The prompt panel is not available");
+    // Intern, aber lesbar: ohne registrierten Typ legt setViewState ein leeres Blatt an, statt zu werfen.
+    const registry = (this.app as unknown as { viewRegistry?: { viewByType?: Record<string, unknown> } }).viewRegistry?.viewByType;
+    if (registry && !(VIEW_TYPE_PROMPT in registry)) {
+      unavailable();
+      return;
+    }
+    try {
+      let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_PROMPT)[0] ?? null;
+      if (!leaf) {
+        leaf = workspace.getRightLeaf(false);
+        if (!leaf) {
+          unavailable();
+          return;
+        }
+        await leaf.setViewState({ type: VIEW_TYPE_PROMPT, active: true });
+      }
+      await workspace.revealLeaf(leaf);
+      const view = leaf.view as unknown as { setTarget?: (t: PanelTarget) => void };
+      if (typeof view.setTarget === "function") view.setTarget(target);
+    } catch (error) {
+      console.warn("[three-d-codeblocks] could not open the prompt panel:", error);
+      unavailable();
     }
   }
 

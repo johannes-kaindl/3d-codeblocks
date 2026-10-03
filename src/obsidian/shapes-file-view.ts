@@ -4,13 +4,15 @@
 // Die ModelFileView bleibt für glTF/GLB/STL zuständig; sie ist eine Lese-Ansicht mit
 // Edit-Modus für Generator-Dateien, diese hier ist ein Editor für eine Quelle.
 import { TextFileView, type WorkspaceLeaf } from "obsidian";
-import type { ActiveViewport } from "../core/active-viewport";
+import type { ActiveViewport, ViewportController } from "../core/active-viewport";
 import { initialMode, layoutFor, RERENDER_DELAY_MS, type ShapesMode } from "../core/shapes/layout";
+import type { PanelTarget } from "../core/shapes/panel-state";
 import { parseShapes } from "../core/shapes/parse";
 import { buildBox, type BoxParts } from "./render-box";
 import { readOnlyController } from "./read-only-controller";
 import type { IssueLine, SourceEditorLike } from "./source-editor";
 import type { TrackedView } from "./tracked-view";
+import { buildActionBar } from "./viewport-toolbar";
 import { ViewerHost, wrapBudgetWithActive, type HostBaseDeps } from "./viewer-host";
 
 export const VIEW_TYPE_SHAPES = "tdcb-shapes-file";
@@ -18,6 +20,7 @@ export const VIEW_TYPE_SHAPES = "tdcb-shapes-file";
 export interface ShapesFileViewDeps extends HostBaseDeps {
   active: ActiveViewport;
   createEditor: (parent: HTMLElement, opts: { onChange: (text: string) => void }) => SourceEditorLike;
+  openInPanel?: (target: PanelTarget) => void;
 }
 
 const PILL_LABELS: Record<ShapesMode, string> = { model: "Model", text: "Text", split: "Split" };
@@ -41,16 +44,23 @@ export class ShapesFileView extends TextFileView implements TrackedView {
   /** Laufendes Render-Promise (für Tests abwartbar). */
   rendering: Promise<void> = Promise.resolve();
 
-  readonly controller = readOnlyController(
-    () => this.host,
-    () => this.file?.path ?? "shapes model",
-  );
+  readonly controller: ViewportController = {
+    ...readOnlyController(
+      () => this.host,
+      () => this.file?.path ?? "shapes model",
+    ),
+    shapesTarget: () => this.target(),
+  };
 
   constructor(
     leaf: WorkspaceLeaf,
     private readonly deps: ShapesFileViewDeps,
   ) {
     super(leaf);
+  }
+
+  private target(): PanelTarget | null {
+    return this.file ? { kind: "shapes-file", path: this.file.path, label: this.file.basename } : null;
   }
 
   getViewType(): string {
@@ -85,6 +95,20 @@ export class ShapesFileView extends TextFileView implements TrackedView {
     this.modelEl = this.bodyEl.createDiv({ cls: "tdcb-shapes-model" });
 
     this.parts = buildBox(this.modelEl, { fill: true });
+    // Auf dem Viewport-Element (Kind der Modell-Spalte), nicht neben den Pillen: im Split-Modus und in
+    // schmaler Breite bleibt sie damit ueber dem Modell und ueberlagert weder Pillen noch Editor.
+    if (this.deps.openInPanel) {
+      buildActionBar(this.parts.viewport, [
+        {
+          icon: "sparkles",
+          label: "Edit in prompt panel",
+          run: () => {
+            const t = this.target();
+            if (t) this.deps.openInPanel?.(t);
+          },
+        },
+      ]);
+    }
     this.host = new ViewerHost(this.parts.stage, this.parts.message, {
       ...this.deps,
       managed: false,

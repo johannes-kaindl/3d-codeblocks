@@ -9,7 +9,7 @@
 //   die Datei stehen (nie ein Rollback durch Neuanlegen).
 import { MarkdownView, TFile, type App } from "obsidian";
 import { parseBlockConfig } from "../core/block-config";
-import { findFenceAt, type Fence } from "../core/shapes/fence";
+import { findFenceAt, listFences, type Fence } from "../core/shapes/fence";
 import { exportBaseName } from "../core/shapes/export";
 import { parseShapes } from "../core/shapes/parse";
 import {
@@ -45,11 +45,8 @@ function sourceEditor(app: App): { view: MarkdownView; file: TFile } | null {
   return { view, file: view.file };
 }
 
-/** Der ```shapes-Block unter dem Cursor, oder der Grund, warum er nicht umgezogen werden kann. */
-function shapesFenceAtCursor(src: { view: MarkdownView }): { fence: Fence; lines: string[] } | { problem: string } | null {
-  const text = src.view.editor.getValue();
-  const fence = findFenceAt(text, src.view.editor.getCursor().line);
-  if (fence?.lang !== "shapes") return null;
+/** Prueft einen gefundenen ```shapes-Zaun auf alles, was einen Umzug unmoeglich macht. */
+function checkedFence(text: string, fence: Fence): { fence: Fence; lines: string[] } | { problem: string } {
   const lines = text.split(/\r?\n/);
   // BOM auf Zeile 0 gehoert nicht zur Einrueckung.
   const open = lines[fence.openLine].replace(/^\uFEFF/, "");
@@ -65,6 +62,14 @@ function shapesFenceAtCursor(src: { view: MarkdownView }): { fence: Fence; lines
   return { fence, lines };
 }
 
+/** Der ```shapes-Block unter dem Cursor, oder der Grund, warum er nicht umgezogen werden kann. */
+function shapesFenceAtCursor(src: { view: MarkdownView }): { fence: Fence; lines: string[] } | { problem: string } | null {
+  const text = src.view.editor.getValue();
+  const fence = findFenceAt(text, src.view.editor.getCursor().line);
+  if (fence?.lang !== "shapes") return null;
+  return checkedFence(text, fence);
+}
+
 /** Billig und ohne Nebenwirkung: steht der Cursor in einem ```shapes-Block (im Quellmodus)? */
 export function canConvertBlockToFile(app: App): boolean {
   const src = sourceEditor(app);
@@ -72,7 +77,7 @@ export function canConvertBlockToFile(app: App): boolean {
 }
 
 export async function convertBlockToFile(env: ConvertEnv): Promise<boolean> {
-  const { app, ports, notice } = env;
+  const { app, notice } = env;
   const src = sourceEditor(app);
   const found = src ? shapesFenceAtCursor(src) : null;
   if (!src || !found) {
@@ -83,14 +88,19 @@ export async function convertBlockToFile(env: ConvertEnv): Promise<boolean> {
     notice(found.problem);
     return false;
   }
-  const { fence, lines } = found;
+  return moveFenceToFile(env, src.file, found.fence, found.lines);
+}
+
+/** Der gemeinsame Umzug: erst die Datei anlegen, dann den Zaun ersetzen, bei Scheitern die Datei zurueck. */
+async function moveFenceToFile(env: ConvertEnv, file: TFile, fence: Fence, lines: string[]): Promise<boolean> {
+  const { app, ports, notice } = env;
   const expected = lines.slice(fence.openLine, fence.closeLine + 1).join("\n");
 
   let created: TFile | null = null;
   let path = "";
   try {
-    const name = `${exportBaseName(parseShapes(fence.body).header, src.file.basename)}.shapes`;
-    path = await app.fileManager.getAvailablePathForAttachment(name, src.file.path);
+    const name = `${exportBaseName(parseShapes(fence.body).header, file.basename)}.shapes`;
+    path = await app.fileManager.getAvailablePathForAttachment(name, file.path);
     // Nie ueberschreiben, auch nicht bei einer Schreibweise, die die Pfadvergabe uebersieht.
     // Zweiter Gurt: die Schreibweisen-Regeln (Gross/Klein) kennt der Adapter, nicht wir.
     if (app.vault.getAbstractFileByPath(path) || (await app.vault.adapter.exists(path))) {
@@ -105,8 +115,8 @@ export async function convertBlockToFile(env: ConvertEnv): Promise<boolean> {
   }
 
   try {
-    const linktext = app.metadataCache.fileToLinktext(created, src.file.path, false);
-    await replaceLines(ports, src.file.path, fence.openLine, fence.closeLine, expected, referenceBlock(linktext));
+    const linktext = app.metadataCache.fileToLinktext(created, file.path, false);
+    await replaceLines(ports, file.path, fence.openLine, fence.closeLine, expected, referenceBlock(linktext));
   } catch (error) {
     const why = error instanceof BlockChangedError ? "The note changed while converting" : `Could not update the note (${errorText(error)})`;
     try {
@@ -119,6 +129,40 @@ export async function convertBlockToFile(env: ConvertEnv): Promise<boolean> {
   }
   notice(`Moved the block to ${path}.`);
   return true;
+}
+
+
+/**
+ * Wie `convertBlockToFile`, aber ohne Cursor: der Block wird ueber die Zeilen aus dem Markdown-
+ * Nachbearbeiter (`lineStart`/`lineEnd` = die Zaunzeilen, 0-basiert) gefunden. Die Notiz wird neu gelesen
+ * und der Zaun an `lineStart` geprueft (Sprache, Schlusszeile); stimmt etwas nicht, ist der Block gewandert
+ * und nichts wird geaendert. Ein Zaun in einem Zitat/Callout ist von hier aus nicht auffindbar: dieselbe Ablehnung.
+ */
+export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: number, lineEnd: number): Promise<boolean> {
+  const { app, ports, notice } = env;
+  const file = app.vault.getAbstractFileByPath(path);
+  let text: string;
+  try {
+    text = ports.editorFor(path)?.getValue() ?? (await ports.vault.read(path));
+  } catch (error) {
+    notice(`Could not read ${path}: ${errorText(error)} — nothing was changed.`);
+    return false;
+  }
+  if (!(file instanceof TFile) || typeof text !== "string") {
+    notice(`Could not find ${path} — nothing was changed.`);
+    return false;
+  }
+  const fence = listFences(text).find((f) => f.openLine === lineStart);
+  if (!fence || fence.lang !== "shapes" || fence.closeLine !== lineEnd) {
+    notice("The block moved or sits inside a quote, callout or list — nothing was changed. Place the cursor in it and use the command instead.");
+    return false;
+  }
+  const checked = checkedFence(text, fence);
+  if ("problem" in checked) {
+    notice(checked.problem);
+    return false;
+  }
+  return moveFenceToFile(env, file, checked.fence, checked.lines);
 }
 
 function errorText(error: unknown): string {

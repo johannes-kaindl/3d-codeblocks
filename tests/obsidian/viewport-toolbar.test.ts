@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeFakeEl } from "../__mocks__/obsidian";
-import { buildToolbar, toolbarVisible } from "../../src/obsidian/viewport-toolbar";
+import { buildActionBar, buildToolbar, toolbarVisible } from "../../src/obsidian/viewport-toolbar";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
 import { MODEL_LOADING_REASON, type ViewportController } from "../../src/core/active-viewport";
 import type { EditUiModel } from "../../src/core/edit-session";
@@ -134,5 +134,30 @@ describe("buildToolbar im Edit-Kontext", () => {
   it("ohne Edit-Modell (Embed/FileView-Altpfad) unveraendert nur View-Buttons", () => {
     const bar: any = buildToolbar(makeFakeEl(), controller());
     expect(labels(bar)).toEqual(["Save view", "Clear view", "Fit camera to model"]);
+  });
+});
+
+describe("buildActionBar", () => {
+  it("builds real buttons with aria-label, title and icon, in the shared toolbar container", () => {
+    const run = vi.fn();
+    const bar: any = buildActionBar(makeFakeEl(), [{ icon: "sparkles", label: "Edit in prompt panel", run }]);
+    expect(bar.className).toBe("tdcb-toolbar");
+    expect(bar.children).toHaveLength(1);
+    const b = bar.children[0];
+    expect(b.tagName).toBe("BUTTON");
+    expect(b.getAttribute("aria-label")).toBe("Edit in prompt panel");
+    expect(b.title).toBe("Edit in prompt panel");
+    expect(b.dataset.icon).toBe("sparkles");
+    expect(b.disabled).toBe(false);
+  });
+
+  it("calls run on click and stops the click from reaching the viewport", () => {
+    const run = vi.fn();
+    const bar: any = buildActionBar(makeFakeEl(), [{ icon: "sparkles", label: "Edit in prompt panel", run }]);
+    const handler = bar.children[0].addEventListener.mock.calls.find((c: unknown[]) => c[0] === "click")[1];
+    const stop = vi.fn();
+    handler({ stopPropagation: stop });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });

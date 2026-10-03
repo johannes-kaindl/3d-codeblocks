@@ -124,6 +124,20 @@ function appendButton(
   });
 }
 
+export interface ActionButton {
+  icon: string;
+  label: string;
+  run: () => void;
+}
+
+/** Kleine Leiste fuer Wege ohne die View-Knoepfe (shapes-Block, shapes-Datei): dieselben Knoepfe,
+ *  dieselbe Sichtbarkeit (CSS `.tdcb-toolbar`: Hover, `:focus-within`, bei Touch immer), andere Aktionen. */
+export function buildActionBar(parent: HTMLElement, buttons: readonly ActionButton[]): HTMLElement {
+  const bar = parent.createDiv({ cls: "tdcb-toolbar" });
+  for (const b of buttons) appendButton(bar, b.icon, b.label, false, b.label, false, b.run);
+  return bar;
+}
+
 /** `edit` optional: ohne ihn (Embed/FileView-Altpfad) exakt das bisherige Verhalten —
  *  nur die drei View-Buttons. Mit `edit` kommt je nach `edit.active` entweder ein
  *  vierter View-Button ("Edit model") dazu, oder die View-Buttons weichen komplett

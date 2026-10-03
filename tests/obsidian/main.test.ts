@@ -3,6 +3,7 @@ import ThreeDCodeblocksPlugin, { isPanelVisible } from "../../src/main";
 import { TFile, makeFakeApp } from "../__mocks__/obsidian";
 import { VIEW_TYPE_3D } from "../../src/obsidian/file-view";
 import { VIEW_TYPE_SHAPES } from "../../src/obsidian/shapes-file-view";
+import { VIEW_TYPE_PROMPT } from "../../src/obsidian/prompt-panel-id";
 
 // Regressionstest fuer Finding 2 (Whole-Branch-Review 2026-07-25): ein Leaf allein
 // (getLeavesOfType(...).length > 0) reicht nicht -- Sidebar-Leaves ueberleben in
@@ -235,5 +236,63 @@ describe("LLM connection wiring", () => {
     const hide = vi.spyOn(plugin.llm, "hideSettings");
     plugin.onunload();
     expect(hide).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("openPromptPanel", () => {
+  const target = { kind: "shapes-file", path: "a.shapes", label: "a" } as const;
+  function setup(opts: { registered?: boolean; existing?: any } = {}) {
+    const app = makeFakeApp();
+    const view = { setTarget: vi.fn() };
+    const leaf = { view, setViewState: vi.fn(async () => {}), detach: vi.fn() };
+    app.viewRegistry = { viewByType: opts.registered === false ? {} : { [VIEW_TYPE_PROMPT]: () => ({}) } };
+    app.workspace.getLeavesOfType = vi.fn(() => (opts.existing ? [opts.existing] : []));
+    app.workspace.getRightLeaf = vi.fn(() => leaf);
+    app.workspace.revealLeaf = vi.fn(async () => {});
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    return { plugin, app, leaf, view };
+  }
+
+  it("opens a leaf of the prompt view in the right sidebar, reveals it and hands over the target", async () => {
+    const { plugin, app, leaf, view } = setup();
+    await plugin.openPromptPanel(target);
+    expect(app.workspace.getRightLeaf).toHaveBeenCalledWith(false);
+    expect(leaf.setViewState).toHaveBeenCalledWith({ type: VIEW_TYPE_PROMPT, active: true });
+    expect(app.workspace.revealLeaf).toHaveBeenCalledWith(leaf);
+    expect(view.setTarget).toHaveBeenCalledWith(target);
+  });
+
+  it("reuses an open panel instead of creating a second leaf", async () => {
+    const existing = { view: { setTarget: vi.fn() }, setViewState: vi.fn() };
+    const { plugin, app } = setup({ existing });
+    await plugin.openPromptPanel(target);
+    expect(app.workspace.getRightLeaf).not.toHaveBeenCalled();
+    expect(existing.setViewState).not.toHaveBeenCalled();
+    expect(app.workspace.revealLeaf).toHaveBeenCalledWith(existing);
+    expect(existing.view.setTarget).toHaveBeenCalledWith(target);
+  });
+
+  it("is harmless when the opened view has no setTarget", async () => {
+    const { plugin, leaf } = setup();
+    (leaf as any).view = {};
+    await expect(plugin.openPromptPanel(target)).resolves.toBeUndefined();
+  });
+
+  it("says so and creates no leaf while the view type is not registered", async () => {
+    const { plugin, app, leaf } = setup({ registered: false });
+    const notices: unknown[] = [];
+    const mod = await import("obsidian");
+    const spy = vi.spyOn(mod, "Notice").mockImplementation(((m: string) => { notices.push(m); }) as never);
+    await plugin.openPromptPanel(target);
+    expect(leaf.setViewState).not.toHaveBeenCalled();
+    expect(app.workspace.getRightLeaf).not.toHaveBeenCalled();
+    expect(notices).toEqual(["The prompt panel is not available"]);
+    spy.mockRestore();
+  });
+
+  it("reports a failing setViewState as 'not available' instead of throwing", async () => {
+    const { plugin, leaf } = setup();
+    leaf.setViewState = vi.fn(async () => { throw new Error("boom"); });
+    await expect(plugin.openPromptPanel(target)).resolves.toBeUndefined();
   });
 });
