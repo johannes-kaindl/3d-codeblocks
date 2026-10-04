@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-04
+
 ### Fixed
 
 - **Release build on GitHub failed for 0.6.0** (`npm ci` stopped with a peer-dependency conflict: the `obsidian` typings pin `@codemirror/state` 6.5.0, the text editor needs 6.7.6; `npm install` resolves this leniently, `npm ci` does not). Added `.npmrc` with `legacy-peer-deps=true`, the same setting json-editor uses for the same editor. No change to the plugin itself; 0.6.0 and 0.6.1 carry identical code.
