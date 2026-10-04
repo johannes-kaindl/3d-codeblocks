@@ -5248,6 +5248,9 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       const clickedRefine = first.reached ? await ppClick(cdp, ".tdcb-prompt-send") : false;
       const second = await pollState<PpState>(cdp, PP_READ, (s) => (s.phase === "ok" || s.phase === "error") && s.rounds === 2 && s.diff.length > 0, 40_000, 300);
       await sleepMs(600);
+      // Das Panel ist erst bei knapper Hoehe „voll“ (Gegenprobe 2026-10-04: mit dem alten styles.css blieb PP11 bei
+      // Fenster 1024x800 gruen, weil die Zeilen noch passten): Fenster fuer die Messung auf 640 px Hoehe, danach zurueck.
+      const sizeBefore = await cdp.evaluate<number[] | null>(`const w = window.require("electron").remote.getCurrentWindow(); const s = w.getSize(); w.setSize(s[0], 640); await new Promise((r) => setTimeout(r, 900)); return s;`).catch(() => null);
       const geo = await cdp.evaluate<{
         innerH: number;
         buttons: { name: string; top: number; bottom: number }[];
@@ -5275,6 +5278,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           scrollable: panel.scrollHeight > panel.clientHeight + 1,
         };
       `);
+      if (sizeBefore) await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); w.setSize(${sizeBefore[0] ?? 1024}, ${sizeBefore[1] ?? 800}); await new Promise((r) => setTimeout(r, 700)); return true;`).catch(() => undefined);
       if (geo === null || !second.reached) {
         ppRecord("PP11", T.PP11, false, `Vorbereitung unvollständig: Erzeugen ${clickedCreate ? (first.reached ? "ok" : "ohne zweite Vorbedingung") : "Klick fehlt"}, Verfeinern ${clickedRefine ? (second.reached ? "ok" : `nicht fertig (Runden ${second.state?.rounds ?? "?"}, Diff ${second.state?.diff.length ?? "?"}, Status „${second.state?.status ?? ""}“)`) : "Klick fehlt"}, Geometrie ${geo ? "gelesen" : "nicht lesbar"}`);
       } else {

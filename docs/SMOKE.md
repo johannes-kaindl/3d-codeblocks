@@ -126,6 +126,8 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 - Cursor im Live Preview in die Zeile NACH dem Block setzen: ein Cursor im Block zeigt den Quelltext statt des Widgets, der Canvas verschwindet.
 - Ein Ersatz-Endpunkt bedient nur die Pfade, die ein echter Server kennt (`/v1/models`, `/v1/chat/completions`); ein großzügiger Ersatz verdeckte den Kit-Fehler „Probe fragt `/models`“ (PP10).
 
+**Endbilanz der Spitze (2026-10-04, abends, Quellstand `f26bea8` plus Treiber, Wegwerf-Vault, jeder Abschnitt in frischem Prozess):** Aktiver Block 9 grün · Ansicht merken 15 grün, 1 übersprungen · Basis 19 grün, 3 übersprungen · Datei-nativer Ausbau 18 grün · shapes-Dateiansicht 14 grün, 1 übersprungen (SH13 bis SH17) · Prompt-Panel 12 grün (PP1–PP11) · Edit mode 9 grün, 3 übersprungen · Kameras 8 grün · Klick-Sturm 4 grün. Summe 108 grün · 0 rot · 8 übersprungen · 0 nichts gemessen. Gegenproben mit dem `styles.css` von vor den Fixes: SH16 rot (Editor 762,7 px statt 115 px bei fünf Zeilen), SH17 rot (im Fokus Outline dotted 1 px, Randfarbe wechselt nicht), PP11 rot (Statuszeile überlagert die Beschriftung, Stream 18 px, Apply und Discard außerhalb des Fensters). PP11 misst bei 640 px Fensterhöhe: bei Fenster 1024×800 blieb der Punkt mit dem alten CSS grün, weil der Inhalt noch passte. Realprobe gegen das echte LM Studio (qwen3.8-27b-splash): Antwortzeiten 1,8 bis 3,7 s bis zum ersten Antwort-Token, 3,5 bis 37 s bis zur letzten, alle Antworten gültig.
+
 **Gegenprobe:** die `.bin` nach dem Schreiben gelöscht → **nur B18 rot**
 > („nichts gezeichnet — die .bin wurde nicht gefunden oder nicht geladen"). Danach
 > zurückgebaut, voller Lauf **65/65**.
