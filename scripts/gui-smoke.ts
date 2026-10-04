@@ -494,6 +494,11 @@ const SAMPLER = `
       cy: (y0 + y1 + 1) / 2 / off.height,
       w: (x1 - x0 + 1) / off.width,
       h: (y1 - y0 + 1) / off.height,
+      // Abstand der Huelle zu den vier Canvasraendern (Anteile); 0 = die Huelle beruehrt den Rand (abgeschnitten).
+      l: x0 / off.width,
+      t: y0 / off.height,
+      r: (off.width - (x1 + 1)) / off.width,
+      b: (off.height - (y1 + 1)) / off.height,
     };
     return {
       colors: seen.size,
@@ -3327,6 +3332,7 @@ const SMOKE_NOTE_MOVE2 = "_tdcb-gui-smoke-move2.md";
 const SMOKE_NOTE_MENU = "_tdcb-gui-smoke-move-menu.md";
 const SMOKE_LIVE_SHAPES = "_tdcb-smoke-live.shapes";
 const SMOKE_NOTE_LIVE = "_tdcb-gui-smoke-live.md";
+const SMOKE_NOTE_KEYS = "_tdcb-gui-smoke-keys.md";
 /** `title:` bestimmt den Dateinamen beim Umzug Block -> Datei (exportBaseName). */
 const MOVED_TITLE = "_tdcb-smoke-moved";
 const CMD_BLOCK_TO_FILE = `${PLUGIN_ID}:convert-shapes-block-to-file`;
@@ -3342,6 +3348,7 @@ const SHAPES_WHITELIST = `
     SMOKE_NOTE_MENU,
     SMOKE_LIVE_SHAPES,
     SMOKE_NOTE_LIVE,
+    SMOKE_NOTE_KEYS,
   ])};
   const movedRe = new RegExp(${JSON.stringify(`^${MOVED_TITLE}( \\d+)?\\.shapes$`)});
   const mine = (f) => !!f && (exactNames.includes(f.name) || movedRe.test(f.name));
@@ -3456,7 +3463,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
   for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
   const remaining = reset.remaining;
   if (remaining.length > 0) {
-    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH9", "SH10", "SH11", "SH12"]) {
+    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH9", "SH10", "SH11", "SH12"]) {
       skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
     }
     return;
@@ -3601,10 +3608,16 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
         : "keine Ansicht",
     );
 
-    // --- SH13. Das Modell sitzt in der Mitte der Flaeche, auch nach einer Groessenaenderung --------
-    // Ursache des Befunds (Blocker 0.6.0): ohne Begrenzung ragte die Flaeche unten ueber das Pane hinaus und die
-    // Kamera rahmte nur bei der ersten Groesse. Gemessen wird die Mitte der Nicht-Hintergrund-Pixel gegen die
-    // Canvasmitte (Toleranz 10 % der Breite/Hoehe) UND ob der Canvas nicht groesser ist als die sichtbare Flaeche.
+    // --- SH13. Das Modell sitzt in der Mitte und wird bei jeder Groessenaenderung neu gerahmt ------
+    // Ursache des Befunds (Blocker 0.6.0): die Flaeche ragte unten ueber das Pane hinaus, und die Kamera rahmte
+    // nur bei der ersten Groesse. Gemessen wird pro Phase die Huellbox der Nicht-Hintergrund-Pixel (das
+    // Bodengitter zaehlt mit, Hintergrund = haeufigster Ton): Mitte innerhalb 10 % der Canvasmitte, Abstand zu
+    // ALLEN vier Canvasraendern (nichts abgeschnitten), Canvas nicht hoeher als die Flaeche.
+    // Die Phasen Seitenleiste ein/aus aendern nur die Breite; solange die HOEHE begrenzt, sieht ein nicht neu
+    // gerahmtes Modell gleich aus (Distanz und vertikaler Bildwinkel aendern sich nicht). Der tragende Fall ist
+    // deshalb die Phase „schmal“: die Modell-Spalte wird auf Seitenverhaeltnis 0,5 gezwungen. Dort begrenzt die
+    // BREITE; mit Refit passt die Huelle (gerechnet: ca. 72 % der Breite), ohne Refit ist sie 141 % breit und
+    // beruehrt beide Raender (tests/core/refit-policy.test.ts rechnet beides mit fitCamera nach).
     const centreExpr = `
       ${SAMPLER}
       ${SHAPES_LEAF}
@@ -3624,17 +3637,21 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       };
     `;
     interface CentreState {
-      box: { cx: number; cy: number; w: number; h: number } | null;
+      box: { cx: number; cy: number; w: number; h: number; l: number; t: number; r: number; b: number } | null;
       canvas: number[];
       pane: number[];
       body: number[];
     }
     const centred = (s: CentreState): boolean =>
-      s.box !== null && Math.abs(s.box.cx - 0.5) < 0.1 && Math.abs(s.box.cy - 0.5) < 0.1 && (s.canvas[1] ?? 0) <= (s.body[1] ?? 0) + 2;
+      s.box !== null &&
+      Math.abs(s.box.cx - 0.5) < 0.1 &&
+      Math.abs(s.box.cy - 0.5) < 0.1 &&
+      Math.min(s.box.l, s.box.t, s.box.r, s.box.b) > 0 &&
+      (s.canvas[1] ?? 0) <= (s.body[1] ?? 0) + 2;
     const describeCentre = (s: CentreState | null): string =>
       s === null
         ? "keine Modell-Spalte"
-        : `Hüllbox-Mitte ${s.box ? `${(s.box.cx * 100).toFixed(0)} %/${(s.box.cy * 100).toFixed(0)} %` : "keine Pixel"} (erwartet 50 % ± 10) · Ausdehnung ${s.box ? `${(s.box.w * 100).toFixed(0)} %×${(s.box.h * 100).toFixed(0)} %` : "-"} · Canvas ${s.canvas.join("×")} · Modell-Spalte ${s.pane.join("×")} · Fläche ${s.body.join("×")} px`;
+        : `Hüllbox-Mitte ${s.box ? `${(s.box.cx * 100).toFixed(0)} %/${(s.box.cy * 100).toFixed(0)} %` : "keine Pixel"} (erwartet 50 % ± 10) · Ausdehnung ${s.box ? `${(s.box.w * 100).toFixed(0)} %×${(s.box.h * 100).toFixed(0)} %` : "-"} · Randabstand l/o/r/u ${s.box ? [s.box.l, s.box.t, s.box.r, s.box.b].map((v) => (v * 100).toFixed(0) + " %").join("/") : "-"} (erwartet je > 0) · Canvas ${s.canvas.join("×")} · Modell-Spalte ${s.pane.join("×")} · Fläche ${s.body.join("×")} px`;
     await cdp.evaluate(`
       ${SHAPES_LEAF}
       leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="model"]')?.click();
@@ -3642,13 +3659,41 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       return true;
     `);
     const open13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
-    // Groessenaenderung: linke Seitenleiste ein, dann wieder aus (Zustand am Abschnittsende stellt `finally` her).
+    // Phase „schmal“: Modell-Spalte auf Seitenverhaeltnis 0,5; der Zwang wird danach IMMER zurueckgenommen.
+    let narrow13: { state: CentreState | null; reached: boolean } = { state: null, reached: false };
+    try {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        const model = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-model");
+        const h = model.getBoundingClientRect().height;
+        // max-width statt Breite/flex: die Hoehe bleibt die der Flaeche (Flex-Wachstum), nur die Breite wird begrenzt.
+        model.style.maxWidth = Math.round(h * 0.5) + "px";
+        await new Promise((r) => setTimeout(r, 900));
+        return true;
+      `);
+      narrow13 = await pollState<CentreState>(
+        cdp,
+        centreExpr,
+        (s) => centred(s) && (s.canvas[0] ?? 0) / Math.max(s.canvas[1] ?? 1, 1) < 0.7 && (s.box?.w ?? 1) < 0.9,
+        10_000,
+      );
+    } finally {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        const model = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-model");
+        if (model) model.style.maxWidth = "";
+        await new Promise((r) => setTimeout(r, 900));
+        return true;
+      `);
+    }
+    const restored13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    // Seitenleiste ein und wieder aus (nur Breite, siehe oben: schaerft den Pane-Zentrum-Teil).
     await cdp.evaluate(`
       app.workspace.leftSplit.expand();
       await new Promise((r) => setTimeout(r, 900));
       return true;
     `);
-    const wide13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    const sidebar13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
     await cdp.evaluate(`
       app.workspace.leftSplit.collapse();
       await new Promise((r) => setTimeout(r, 900));
@@ -3656,9 +3701,9 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     `);
     const back13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
     record(
-      "SH13. Das Modell der Dateiansicht sitzt in der Mitte, beim Öffnen und nach Größenänderung der Fläche",
-      open13.reached && wide13.reached && back13.reached,
-      `Öffnen: ${describeCentre(open13.state)} | Seitenleiste ein: ${describeCentre(wide13.state)} | wieder aus: ${describeCentre(back13.state)}`,
+      "SH13. Das Modell der Dateiansicht sitzt in der Mitte und wird bei jeder Größenänderung neu gerahmt (nichts abgeschnitten, auch im schmalen Pane)",
+      open13.reached && narrow13.reached && restored13.reached && sidebar13.reached && back13.reached,
+      `Öffnen: ${describeCentre(open13.state)} | schmal (Seitenverhältnis 0,5; erwartet Ausdehnung < 90 % der Breite): ${describeCentre(narrow13.state)} | Zwang zurück: ${describeCentre(restored13.state)} | Seitenleiste ein: ${describeCentre(sidebar13.state)} | wieder aus: ${describeCentre(back13.state)}`,
     );
 
     // --- SH14. Text- und Split-Ansicht haben ein sichtbares Ende --------------------------------
@@ -3680,6 +3725,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       return {
         editorBorder: Math.max(px(e.borderTopWidth), px(e.borderBottomWidth), px(e.borderLeftWidth), px(e.borderRightWidth)),
         editorBg: e.backgroundColor,
+        editorBox: e.boxSizing,
         paneBg: t.backgroundColor,
         bodyBottom: px(bd.borderBottomWidth),
         splitDivider: px(t.borderRightWidth),
@@ -3692,6 +3738,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     interface EndsState {
       editorBorder: number;
       editorBg: string;
+      editorBox: string;
       paneBg: string;
       bodyBottom: number;
       splitDivider: number;
@@ -3709,7 +3756,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       `);
     };
     const hasEnd = (s: EndsState): boolean =>
-      (s.editorBorder > 0 || s.editorBg !== s.paneBg) && s.bodyBottom > 0 && s.editorH <= s.bodyH + 2;
+      (s.editorBorder > 0 || s.editorBg !== s.paneBg) && s.editorBox === "border-box" && s.bodyBottom > 0 && s.editorH <= s.bodyH;
     await clickPill("text");
     const textEnds = await pollState<EndsState>(cdp, endsExpr, hasEnd, 8_000);
     const wideNow = await cdp.evaluate<boolean>(`
@@ -3722,7 +3769,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       splitEnds = await pollState<EndsState>(
         cdp,
         endsExpr,
-        (s) => hasEnd(s) && s.split && s.splitDivider > 0 && (s.modelH ?? 0) <= s.bodyH + 2,
+        (s) => hasEnd(s) && s.split && s.splitDivider > 0 && (s.modelH ?? 0) <= s.bodyH,
         8_000,
       );
     }
@@ -3731,12 +3778,82 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     record(
       "SH14. Text- und Split-Ansicht haben ein sichtbares Ende: Rahmen, Abschlusslinie, im Split eine Trennlinie, Höhen innerhalb der Fläche",
       textEnds.reached && (!wideNow || splitEnds?.reached === true),
-      `Text: Rand ${t14?.editorBorder ?? "?"} px, Editor-Hintergrund ${t14?.editorBg ?? "?"} gegen Pane ${t14?.paneBg ?? "?"}, Abschlusslinie ${t14?.bodyBottom ?? "?"} px, Editor ${t14?.editorH ?? "?"} px ≤ Fläche ${t14?.bodyH ?? "?"} px` +
+      `Text: Rand ${t14?.editorBorder ?? "?"} px, Editor-Hintergrund ${t14?.editorBg ?? "?"} gegen Pane ${t14?.paneBg ?? "?"}, box-sizing ${t14?.editorBox ?? "?"} (erwartet border-box), Abschlusslinie ${t14?.bodyBottom ?? "?"} px, Editor ${t14?.editorH ?? "?"} px ≤ Fläche ${t14?.bodyH ?? "?"} px` +
         (wideNow
           ? ` | Split: Trennlinie ${s14?.splitDivider ?? "?"} px, Editor ${s14?.editorH ?? "?"} px, Modell ${s14?.modelH ?? "?"} px ≤ Fläche ${s14?.bodyH ?? "?"} px, is-split ${s14?.split ?? "?"}`
           : " | Split nicht angeboten (Breite < 700 px) — Split-Teil nicht gemessen"),
     );
     if (!wideNow) skipped("SH14b. Trennlinie im Split", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
+
+    // --- SH15. Pfeiltasten schieben die Ansicht (Lesemodus-Block und Live Preview) -----------------
+    // Ungemessen waren: bekommt die Flaeche per echtem Klick den Fokus (tabIndex -1: fokussierbar, kein
+    // Tab-Stopp), und wirken ECHTE Tastendruecke (Input.dispatchKeyEvent) auf die Kamera? Pan aendert die drei
+    // Winkel der Ansicht nicht (siehe B4), gemessen wird deshalb am Bild (Hash der Pixel). Im Live Preview
+    // zusaetzlich: die Cursorzeile des Editors bleibt stehen (die Pfeiltasten gehen nicht an CodeMirror).
+    const keysBody = ["# Pfeiltasten (automatisch erzeugt)", "", `${fence}shapes`, SHAPES_TABLE, fence, "", "Zeile danach", ""].join("\n");
+    const blockCanvas = `app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view.containerEl.querySelector(".tdcb-block canvas")`;
+    const pressKey = async (key: "ArrowUp" | "ArrowLeft"): Promise<void> => {
+      const vk = key === "ArrowLeft" ? 37 : 38;
+      const common = { key, code: key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
+      await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...common });
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
+    };
+    interface KeysState {
+      focused: boolean;
+      tabIndex: number | null;
+      hash: number | null;
+      box: { cx: number; cy: number } | null;
+      line: number | null;
+    }
+    const keysProbe = `
+      ${SAMPLER}
+      const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+      const canvas = view?.containerEl.querySelector(".tdcb-block canvas");
+      if (!canvas) return null;
+      const s = sample(canvas);
+      return {
+        focused: document.activeElement === canvas,
+        tabIndex: canvas.tabIndex,
+        hash: s?.hash ?? null,
+        box: s?.box ? { cx: s.box.cx, cy: s.box.cy } : null,
+        line: view.editor?.getCursor?.().line ?? null,
+      };
+    `;
+    const measureKeys = async (live: boolean): Promise<{ ready: boolean; detail: string; ok: boolean }> => {
+      const ready = await pollState<KeysState>(cdp, keysProbe, (s) => s.hash !== null && s.box !== null, 15_000);
+      if (!ready.reached) return { ready: false, ok: false, detail: "kein gezeichneter Block-Canvas im Blatt" };
+      if (live) await setCursorLine(cdp, 6);
+      const clicked = await clickReal(cdp, blockCanvas);
+      await new Promise((r) => setTimeout(r, 400));
+      const before = await cdp.evaluate<KeysState | null>(keysProbe);
+      await pressKey("ArrowUp");
+      await pressKey("ArrowLeft");
+      await new Promise((r) => setTimeout(r, 700));
+      const after = await cdp.evaluate<KeysState | null>(keysProbe);
+      const moved = !!before && !!after && before.hash !== after.hash;
+      const lineKept = !live || (before?.line !== null && before?.line === after?.line);
+      const ok = clicked && before?.focused === true && moved && lineKept;
+      return {
+        ready: true,
+        ok,
+        detail: `Klick angekommen: ${clicked} · Fokus auf dem Canvas nach dem Klick: ${before?.focused} (erwartet true) · tabIndex ${before?.tabIndex} (erwartet -1) · Bild nach ↑ ← ${moved ? "verändert" : "IDENTISCH"} · Hüllbox-Mitte ${before?.box ? `${(before.box.cx * 100).toFixed(1)}/${(before.box.cy * 100).toFixed(1)}` : "?"} → ${after?.box ? `${(after.box.cx * 100).toFixed(1)}/${(after.box.cy * 100).toFixed(1)}` : "?"}` +
+          (live ? ` · Cursorzeile ${before?.line} → ${after?.line} (erwartet gleich)` : ""),
+      };
+    };
+    await closeExtraLeaves(cdp);
+    await openNote(cdp, SMOKE_NOTE_KEYS, keysBody, "preview");
+    const readKeys = await measureKeys(false);
+    record("SH15. Pfeiltasten schieben die Ansicht eines Blocks im Lesemodus (echter Klick fokussiert, echte Tasten)", readKeys.ok, readKeys.detail);
+    await closeExtraLeaves(cdp);
+    const previousLive15 = await cdp.evaluate<unknown>(`return app.vault.getConfig("livePreview");`);
+    try {
+      await openInLivePreview(cdp, SMOKE_NOTE_KEYS);
+      const liveKeys = await measureKeys(true);
+      record("SH15b. Pfeiltasten schieben die Ansicht eines Blocks im Live Preview, die Cursorzeile des Editors bleibt", liveKeys.ok, liveKeys.detail);
+    } finally {
+      await cdp.evaluate(`app.vault.setConfig("livePreview", ${JSON.stringify(previousLive15)}); return true;`);
+      await closeExtraLeaves(cdp);
+    }
 
     // --- SH9. Block -> Datei -------------------------------------------------
     const movedBody = [`title: ${MOVED_TITLE}`, "box A size 1", "box B size 0.5 at 1 0 0 color #ff0000"].join("\n");

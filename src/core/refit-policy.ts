@@ -23,3 +23,36 @@ export function needsRefit(s: RefitState): boolean {
   if (s.now.width <= 0 || s.now.height <= 0) return false;
   return s.lastFit === null || s.lastFit.width !== s.now.width || s.lastFit.height !== s.now.height;
 }
+
+/** Der Zustand dahinter, rein und ohne WebGL testbar; `Viewport` haelt genau eine Instanz.
+ *  - `noteFit`: JEDER Fit (Oeffnen, Resize-Refit, Fit-Knopf, Doppelklick, gespeicherte Ansicht) merkt sich die
+ *    Groesse und gilt als „Blick nicht vom Nutzer bewegt“ — ein ausdruecklich angeforderter Blick ist der
+ *    neue Ausgangspunkt, danach darf eine Groessenaenderung wieder neu einpassen.
+ *  - `noteUserMove`: jede Kameraaenderung, die kein eigener Fit ist (Orbit, Pan, Zoom).
+ *  - `reset`: neues Modell, nichts eingepasst. */
+export class RefitTracker {
+  private lastFit: PaneSize | null = null;
+  private moved = false;
+
+  reset(): void {
+    this.lastFit = null;
+    this.moved = false;
+  }
+
+  noteFit(size: PaneSize): void {
+    this.lastFit = { width: size.width, height: size.height };
+    this.moved = false;
+  }
+
+  noteUserMove(): void {
+    this.moved = true;
+  }
+
+  userMoved(): boolean {
+    return this.moved;
+  }
+
+  shouldRefit(now: PaneSize, hasBounds: boolean): boolean {
+    return needsRefit({ userMoved: this.moved, hasBounds, lastFit: this.lastFit, now });
+  }
+}

@@ -59,6 +59,12 @@
   height: 100%;
 }
 
+/* Fokusrahmen: ein Klick fokussiert die Flaeche (Pfeiltasten schieben die Ansicht), das muss man sehen. */
+.tdcb-stage canvas:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
 .tdcb-stage.tdcb-hidden {
   display: none;
 }
@@ -331,18 +337,14 @@
   overflow: auto;
 }
 /* Der Editor ist ein umrahmtes Feld mit eigenem Hintergrund: Rand und Flaeche sagen, wo er endet (UI-STANDARD
-   §8, nur Theme-Variablen). Das Pane drumherum hat etwas Luft, damit der Rahmen nie am Rand klebt.
-   Offen (b): den Editor an die Zeilenzahl binden. Die Grenzen stehen als Variablen bereit, sind aber noch
-   NICHT verdrahtet: --tdcb-editor-min-lines / --tdcb-editor-max-lines (z. B. `max-height: calc(var(--tdcb-
-   editor-max-lines) * 1lh)` am .cm-editor). */
+   §8, nur Theme-Variablen). Das Pane drumherum hat etwas Luft, damit der Rahmen nie am Rand klebt. */
 .tdcb-shapes-text {
-  --tdcb-editor-min-lines: 6;
-  --tdcb-editor-max-lines: none;
   padding: var(--size-4-2);
   box-sizing: border-box;
 }
 .tdcb-shapes-text .cm-editor {
   height: 100%;
+  box-sizing: border-box;
   border: var(--border-width) solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-primary);

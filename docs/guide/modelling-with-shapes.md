@@ -105,7 +105,10 @@ A `.shapes` file opens in its own view, not in the plain 3D viewer. At the top i
 - The button that is on is marked as pressed, so the state is not carried by colour alone.
 - The editor is a framed field and the whole area ends in a visible line; in **Split** a divider line separates the text from the model, and neither half is taller than the area.
 - The camera frames the whole model with its middle in the middle of the pane when the file opens and whenever the pane changes size (for example when a sidebar opens or you switch between **Split** and **Model**). Once you have moved the view yourself, a resize leaves it where you put it; double-click the model, or use **Fit** in the 3D view controls, to frame it again.
-- Moving the view: drag to orbit and scroll or pinch to zoom. Because two-finger scrolling on a trackpad zooms, you pan with a right-drag or a Shift-drag, or with the arrow keys after clicking the model. This works the same in code blocks and in files.
+- Moving the view: drag to orbit, scroll or pinch to zoom, right-drag or Shift-drag to pan. This works the same in code blocks and in files.
+- Because two-finger scrolling on a trackpad zooms, there is one more way to pan: click the model (it gets a focus ring), then use the arrow keys. Shift, Ctrl or Cmd with an arrow key rotates the view instead.
+- Press Escape on the focused model to give the focus back to the note.
+- With auto-rotate switched on, the view is not framed again on every size change, because the rotation counts as a move of the view.
 - Type in the editor and the model redraws after a short pause. The file is saved automatically; there is nothing to press.
 - A line with a problem is marked in the text: errors have a red bar, a wavy underline and a tinted background, warnings a dotted yellow bar and underline. Hover a marked line to read its message. The same first message is also written out next to the buttons, for example `1 error — Line 8: …`, so a problem does not depend on colour.
 - If the file changes from outside (for example through a sync tool) while it is open, the text updates in place and your cursor stays where it was. Undo works in the editor.

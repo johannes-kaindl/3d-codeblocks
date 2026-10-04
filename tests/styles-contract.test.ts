@@ -16,9 +16,17 @@ function declarations(selector: string): string {
 }
 const has = (selector: string, decl: RegExp): boolean => decl.test(declarations(selector));
 
+describe("canvas focus", () => {
+  it("a focused canvas shows a ring (a click focuses it so the arrow keys work)", () => {
+    expect(has(".tdcb-stage canvas:focus-visible", /outline:\s*2px solid var\(--interactive-accent\)/)).toBe(true);
+  });
+});
+
 describe("file view geometry (model sat too low and was cut off)", () => {
   it("the canvas of a filling stage is positioned absolutely, so its pixel buffer never sizes the stage", () => {
     expect(has(".tdcb-block.tdcb-fill .tdcb-stage canvas", /position:\s*absolute/)).toBe(true);
+    // Verankerung oben links: `inset: 0` oder top+left sind gleichwertig.
+    expect(has(".tdcb-block.tdcb-fill .tdcb-stage canvas", /inset:\s*0|top:\s*0[^}]*left:\s*0|left:\s*0[^}]*top:\s*0/)).toBe(true);
     expect(has(".tdcb-block.tdcb-fill .tdcb-stage", /position:\s*relative/)).toBe(true);
   });
   it("the flex chain down to the stage may shrink (min-height: 0)", () => {
@@ -32,6 +40,9 @@ describe("text and split view have a visible end", () => {
     expect(has(".tdcb-shapes-text .cm-editor", /border:\s*var\(--border-width\)/)).toBe(true);
     expect(has(".tdcb-shapes-text .cm-editor", /background:\s*var\(--background-primary\)/)).toBe(true);
   });
+  it("the editor's border is inside its height (border-box), so it never exceeds the area", () => {
+    expect(has(".tdcb-shapes-text .cm-editor", /box-sizing:\s*border-box/)).toBe(true);
+  });
   it("the whole body ends in a line and clips its children", () => {
     expect(has(".tdcb-shapes-body", /border-bottom:\s*var\(--divider-width\)/)).toBe(true);
     expect(has(".tdcb-shapes-body", /overflow:\s*hidden/)).toBe(true);
@@ -40,9 +51,5 @@ describe("text and split view have a visible end", () => {
     expect(has(".tdcb-shapes-body.is-split .tdcb-shapes-text", /border-right:\s*var\(--divider-width\)\s+solid\s+var\(--divider-color\)/)).toBe(true);
     expect(has(".tdcb-shapes-body.is-split .tdcb-shapes-text", /max-height:\s*100%/)).toBe(true);
     expect(has(".tdcb-shapes-body.is-split .tdcb-shapes-model", /max-height:\s*100%/)).toBe(true);
-  });
-  it("the line-count bounds (b) exist as variables but are not wired yet", () => {
-    expect(declarations(".tdcb-shapes-text")).toMatch(/--tdcb-editor-min-lines:\s*6/);
-    expect(css).not.toMatch(/var\(--tdcb-editor-(min|max)-lines\)/);
   });
 });
