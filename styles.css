@@ -59,6 +59,12 @@
   height: 100%;
 }
 
+/* Fokusrahmen: ein Klick fokussiert die Flaeche (Pfeiltasten schieben die Ansicht), das muss man sehen. */
+.tdcb-stage canvas:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
 .tdcb-stage.tdcb-hidden {
   display: none;
 }
@@ -81,6 +87,23 @@
   flex: 1;
   border: none;
   border-radius: 0;
+}
+/* Die Flaeche darf nie GROESSER werden als der Platz, den ihr das Pane gibt. Flex-Items haben `min-height:
+   auto`; die Zeichenflaeche (Canvas) traegt ihre Puffergroesse (CSS-Groesse x Pixeldichte) als Eigengroesse
+   und wuerde Viewport und Buehne darueber hinaus aufblaehen — das Modell sass dann in der Mitte einer
+   Flaeche, die unten ueber das sichtbare Pane hinausragt. Deshalb: Kette mit `min-height: 0`, und der Canvas
+   liegt absolut in der Buehne und liefert ihr keine Groesse. Der Block-Pfad (feste Pixelhoehe) braucht das nicht. */
+.tdcb-block.tdcb-fill .tdcb-viewport {
+  min-height: 0;
+}
+.tdcb-block.tdcb-fill .tdcb-stage {
+  min-height: 0;
+  position: relative;
+}
+.tdcb-block.tdcb-fill .tdcb-stage canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 .tdcb-poster {
@@ -123,6 +146,15 @@
 .tdcb-message-info {
   color: var(--text-muted);
   border-left: 3px solid var(--background-modifier-border);
+}
+
+/* Empty-State (UI-STANDARD §8): kurzer Text, nur Theme-Variablen. Dient dem Block (leerer
+   shapes-Text) und der Sidebar (control-panel.ts). */
+.tdcb-empty {
+  padding: var(--size-4-3) var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: center;
 }
 
 .tdcb-hint {
@@ -250,3 +282,398 @@
 .tdcb-panel-edit input[type="number"] {
   width: 5em;
 }
+
+/* .shapes-Dateiansicht: Pillen-Leiste, Text- und Modell-Pane (Spec Modell per Prompt § 5.1). */
+.tdcb-shapes-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.tdcb-shapes-pills {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  padding: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tdcb-shapes-pill[hidden] {
+  display: none;
+}
+/* Aktive Pille: Farbe PLUS Fettdruck PLUS Unterstreichung (UI-STANDARD § 8: zweiter Kanal
+   neben der Farbe); aria-pressed traegt den Zustand fuer Screenreader. */
+.tdcb-shapes-pill[aria-pressed="true"] {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: var(--font-semibold);
+  text-decoration: underline;
+  text-underline-offset: var(--size-2-2);
+}
+.tdcb-shapes-summary {
+  margin-left: var(--size-4-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.tdcb-shapes-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Sichtbarer unterer Abschluss der ganzen Flaeche (Text, Modell, Split). */
+  overflow: hidden;
+  border-bottom: var(--divider-width) solid var(--divider-color);
+}
+.tdcb-shapes-body.is-split {
+  flex-direction: row;
+}
+.tdcb-shapes-text,
+.tdcb-shapes-model {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+/* Der Editor ist ein umrahmtes Feld mit eigenem Hintergrund: Rand und Flaeche sagen, wo er endet (UI-STANDARD
+   §8, nur Theme-Variablen). Das Pane drumherum hat etwas Luft, damit der Rahmen nie am Rand klebt. */
+.tdcb-shapes-text {
+  padding: var(--size-4-2);
+  box-sizing: border-box;
+}
+.tdcb-shapes-text .cm-editor {
+  /* So hoch wie der Text (Zeilen x Zeilenhoehe + Padding + Rahmen), nach oben von der Hoehe des Panes begrenzt;
+     darueber scrollt der Editor INNEN (.cm-scroller). Das Pane selbst bleibt voll hoch (Split: das Modell
+     daneben bleibt so hoch wie die Flaeche), der Editor sitzt oben darin. */
+  height: auto;
+  max-height: 100%;
+  box-sizing: border-box;
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+/* Mindesthoehe etwa drei Zeilen, damit eine leere Datei nicht zu einer Linie wird. `lh` ist die Zeilenhoehe des
+   Elements selbst (hier die der Editorzeilen), also folgt die Mindesthoehe der Schrift ohne feste Pixel. */
+.tdcb-shapes-text .cm-content {
+  min-height: calc(3 * 1.4em);
+  min-height: 3lh;
+}
+/* Der Editor der Dateiansicht hat einen durchgezogenen 1-px-Rand. CodeMirrors Basisthema setzt auf einen fokussierten
+   Editor `outline: 1px dotted #212121` (node_modules/@codemirror/view, buildTheme "&.cm-focused"): das sah wie ein
+   gepunkteter Rand aus. Ersatz: kein Outline, der Rand selbst nimmt die Akzentfarbe an (Fokus bleibt erkennbar). */
+.tdcb-shapes-text .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+/* Split: eine deutliche Trennlinie zwischen Editor und Modell; beide Haelften enden an der Hoehe der Flaeche. */
+.tdcb-shapes-body.is-split .tdcb-shapes-text {
+  border-right: var(--divider-width) solid var(--divider-color);
+  max-height: 100%;
+}
+.tdcb-shapes-body.is-split .tdcb-shapes-model {
+  max-height: 100%;
+}
+.tdcb-shapes-text.is-hidden,
+.tdcb-shapes-model.is-hidden {
+  display: none;
+}
+/* Fehlerzeilen: Farbe ist nur ein Kanal. Zweiter Kanal = Linienform (gewellt gegen
+   gepunktet) und ein linker Balken (durchgezogen gegen gepunktet); die Meldung steht
+   zusaetzlich als Text in der Zusammenfassung der Pillen-Leiste (Tastatur/Touch). */
+.tdcb-issue-line {
+  border-left: var(--size-4-1) solid transparent;
+}
+.tdcb-issue-line.is-error {
+  background: rgba(var(--color-red-rgb), 0.15);
+  border-left-style: solid;
+  border-left-color: var(--color-red);
+  text-decoration: underline wavy var(--color-red);
+}
+.tdcb-issue-line.is-warning {
+  background: rgba(var(--color-yellow-rgb), 0.15);
+  border-left-style: dotted;
+  border-left-color: var(--color-yellow);
+  text-decoration: underline dotted var(--color-yellow);
+}
+
+/* HUB_CSS (obsidian-kit hub.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
+/* Hub-Tab-Leiste (obsidian-kit: buildHubInto). Die vier nummerierten Zutaten gehören
+   zusammen — jede einzeln ist wirkungslos, s. Modulkopf von src/obsidian/hub.ts. */
+.okit-hub-root { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.okit-hub-tabs {
+  display: flex;
+  flex-wrap: wrap;                 /* (1) erlaubt die zweite Zeile */
+  gap: var(--size-2-1);
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+/* box-shadow: none nimmt dem nativen <button> nur seinen Ruhe-Schatten. Obsidians
+   Fokusring bleibt: button:focus-visible { box-shadow: 0 0 0 3px … } hat mit (0,1,1) die
+   höhere Spezifität als .okit-hub-tab (0,1,0) — geprüft in Obsidians app.css. */
+.okit-hub-tab {
+  display: flex;
+  flex: 1 1 auto;                  /* (2) Basis = Inhaltsbreite, sonst bricht nichts um */
+  min-width: 0;                    /* (3) hebt min-width:auto auf, sonst sprengt ein langes Label die Zeile */
+  align-items: center;
+  justify-content: center;
+  gap: var(--size-4-1);
+  padding: var(--size-2-3) var(--size-4-2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.okit-hub-tab-label {              /* (4) ohne eigenes Label-Element kann nichts ellipsieren */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okit-hub-tab-icon { display: inline-flex; flex: 0 0 auto; }
+.okit-hub-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.okit-hub-tab.is-active { color: var(--text-normal); border-bottom-color: var(--interactive-accent); }
+.okit-hub-content { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+.okit-hub-panel { height: 100%; overflow: auto; }
+.okit-hub-panel.is-hidden { display: none; }
+
+/* STREAM_AREA_CSS (obsidian-kit stream-area.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
+.okit-stream { display: flex; flex-direction: column; min-height: 0; gap: var(--size-4-2); }
+.okit-stream-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  font-size: var(--font-ui-small); line-height: var(--line-height-normal);
+}
+/* Rollt der Wirt selbst, ist der Body KEIN eigener Scroll-Container — sonst entstuende
+   ein zweiter Rollbereich im ersten. Wird per Wurzelklasse geschaltet, nicht vom Consumer. */
+.okit-stream--host-scroll .okit-stream-body { flex: 0 0 auto; min-height: auto; overflow-y: visible; }
+.okit-stream-block > :first-child { margin-top: 0; }
+.okit-stream-block > :last-child { margin-bottom: 0; }
+.okit-stream-tail { white-space: pre-wrap; color: var(--text-muted); }
+.okit-stream-status {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--size-4-1);
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.okit-stream-reasoning {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.okit-stream-reasoning > summary { cursor: var(--cursor); color: var(--text-faint); }
+.okit-stream-reasoning > pre {
+  max-height: 12em; overflow-y: auto; white-space: pre-wrap;
+  background: var(--background-secondary); padding: var(--size-4-2);
+}
+/* Ein leerer Slot bleibt Flex-Item und kostet einen gap — spürbar bei einem Wirt, der die
+   Statuszeile nicht nutzt (Befund aus der ersten Adoption, 2026-09-11). */
+.okit-stream-status:empty, .okit-stream-reasoning-slot:empty { display: none; }
+
+/* VERSION_LIST_CSS (obsidian-kit version-list.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
+.okit-vlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  margin-bottom: var(--size-4-2);
+}
+
+.okit-vlist-heading,
+.okit-vlist-group {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.okit-vlist-group {
+  margin-top: var(--size-4-1);
+  color: var(--text-faint);
+}
+
+.okit-vlist-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
+.okit-vlist-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-4-1);
+  width: 100%;
+  text-align: left;
+  padding: var(--size-2-2) var(--size-4-1);
+  background-color: transparent;
+  box-shadow: none;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.okit-vlist-row:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.okit-vlist-row:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.okit-vlist-row.is-active {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.okit-vlist-no,
+.okit-vlist-meta {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.okit-vlist-label {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Prompt-Panel (src/obsidian/prompt-panel.ts): nur Theme-Variablen. */
+.tdcb-prompt .is-hidden { display: none; }
+.tdcb-prompt-top, .tdcb-prompt-model, .tdcb-prompt-actions {
+  display: flex; align-items: center; gap: var(--size-4-2); flex: 0 0 auto;
+}
+.tdcb-prompt-hint, .tdcb-prompt-quality, .tdcb-prompt-preview-caption, .tdcb-prompt-diff-heading {
+  flex: 0 0 auto; font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.tdcb-prompt-hint:empty { display: none; }
+.tdcb-prompt-target { flex: 1 1 auto; min-width: 0; font-weight: var(--font-semibold); overflow-wrap: anywhere; }
+.tdcb-prompt-model select { flex: 1 1 auto; min-width: 0; }
+.tdcb-prompt-input { width: 100%; resize: vertical; flex: 0 0 auto; }
+.tdcb-prompt > .okit-hub-content .okit-hub-panel,
+.tdcb-prompt-versions { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-2); }
+.tdcb-prompt .okit-hub-panel.is-hidden { display: none; }
+.tdcb-prompt-stream { flex: 0 1 auto; max-height: 14em; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
+/* Ursache des zusammengefallenen Stream-Bereichs und der halb abgeschnittenen Knoepfe: der Hub-Panel-Rumpf ist ein
+   Flex-Container fester Hoehe (height: 100% aus dem Kit), alle Kinder ausser dem Stream tragen `flex: 0 0 auto`;
+   der Stream (`flex: 0 1 auto`, Kit-`.okit-stream { min-height: 0 }`, Body `flex: 1 1 auto; min-height: 0`) ist das
+   EINZIGE schrumpfbare Kind und gibt bei viel Inhalt (Vorschau 260 px, Diff, zwei Runden) allen Platz her, bis nur der
+   Streifen der Statuszeile bleibt; deren Inhalt ragt dann ueber die Box und ueberlagert die Vorschau-Beschriftung.
+   Die Regeln darunter (hoehere Spezifitaet, das Kit-CSS bleibt wortgleich): der Stream schrumpft nicht mehr und hat
+   eine Mindesthoehe von sechs Zeilen, der Rumpf rollt, die Knopfzeile Apply/Discard klebt unten. */
+.tdcb-prompt .tdcb-prompt-stream { flex: 0 0 auto; min-height: 6em; }
+.tdcb-prompt > .okit-hub-content .okit-hub-panel { overflow-y: auto; min-height: 0; }
+.tdcb-prompt .tdcb-prompt-end {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--size-4-2) 0;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+}
+.tdcb-prompt-preview, .tdcb-prompt-diff, .tdcb-prompt-rounds, .tdcb-prompt-empty { flex: 0 0 auto; }
+.tdcb-prompt-empty { padding: var(--size-4-2); border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s); color: var(--text-muted); }
+.tdcb-prompt-diff ul { margin: 0; padding-left: var(--size-4-4); font-size: var(--font-ui-small); }
+.tdcb-prompt-versions-empty { color: var(--text-muted); font-size: var(--font-ui-small); }
+/* Status-Indikator (UI-STANDARD §8): Form UND Farbe UND Klasse; is-checking dreht sich. */
+.tdcb-status { display: flex; gap: var(--size-2-2); align-items: center; }
+.tdcb-status-icon svg { width: var(--icon-xs); height: var(--icon-xs); }
+.tdcb-status.is-ok .tdcb-status-icon { color: var(--text-success); }
+.tdcb-status.is-error .tdcb-status-icon { color: var(--text-error); }
+.tdcb-status.is-warning .tdcb-status-icon { color: var(--text-warning); }
+.tdcb-status.is-checking .tdcb-status-icon svg { animation: tdcb-spin 1.2s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .tdcb-status.is-checking .tdcb-status-icon svg { animation: none; } }
+
+/* Kit-Baustein endpoint-list (ENDPOINT_LIST_CSS, wortgleich aus src/vendor/kit-obsidian/endpoint-list.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+/* Pro-Zeile-Status der Endpunkt-Fallback-Liste: Form trägt die Bedeutung, Farbe sekundär (WCAG 1.4.1). */
+.okit-ep-status { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; color: var(--text-muted); }
+.okit-ep-status svg { width: 14px; height: 14px; }
+.okit-ep-status.is-ok { color: var(--text-success); }
+.okit-ep-status.is-error { color: var(--text-error); }
+.okit-ep-warn { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; color: var(--text-warning); }
+.okit-ep-warn svg { width: 14px; height: 14px; }
+/* Drittanbieter-Hinweis (Schlüssel gesetzt): sachlicher Hinweis, keine Fehler-Warnung — bewusst
+   gedämpfter als .okit-ep-warn, Bedeutung trägt das Dreieck + der Tooltip, nicht die Farbe. */
+.okit-ep-thirdparty { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; color: var(--text-muted); }
+.okit-ep-thirdparty svg { width: 14px; height: 14px; }
+.okit-ep-secret { color: var(--text-muted); font-size: var(--font-ui-small); margin-right: 8px; }
+.okit-ep-extra { flex: 0 0 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+/* Rolle der Zeile als Text unter den Feldern: „aktiv" / „erreichbar, aber Platz N" / … .
+   Erreichbarkeit trägt das Icon (Form), die Rolle dieser Text — keins von beiden über Farbe
+   allein (WCAG 1.4.1). Die frühere Auszeichnung saß auf dem Icon-Container und war wirkungslos:
+   font-weight greift auf einem SVG nicht.
+   flex-basis: 100% erzwingt den Umbruch im ohnehin umbrechenden .setting-item-control.
+   stateEl wird VOR warnIcon/thirdPartyIcon angelegt (Erst-Render-Reihenfolge in
+   buildEndpointList) — ohne order würden die beiden Icons hinter die volle-Breite-Zeile
+   rutschen statt in der Feldreihe zu bleiben. order:1 hält die Rolle visuell zuletzt,
+   unabhängig davon, was später noch an controlEl angehängt wird. */
+.okit-ep-row > .setting-item-control .okit-ep-state {
+  flex: 0 0 100%;
+  order: 1;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.okit-ep-row > .setting-item-control .okit-ep-state.is-active {
+  color: var(--text-normal);
+  font-weight: var(--font-bold);
+}
+/* Speicher-/Lösch-Fenster: die gerenderten Zeilen-Indizes sind stale, bis der Re-Render kommt —
+   Eingaben und Icon-Buttons (divs, kein disabled) sind solange gesperrt. */
+.okit-ep-busy { pointer-events: none; opacity: 0.6; }
+/* Endpunkt-Zeile: drei Felder (Adresse · Schlüssel · Modell) brauchen die volle Breite.
+   Die Beschriftung steht als eigene Zeile darüber, deshalb ist der Info-Block hier leer und
+   darf keinen Platz beanspruchen — sonst quetscht er die Felder (gemeldet 2026-08-04).
+   Kindselektor (>), kein Nachkomme: der extraRow-Host sitzt in controlEl, und ein Setting
+   darin verlor sonst seine Beschriftung (gemessen 2026-09-25, llm-endpoint-manager). */
+.okit-ep-row > .setting-item-info {
+  display: none;
+}
+.okit-ep-row > .setting-item-control {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: var(--size-4-2);
+  width: 100%;
+}
+.okit-ep-row > .setting-item-control input[type="text"],
+.okit-ep-row > .setting-item-control input[type="password"] {
+  flex: 1 1 12em;
+  min-width: 8em;
+}
+/* Reservierter Platz für das Modell-Dropdown (Auffüllen der Zeile erst nach dem geladenen
+   Promise, siehe buildEndpointList). Selbst ein Flex-Container, damit Dropdown/Freitext + der
+   „Modelle abrufen"-Knopf innerhalb genauso mitwachsen wie URL/Schlüssel daneben. */
+.okit-ep-row > .setting-item-control .okit-model-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  flex: 1 1 12em;
+  min-width: 10em;
+}
+.okit-ep-row > .setting-item-control .okit-model-slot select,
+.okit-ep-row > .setting-item-control .okit-model-slot input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Kit-Baustein collapsible (COLLAPSIBLE_CSS, wortgleich aus src/vendor/kit-obsidian/collapsible.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+.okit-collapsible-header {
+  display: flex; align-items: center; gap: var(--size-4-2);
+  cursor: pointer; padding: var(--size-4-2) 0;
+  font-weight: var(--font-semibold); color: var(--text-normal);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.okit-collapsible-header:hover { color: var(--text-accent); }
+.okit-collapsible-header:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+.okit-collapsible-chevron { display: inline-flex; color: var(--text-muted); }
+.okit-collapsible-body { padding-top: var(--size-4-2); }
+.okit-collapsible-body.is-collapsed { display: none; }
+
+/* Kit-Baustein request-section (REQUEST_SECTION_CSS, wortgleich aus src/vendor/kit-obsidian/request-section.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+.okit-request-warning { color: var(--text-warning); margin: var(--size-4-2) 0; }
+.okit-request-note { color: var(--text-muted); font-size: var(--font-ui-small); }
+.okit-request-own { border-color: var(--interactive-accent); }
+.okit-request-last { font-size: var(--font-ui-smaller); background: var(--background-secondary); padding: var(--size-4-2); border-radius: var(--radius-s); white-space: pre-wrap; }
+.okit-request-status { display: flex; gap: var(--size-4-2); align-items: center; margin-top: var(--size-4-2); }
+.okit-request-status.is-ok { color: var(--text-success); }
+.okit-request-status.is-warning { color: var(--text-warning); }
+.okit-request-deviation { color: var(--text-muted); font-size: var(--font-ui-small); padding-left: var(--size-4-6); }

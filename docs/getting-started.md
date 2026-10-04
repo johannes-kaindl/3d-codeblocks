@@ -10,7 +10,7 @@ Settings → Community plugins → Browse → search for *3D Codeblocks* → Ins
 
 Drop any `.glb`, `.gltf` or `.stl` file into your vault. A `.gltf` that comes with a `.bin` file and textures needs its whole folder, so copy the folder, not just the one file.
 
-Click the file in the file explorer. It opens in its own pane and you can orbit (drag), zoom (scroll) and pan (right-drag or Shift-drag).
+Click the file in the file explorer. It opens in its own pane and you can orbit (drag), zoom (scroll) and pan (right-drag, Shift-drag, or the arrow keys after clicking the model).
 
 ## 3. Show it inside a note
 

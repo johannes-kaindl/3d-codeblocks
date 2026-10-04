@@ -6,7 +6,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/LICENSE)
 [![Docs: CC BY-SA 4.0](https://img.shields.io/badge/docs-CC%20BY--SA%204.0-lightgrey.svg)](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/LICENSE-DOCS)
 [![Release](https://img.shields.io/github/v/release/johannes-kaindl/3d-codeblocks?label=release)](https://github.com/johannes-kaindl/3d-codeblocks/releases)
-[![Obsidian](https://img.shields.io/badge/obsidian-1.6.6%2B-purple)](https://obsidian.md)
+[![Obsidian](https://img.shields.io/badge/obsidian-1.11.4%2B-purple)](https://obsidian.md)
 
 *Auch auf Deutsch verfügbar: [`README.de.md`](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/README.de.md).*
 
@@ -23,6 +23,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
   itself.
 - **Edit mode:** move and scale the top-level nodes of a glTF/GLB model. Edits go to a
   separate `.edit.gltf` file — the original is never modified.
+- **Model by prompt:** describe a model in words, or ask for a change to an existing shapes model, in a side panel; check the preview and apply it as a code block or a file. [How it works](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md#modelling-with-a-prompt).
 - Theme-aware default material for STL, which carries none of its own.
 - No continuous render loop: a frame is drawn only when something changes.
 
@@ -30,7 +31,8 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 
 ## Requirements
 
-- Obsidian **1.6.6** or newer.
+- Obsidian **1.11.4** or newer.
+- Optional, for *Model by prompt*: an OpenAI-compatible language model endpoint (see the [setup guide](https://uplink.jkaindl.de/llm-setup)). Nothing else needs one.
 - WebGL support in the renderer — standard on desktop. Mobile works, but large models
   are slow and the browser's limit on simultaneous 3D views is reached sooner.
 - **No Draco compression.** Meshopt-compressed files work; Draco-compressed ones cannot be
@@ -47,7 +49,7 @@ Install, then Enable.
 
 ## Usage
 
-### Four ways to show a model
+### Ways to show a model
 
 **1. Open a file.** Click a `.gltf`, `.glb` or `.stl` in the file explorer — it opens
 in its own pane, full size, fully interactive.
@@ -81,10 +83,21 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 ```
 ````
 
+**5. The `shapes` code block** — a model described as one part per line (`box`, `cylinder`, `sphere`, `cone`), no JSON and no file. A broken line only drops its own part and is reported with its line number. The same text in a `.shapes` file works like any model file and opens in its own view with **Model | Text | Split**: edit the text, the model redraws, and broken lines are marked. Two commands move a model between a block and a file.
+
+````markdown
+```shapes
+title: Table
+box Top size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b
+box Leg-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3
+```
+````
+
 <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/code-and-render.png" width="820" alt="A 3d code block in the editor on the left, the rendered model on the right">
 
 ### Guides
 
+- [Modelling with shapes](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md) — describe a model as one part per line and export it as glTF.
 - [Writing a 3D model by hand](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/writing-gltf-by-hand.md) — build a model as text
   inside a note, and learn to read any `.gltf` file along the way. Every example is
   verified on every commit.
@@ -94,6 +107,7 @@ hand-written or sketch models. (Binary GLB does not fit in a text block; use a f
 | Extension | Notes |
 |---|---|
 | `.glb`, `.gltf` | Materials and colours come from the file |
+| `.shapes` | Text, one part per line (box, cylinder, sphere, cone); see [Modelling with shapes](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md) |
 | `.stl` | No materials in the format; the plugin applies a theme-aware default, unless the file carries per-facet colours |
 
 <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/colored-stl.png" width="380" alt="An STL model with its own per-facet colours, each face a different colour instead of the theme default">

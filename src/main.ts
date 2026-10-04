@@ -1,4 +1,5 @@
 import {
+  MarkdownView,
   Notice,
   Plugin,
   TFile,
@@ -7,8 +8,11 @@ import {
 } from "obsidian";
 import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
+import type { PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
+import { findEndpointManager } from "./vendor/kit-obsidian/endpoint-source";
+import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
 import { vaultEditIo } from "./obsidian/edit-mode";
@@ -17,6 +21,18 @@ import type { TrackedView } from "./obsidian/tracked-view";
 import { ModelFileView, VIEW_TYPE_3D } from "./obsidian/file-view";
 import { GltfBlock } from "./obsidian/gltf-block";
 import { SettingsTab } from "./obsidian/settings";
+import {
+  canConvertBlockToFile,
+  canConvertFileToBlock,
+  convertBlockAt,
+  convertBlockToFile,
+  convertFileToBlock,
+} from "./obsidian/shapes-convert";
+import { PromptPanelView, VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel";
+import { AcceptAsModal, acceptPanel, readTargetText, type AcceptEnv } from "./obsidian/panel-accept";
+import { exportShapesAsGltf } from "./obsidian/shapes-export";
+import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
+import { SourceEditor } from "./obsidian/source-editor";
 import { readSceneColors } from "./obsidian/theme";
 import { isWebGLAvailable } from "./obsidian/webgl";
 import { obsidianWritePorts } from "./obsidian/write-ports";
@@ -36,9 +52,34 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   // Welcher Viewport zuletzt vom Nutzer bedient wurde — Sidebar/Toolbar (Task 10/11)
   // lesen und schreiben darueber, ohne den Block selbst zu kennen.
   readonly active = new ActiveViewport();
+  /** Die LLM-Verbindung (Endpunkt-Quelle, Modelle, Anfragen, Einstellungs-Abschnitt). */
+  llm!: LlmConnection;
 
   async onload(): Promise<void> {
     this.settings = validateSettings(await this.loadData());
+    this.llm = createLlmConnection({
+      app: this.app,
+      pluginId: this.manifest.id,
+      caller: "3d-codeblocks",
+      capability: "chat",
+      mode: "structured",
+      getSettings: () => ({
+        endpoints: this.settings.endpoints,
+        choice: this.settings.endpointChoice,
+        model: this.settings.llmModel,
+        request: this.settings.request,
+      }),
+      // Patch ZUERST uebernehmen, dann speichern — die Verbindung prueft das (MIGRATION 0.49.0).
+      persist: (patch) => {
+        if (patch.endpoints !== undefined) this.settings.endpoints = patch.endpoints;
+        if (patch.choice !== undefined) this.settings.endpointChoice = patch.choice;
+        if (patch.model !== undefined) this.settings.llmModel = patch.model;
+        if (patch.request !== undefined) this.settings.request = patch.request;
+        // Unverpackt zurueckgeben: das Kit macht aus einem abgelehnten Speichern eine Notice
+        // (MIGRATION 0.49.0 Schritt 2); ein Catch hier liesse einen Schreibfehler wie Erfolg aussehen.
+        return this.saveSettings();
+      },
+    });
     this.addSettingTab(new SettingsTab(this.app, this));
 
     // `active` gehoert seit Task 12 mit dazu — Embed und FileView brauchen es, um sich
@@ -105,6 +146,42 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       },
     );
 
+    // ```shapes — die DSL direkt im Block (Spec Modell per Prompt § 3). Eigenes try:
+    // belegt ein fremdes Plugin die Sprache, faellt nur dieser Weg aus, nicht das Plugin.
+    try {
+      this.registerMarkdownCodeBlockProcessor(
+        "shapes",
+        (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
+          // Beim Klick gelesen (nicht beim Rendern): ein Block, der durch Tippen darueber wandert, meldet neue Zeilen.
+          const sectionInfo = () => {
+            const info = ctx.getSectionInfo(el);
+            return info ? { lineStart: info.lineStart, lineEnd: info.lineEnd } : null;
+          };
+          const block = new GltfBlock(
+            el,
+            source,
+            {
+              ...hostDeps,
+              sourcePath: ctx.sourcePath,
+              sectionInfo,
+              openInPanel: (target) => void this.openPromptPanel(target),
+              moveToFile: () => {
+                const info = sectionInfo();
+                if (!info) return;
+                void convertBlockAt(this.convertEnv(), ctx.sourcePath, info.lineStart, info.lineEnd, source);
+              },
+            },
+            "shapes",
+          );
+          this.track(block);
+          ctx.addChild(block);
+        },
+      );
+    } catch (error) {
+      console.warn("[three-d-codeblocks] ```shapes code blocks unavailable:", error);
+      new Notice("3D Codeblocks: ```shapes code blocks unavailable — another plugin already uses that language.");
+    }
+
     // ![[datei.gltf]] — Embed in einer Notiz über die (inoffizielle) embedRegistry.
     // Fehlt die API in einer künftigen Obsidian-Version, laufen die anderen drei Wege
     // weiter; nur Embeds entfallen dann.
@@ -131,11 +208,79 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       return view;
     });
     this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
+    // `.shapes` bekommt die eigene Dateiansicht (Text + Modell), nicht die ModelFileView.
+    this.registerView(VIEW_TYPE_SHAPES, (leaf: WorkspaceLeaf) => {
+      const view = new ShapesFileView(leaf, {
+        ...hostDeps,
+        createEditor: (parent, opts) => new SourceEditor(parent, opts),
+      });
+      this.track(view);
+      return view;
+    });
+    // `.shapes` getrennt: haelt ein anderes Plugin die Endung, wirft Obsidian — dann
+    // sollen wenigstens glTF/GLB/STL weiter in der 3D-Ansicht aufgehen.
+    try {
+      this.registerExtensions(["shapes"], VIEW_TYPE_SHAPES);
+    } catch (error) {
+      console.warn("[three-d-codeblocks] .shapes files unavailable:", error);
+      new Notice("3D Codeblocks: .shapes files unavailable — another plugin already handles that extension.");
+    }
 
     // Rechte Leiste: Presets/Save/Clear/Fit fuer den zuletzt bedienten Viewport.
     this.registerView(
       VIEW_TYPE_3D_CONTROLS,
       (leaf: WorkspaceLeaf) => new ControlPanelView(leaf, this.active),
+    );
+
+    // Prompt-Panel (Spec Modell per Prompt § 6): ein Frontend fuer Erzeugen und Aendern.
+    this.registerView(
+      VIEW_TYPE_PROMPT,
+      (leaf: WorkspaceLeaf) =>
+        new PromptPanelView(leaf, {
+          ...hostDeps,
+          llm: this.llm,
+          readTargetText: (t) => readTargetText(this.acceptEnv(), t),
+          accept: (state) => acceptPanel(this.acceptEnv(), state),
+          openSettings: () => {
+            // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
+            const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+            if (!setting) {
+              new Notice("Open Settings → Community plugins → 3D Codeblocks.");
+              return;
+            }
+            setting.open();
+            setting.openTabById(this.manifest.id);
+          },
+          confirm: (message) => confirmAction(this.app, { message, confirmLabel: "Discard", cancelLabel: "Keep" }),
+          managerPresent: () => findEndpointManager(this.app) !== null,
+          persistModel: async (model) => {
+            if (findEndpointManager(this.app)) this.settings.endpointChoice = { ...this.settings.endpointChoice, model };
+            else this.settings.llmModel = model;
+            await this.saveSettings();
+          },
+        }),
+    );
+    this.addCommand({ id: "open-prompt-panel", name: "Open prompt panel", callback: () => void this.openPromptPanel({ kind: "new" }) });
+    this.addCommand({
+      id: "edit-in-prompt-panel",
+      name: "Edit shapes model in prompt panel",
+      checkCallback: (checking) => {
+        const t = this.active.get()?.shapesTarget?.() ?? null;
+        if (!t) return false;
+        if (!checking) void this.openPromptPanel(t);
+        return true;
+      },
+    });
+    // Das Panel folgt dem zuletzt bedienten Modell (Spec § 2 Nr. 5).
+    this.register(
+      this.active.subscribe((controller) => {
+        // Ohne Controller (nichts bedient) bleibt das Ziel, wie es ist: ein frisches Panel hat ohnehin „neu“.
+        if (!controller) return;
+        const t: PanelTarget = controller.shapesTarget?.() ?? { kind: "other", label: controller.label() };
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
+          if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(t);
+        }
+      }),
     );
 
     this.addCommand({
@@ -196,6 +341,47 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       callback: withActive((controller) => controller.applyView(null)),
     });
 
+    this.addCommand({
+      id: "export-shapes-gltf",
+      name: "Export shapes model as glTF",
+      callback: () =>
+        void exportShapesAsGltf(this.app, (message) =>
+          confirmAction(this.app, { message, confirmLabel: "Overwrite", cancelLabel: "Cancel" }),
+        ),
+    });
+
+    // Umwandeln ```shapes-Block <-> .shapes-Datei. checkCallback/Menue fragen nur billig und ohne
+    // Nebenwirkung; die Ablehnungsgruende meldet der Befehl selbst als Notice.
+    const convertEnv = () => this.convertEnv();
+    this.addCommand({
+      id: "convert-shapes-block-to-file",
+      name: "Move shapes block into a .shapes file",
+      checkCallback: (checking) => {
+        if (!canConvertBlockToFile(this.app)) return false;
+        if (!checking) void convertBlockToFile(convertEnv());
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "convert-shapes-file-to-block",
+      name: "Move .shapes file into a code block",
+      checkCallback: (checking) => {
+        if (!canConvertFileToBlock(this.app)) return false;
+        if (!checking) void convertFileToBlock(convertEnv());
+        return true;
+      },
+    });
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu) => {
+        if (canConvertBlockToFile(this.app)) {
+          menu.addItem((item) => item.setTitle("Move shapes block into a file").setIcon("file-output").onClick(() => void convertBlockToFile(convertEnv())));
+        }
+        if (canConvertFileToBlock(this.app)) {
+          menu.addItem((item) => item.setTitle("Move .shapes file into a code block").setIcon("file-input").onClick(() => void convertFileToBlock(convertEnv())));
+        }
+      }),
+    );
+
     // Regenerierte Dateien (gleicher Pfad, neuer Inhalt) sollen ohne Neustart neu laden.
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
@@ -232,6 +418,15 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // Sidebar auf/zu (oder sonst ein Layout-Wechsel) aendert `panelVisible()` — ohne
     // dieses Nachziehen bliebe die Hover-Leiste stehen, nachdem die Sidebar geoeffnet
     // wurde, bis der Block aus einem anderen Grund neu zeichnet.
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf?.view instanceof MarkdownView) this.lastMarkdownView = leaf.view;
+      }),
+    );
+    // Nach dem Start gibt es noch kein active-leaf-change: die schon offene Notiz einmal vormerken.
+    this.app.workspace.onLayoutReady(() => {
+      this.lastMarkdownView ??= this.app.workspace.getActiveViewOfType(MarkdownView);
+    });
     this.registerEvent(this.app.workspace.on("layout-change", () => this.syncAllToolbars()));
 
     // `layout-change` allein reicht NICHT: es feuert, wenn Blaetter entstehen oder
@@ -248,6 +443,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   }
 
   onunload(): void {
+    // Verwirft die Modell-Listen eines evtl. noch offenen Settings-Tabs.
+    this.llm?.hideSettings();
     // three setzt beim Laden einen globalen Marker (window.__THREE__). Obsidian räumt
     // Globals beim Plugin-Reload (disable/enable) nicht auf → beim Wiedereinschalten
     // warnt three „Multiple instances of Three.js". Marker hier entfernen, damit ein
@@ -263,6 +460,67 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     for (const view of this.views) {
       view.refreshAutoRotate?.();
       view.refreshLighting?.();
+    }
+  }
+
+  // Die zuletzt bediente Markdown-Ansicht: das Panel hat den Fokus, wenn der Nutzer uebernimmt, `getActiveViewOfType`
+  // waere dann null.
+  private lastMarkdownView: MarkdownView | null = null;
+
+  /** Die zuletzt bediente Notiz. Primaer das zuletzt benutzte Blatt der Hauptflaeche (das Panel liegt in der
+   *  Seitenleiste): `setViewState` tauscht die View-Instanz im selben Blatt aus, ohne dass `active-leaf-change`
+   *  feuert, ein gemerkter Verweis haengt dann ab. Zweitens der gemerkte, solange er noch in einem Blatt haengt. */
+  private lastEditor(): MarkdownView | null {
+    const workspace = this.app.workspace;
+    const recent = workspace.getMostRecentLeaf(workspace.rootSplit)?.view;
+    if (recent instanceof MarkdownView && recent.file) return recent;
+    const view = this.lastMarkdownView;
+    if (!view?.file) return null;
+    return this.app.workspace.getLeavesOfType("markdown").some((leaf) => leaf.view === view) ? view : null;
+  }
+
+  private acceptEnv(): AcceptEnv {
+    return {
+      app: this.app,
+      ports: obsidianWritePorts(this.app),
+      settings: () => this.settings,
+      lastEditor: () => this.lastEditor(),
+      choose: () => new Promise((resolve) => { new AcceptAsModal(this.app, resolve).open(); }),
+    };
+  }
+
+  private convertEnv() {
+    return { app: this.app, ports: obsidianWritePorts(this.app), notice: (m: string) => { new Notice(m); } };
+  }
+
+  /** Das Prompt-Panel in der rechten Leiste oeffnen (oder zeigen) und ihm das Ziel geben. Solange die View
+   *  nicht registriert ist (Task 6), meldet das eine Notice statt ein leeres Blatt anzulegen. */
+  async openPromptPanel(target: PanelTarget): Promise<void> {
+    const workspace = this.app.workspace;
+    const unavailable = () => new Notice("The prompt panel is not available");
+    // Intern, aber lesbar: ohne registrierten Typ legt setViewState ein leeres Blatt an, statt zu werfen.
+    const registry = (this.app as unknown as { viewRegistry?: { viewByType?: Record<string, unknown> } }).viewRegistry?.viewByType;
+    // registerView laeuft unbedingt in onload; nur verweigern, wenn die Registry lesbar ist und den Typ NICHT kennt
+    // (setViewState legte sonst ein leeres Blatt an). Eine fehlende interne Registry ist kein Grund zu verweigern.
+    if (registry && !(VIEW_TYPE_PROMPT in registry)) {
+      unavailable();
+      return;
+    }
+    try {
+      let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_PROMPT)[0] ?? null;
+      if (!leaf) {
+        leaf = workspace.getRightLeaf(false);
+        if (!leaf) {
+          unavailable();
+          return;
+        }
+        await leaf.setViewState({ type: VIEW_TYPE_PROMPT, active: true });
+      }
+      await workspace.revealLeaf(leaf);
+      if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(target);
+    } catch (error) {
+      console.warn("[three-d-codeblocks] could not open the prompt panel:", error);
+      unavailable();
     }
   }
 

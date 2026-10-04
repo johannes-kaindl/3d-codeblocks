@@ -38,6 +38,10 @@
     "three": "^0.169.0"
   },
   "devDependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.38.6",
     "@types/node": "^20",
     "@types/three": "^0.169.0",
     "esbuild": "^0.23",

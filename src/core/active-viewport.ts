@@ -4,6 +4,7 @@
 // benutzte; gespeist wird das aus `onInteract`, das schon heute jede echte
 // Nutzerinteraktion meldet (Autorotate zaehlt bewusst nicht).
 import type { EditUiModel } from "./edit-session";
+import type { PanelTarget } from "./shapes/panel-state";
 import type { ViewSpec } from "./view-spec";
 
 /**
@@ -33,6 +34,9 @@ export interface ViewportController {
   /** Edit-Zustand fuers Sidebar-Panel; `undefined`/`null`, wenn der Weg (noch) keinen
    *  Editor kennt (Embed/FileView-Altpfad) oder kein Modell geladen ist. */
   editPanel?: () => EditUiModel | null;
+  /** Nur `shapes`-Quellen (Block, Datei): was das Prompt-Panel bearbeiten wuerde. Fehlt bei allen
+   *  anderen Wegen — das Panel zeigt dann „kann nicht per Prompt geaendert werden“. */
+  shapesTarget?: () => PanelTarget | null;
 }
 
 type Listener = (controller: ViewportController | null) => void;

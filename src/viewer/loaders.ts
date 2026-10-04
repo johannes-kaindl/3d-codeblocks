@@ -46,6 +46,12 @@ export function loadModel(
   materialColor: string,
   resolveUrl?: (uri: string) => string,
 ): Promise<LoadedModel> {
+  // `shapes` ist Text, kein Ladeformat: der ViewerHost wandelt ihn vorher in glTF um
+  // (core/shapes/convert). Kommt er doch hier an, ist das ein Verdrahtungsfehler — ohne
+  // diesen Wächter fiele er still in den STL-Zweig und zeigte Datenmüll.
+  if (format === "shapes") {
+    return Promise.reject(new Error("shapes text must be converted to glTF before loading"));
+  }
   return format === "gltf"
     ? loadGltf(buffer, resolveUrl)
     : Promise.resolve({ object: loadStl(buffer, materialColor), cameras: [] });

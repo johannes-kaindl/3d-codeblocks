@@ -12,6 +12,7 @@ function makeTab(overrides: Partial<PluginSettings> = {}) {
     settings: { ...DEFAULT_SETTINGS, ...overrides },
     saveSettings: vi.fn(async () => {}),
     syncAllToolbars: vi.fn(),
+    llm: { renderSettings: vi.fn(), hideSettings: vi.fn() },
   };
   return { tab: new SettingsTab({} as any, plugin), plugin };
 }
@@ -45,6 +46,7 @@ describe("SettingsTab.getSettingDefinitions", () => {
       "maxContexts",
       "panelPlacement",
       "lockedNodePrefixes",
+      "acceptAs",
     ]);
   });
 
@@ -118,15 +120,15 @@ describe("SettingsTab.getControlValue / setControlValue", () => {
 });
 
 // Fallback-Pfad: Auf Obsidian < 1.13 ruft der Host display(). Bricht der, sehen
-// Nutzer unterhalb 1.13 GAR KEINE Settings — minAppVersion ist 1.5.0.
+// Nutzer unterhalb 1.13 GAR KEINE Settings — minAppVersion ist 1.11.4.
 describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
   it("zeichnet jede Definition als Setting-Zeile", () => {
     const { tab } = makeTab();
     tab.display();
 
     const rows = (tab.containerEl as any).settings ?? [];
-    // +1: die Hilfe-Zeile ist keine Control-Definition, sondern ein Render-Hatch.
-    expect(rows).toHaveLength(controls(tab.getSettingDefinitions()).length + 1);
+    // +1 Hilfe-Zeile (Render-Hatch), +1 Gruppen-Ueberschrift, +1 LLM-Zeile (Render-Hatch).
+    expect(rows).toHaveLength(controls(tab.getSettingDefinitions()).length + 3);
     expect(rows.map((r: any) => r.name)).toContain("View mode");
   });
 
@@ -306,5 +308,42 @@ describe("Hilfe-Zeile", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("SettingsTab: Model by prompt", () => {
+  it("places the help row first", () => {
+    const { tab } = makeTab();
+    const first = tab.getSettingDefinitions()[0] as any;
+    expect(first.name).toBe("Help");
+    expect(typeof first.render).toBe("function");
+  });
+
+  it("has a Model-by-prompt group with the acceptAs dropdown and a render row", () => {
+    const { tab } = makeTab();
+    const group = tab.getSettingDefinitions().find((i: any) => i.type === "group" && i.heading === "Model by prompt") as any;
+    expect(group).toBeDefined();
+    const dropdown = group.items.find((i: any) => i.control?.key === "acceptAs");
+    expect(dropdown.control.type).toBe("dropdown");
+    expect(Object.keys(dropdown.control.options)).toEqual(["block", "file", "ask"]);
+    expect(group.items.some((i: any) => typeof i.render === "function")).toBe(true);
+  });
+
+  it("hands the LLM row body to llm.renderSettings without an own strings bundle", () => {
+    const { tab, plugin } = makeTab();
+    tab.display();
+    expect(plugin.llm.renderSettings).toHaveBeenCalledTimes(1);
+    expect(plugin.llm.renderSettings.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("hide() releases the model lists of the LLM section", () => {
+    const { tab, plugin } = makeTab();
+    tab.hide();
+    expect(plugin.llm.hideSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("still opens for an install without any endpoint", () => {
+    const { tab } = makeTab({ endpoints: [] });
+    expect(() => tab.display()).not.toThrow();
   });
 });

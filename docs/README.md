@@ -10,6 +10,7 @@ Organised after [Diátaxis](https://diataxis.fr/): learning, doing, looking up a
 |---|---|
 | **[Getting started](getting-started.md)** | Learning-oriented. Install the plugin, embed a model, save a camera angle. |
 | **[Troubleshooting](troubleshooting.md)** | Task-oriented. "WebGL is unavailable", "Draco-compressed glTF is not supported", "File not found". |
+| **[Modelling with shapes](guide/modelling-with-shapes.md)** | Learning-oriented, then reference. Describe a model as one part per line and export it as glTF. |
 | **[Writing a 3D model by hand](guide/writing-gltf-by-hand.md)** | Learning-oriented. Build a model as text inside a note and learn to read any `.gltf` file. |
 
 The [README](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/README.md) covers every block key, setting and edit-mode detail.

@@ -341,7 +341,7 @@ describe("registerModelEmbeds", () => {
     const ok = registerModelEmbeds(app, deps, () => {});
 
     expect(ok).toBe(true);
-    expect(registered.sort()).toEqual(["glb", "gltf", "stl"]);
+    expect(registered.sort()).toEqual(["glb", "gltf", "shapes", "stl"]);
   });
 
   it("returns false and does nothing when the API is missing", () => {

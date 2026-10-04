@@ -2,26 +2,27 @@
 //
 // Ab Obsidian 1.13 fragt der Host `getSettingDefinitions()` ab und ruft `display()`
 // nie; nur so erscheinen die Settings in der Settings-Suche. Unser `minAppVersion`
-// ist 1.5.0, dort gibt es die deklarative API nicht — der Host ruft `display()`.
+// ist 1.11.4; unter 1.13 gibt es die deklarative API nicht — der Host ruft `display()`.
 //
 // Deshalb ist `getSettingDefinitions()` die einzige Definition, und `display()`
 // zeichnet DIESELBE Struktur mit der klassischen `Setting`-API nach. Kein zweiter
 // Definitionsbaum, der auseinanderlaufen kann.
 //
 // Muster uebernommen aus `vault-rag/src/settings.ts` + `vim-dojo/src/SettingsTab.ts`
-// (REGISTRY: „Zweigleisige deklarative Settings — eine-Wahrheit-Walker"). Hier in der
-// minimalen Form: alle Zeilen sind reine Controls, keine `render`-Hatches noetig.
+// (REGISTRY: „Zweigleisige deklarative Settings — eine-Wahrheit-Walker"). Fast alle Zeilen
+// sind reine Controls; die Hilfe-Zeile und der LLM-Abschnitt sind `render`-Hatches.
 
 import {
   PluginSettingTab,
   type App,
+  type Setting,
   type SettingDefinitionItem,
 } from "obsidian";
 import { MAX_CONTEXTS_LIMIT, validateSettings, type PluginSettings } from "../core/settings-types";
 import type ThreeDCodeblocksPlugin from "../main";
 import { HELP_TEXTS } from "../i18n/strings";
 import { githubHelpUrls, helpSettingDefinition } from "../vendor/kit-obsidian/help-setting";
-import { renderSettingDefinitions } from "../vendor/kit-obsidian/settings_walker";
+import { renderSettingDefinitions, settingBodyHost } from "../vendor/kit-obsidian/settings_walker";
 
 export class SettingsTab extends PluginSettingTab {
   constructor(
@@ -128,6 +129,23 @@ export class SettingsTab extends PluginSettingTab {
         desc: "Comma-separated name prefixes protected from editing (e.g. env__).",
         control: { type: "text", key: "lockedNodePrefixes" },
       },
+      {
+        type: "group",
+        heading: "Model by prompt",
+        items: [
+          {
+            name: "Apply new models as",
+            desc: "Where the prompt panel puts a new model when you click Apply.",
+            control: {
+              type: "dropdown",
+              key: "acceptAs",
+              options: { block: "Code block at the cursor", file: "File in the attachment folder", ask: "Ask each time" },
+            },
+          },
+          // Texte kommen aus dem Kit (englische Default-Texte) — kein eigenes Buendel.
+          { name: "Language model", desc: "", render: (setting: Setting) => this.plugin.llm.renderSettings(settingBodyHost(setting)) },
+        ],
+      },
     ];
   }
 
@@ -150,6 +168,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   // ── Imperativer Fallback (Obsidian < 1.13) ───────────────────────────────
+  override hide(): void {
+    super.hide?.();
+    this.plugin.llm.hideSettings();
+  }
+
   private cleanupPrevious: () => void = () => {};
 
   display(): void {

@@ -13,8 +13,13 @@
 
 import type { PanelPlacement } from "./panel-target";
 import type { LightingMode, ModelLightsMode } from "./lighting";
+import { migrateEndpointList, type EndpointConfig } from "../vendor/kit/endpoint_config";
+import type { EndpointChoice } from "../vendor/kit/endpoint-source";
+import { DEFAULT_REQUEST_SETTINGS, sanitizeRequestSettings, type RequestSettings } from "../vendor/kit/sampling-profiles";
 import {
+  arrayThen,
   check,
+  isPlainObject,
   oneOf,
   validateSettings as validateAgainstSchema,
   type FieldCheck,
@@ -22,6 +27,9 @@ import {
 } from "../vendor/kit/settings_schema";
 
 export type ViewMode = "immediate" | "on-click";
+
+/** Wohin das Prompt-Panel ein neues Modell schreibt, wenn man "Apply" klickt. */
+export type AcceptAs = "block" | "file" | "ask";
 
 export interface PluginSettings {
   viewMode: ViewMode;
@@ -37,6 +45,15 @@ export interface PluginSettings {
   lighting: LightingMode;
   /** Was mit den Lichtern aus der Datei geschieht. */
   modelLights: ModelLightsMode;
+  /** Lokale Endpunkt-Liste der LLM-Anbindung (Schluessel liegen im Schluesselbund, `secretId`). */
+  endpoints: EndpointConfig[];
+  /** Wahl in der Endpunkt-Quelle (gilt nur mit Endpoint-Manager). */
+  endpointChoice?: EndpointChoice | undefined;
+  /** Globales Modell fuer Zeilen ohne eigenes Modell. */
+  llmModel: string;
+  /** Sampling-Einstellungen der LLM-Anbindung. */
+  request: RequestSettings;
+  acceptAs: AcceptAs;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -53,6 +70,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   // Auslieferungszustand war damit der fehlerhafte.
   lighting: "faithful",
   modelLights: "prefer",
+  endpoints: [],
+  // Schluessel muss existieren (geschlossene Welt in validateSettings), Wert ist "keine Wahl".
+  endpointChoice: undefined,
+  llmModel: "",
+  request: DEFAULT_REQUEST_SETTINGS,
+  acceptAs: "block",
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;
@@ -82,6 +105,28 @@ const clampContexts: FieldCheck<number> = (raw, fallback) => {
 // generische Bauform-Pruefung des Kit gegen ihren Default. Fuer `lockedNodePrefixes`
 // ist das Absicht und keine Luecke: "" ist hier ein gueltiger Wert ("nichts sperren"),
 // `nonEmptyString` wuerde ihn auf `env__` zurueckwerfen.
+const ENDPOINT_STRING_FIELDS = ["url", "apiKey", "model", "id", "secretId"] as const;
+
+/** Vor der Kit-Migration: `toConfig` wirft bei einem Nicht-String-Feld (`.trim`), und ein Nicht-String
+ *  als `id`/`secretId` stuerzt spaeter im Kit ab. Behalten werden Strings und Objekte mit String-`url`;
+ *  Felder ohne String-Wert fallen einzeln weg, der Eintrag (und ein gueltiges `secretId`) bleibt. */
+function sanitizeEndpointEntries(items: unknown[]): (string | EndpointConfig)[] {
+  const out: (string | EndpointConfig)[] = [];
+  for (const item of items) {
+    if (typeof item === "string") {
+      out.push(item);
+    } else if (isPlainObject(item) && typeof item["url"] === "string") {
+      const entry: Record<string, string> = {};
+      for (const field of ENDPOINT_STRING_FIELDS) {
+        const value = item[field];
+        if (typeof value === "string") entry[field] = value;
+      }
+      out.push(entry as unknown as EndpointConfig);
+    }
+  }
+  return out;
+}
+
 const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   viewMode: oneOf(["immediate", "on-click"] as const),
   panelPlacement: oneOf(["auto", "sidebar", "toolbar"] as const),
@@ -93,6 +138,21 @@ const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   // Anders als `defaultHeight`: eine vorhandene Zahl wird geklemmt, nicht verworfen —
   // wer 0 oder 999 eintraegt, meint "so wenig/viel wie moeglich".
   maxContexts: clampContexts,
+  acceptAs: oneOf(["block", "file", "ask"] as const),
+  // Die Kit-Migration ist die einzige Stelle, die die Zeilenform kennt: sie reicht `id` und
+  // `secretId` durch (sonst ginge der Schluesselbund-Verweis beim Neustart verloren, waehrend der
+  // Schluessel schon aus data.json entfernt ist) und laesst einen Klartext-`apiKey` fuer die
+  // Migration stehen.
+  endpoints: arrayThen<EndpointConfig>((items) => migrateEndpointList(undefined, sanitizeEndpointEntries(items))),
+  endpointChoice: (raw, fallback) => {
+    if (!isPlainObject(raw)) return fallback;
+    const out: EndpointChoice = {};
+    if (typeof raw["endpointId"] === "string") out.endpointId = raw["endpointId"];
+    if (typeof raw["model"] === "string") out.model = raw["model"];
+    return out;
+  },
+  llmModel: check((v) => typeof v === "string"),
+  request: (raw) => sanitizeRequestSettings(raw).settings,
 };
 
 export function validateSettings(loaded: unknown): PluginSettings {

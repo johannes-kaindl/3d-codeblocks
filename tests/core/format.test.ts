@@ -29,7 +29,12 @@ describe("detectFormat", () => {
     expect(detectFormat("v1.0/model")).toBeNull();
   });
 
-  it("lists the supported extensions", () => {
-    expect(SUPPORTED_EXTENSIONS).toEqual([".glb", ".gltf", ".stl"]);
+  it("knows .shapes", () => {
+    expect(detectFormat("Möbel/tisch.shapes")).toBe("shapes");
+    expect(detectFormat("TISCH.SHAPES")).toBe("shapes");
+  });
+
+  it("lists every supported extension", () => {
+    expect(SUPPORTED_EXTENSIONS).toEqual([".glb", ".gltf", ".stl", ".shapes"]);
   });
 });

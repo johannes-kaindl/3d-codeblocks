@@ -1,6 +1,7 @@
 // Viewer-Zustand → Anzeigemodell. Pure: die Render-Schicht konsumiert nur das
 // ViewModel und trifft keine Entscheidungen (UI-STANDARD §6).
 import { SUPPORTED_EXTENSIONS } from "./format";
+import { capList } from "./shapes/convert";
 
 export type ViewerState =
   | { kind: "config-error"; messages: string[] }
@@ -9,6 +10,9 @@ export type ViewerState =
   | { kind: "compressed-gltf"; extensions: string[] }
   | { kind: "invalid-file" }
   | { kind: "invalid-gltf-json" }
+  | { kind: "invalid-shapes"; messages: string[] }
+  /** shapes-Text ohne Teil UND ohne Zeilenfehler (leer, nur Kommentare): Leerzustand, kein Fehler. */
+  | { kind: "empty-shapes"; hint: string }
   | { kind: "no-webgl" }
   | { kind: "context-lost" }
   | { kind: "load-failed"; detail: string }
@@ -24,6 +28,8 @@ export interface ViewModel {
   tone: "error" | "info" | null;
   showReloadButton: boolean;
   showSpinner: boolean;
+  /** true = als Empty-State (`tdcb-empty`) zeigen statt als Meldungsbox (UI-STANDARD §8). */
+  empty?: boolean;
 }
 
 const SILENT: ViewModel = {
@@ -67,6 +73,10 @@ export function toViewModel(state: ViewerState): ViewModel {
       return error("The file is damaged or not a valid GLB.");
     case "invalid-gltf-json":
       return error("The glTF code is not valid JSON.");
+    case "invalid-shapes":
+      return error(`The shapes code has no valid part. ${capList(state.messages, 5).join(" ")}`.trim());
+    case "empty-shapes":
+      return { ...SILENT, message: state.hint, tone: "info", empty: true };
     case "no-webgl":
       return error("WebGL is unavailable, so the 3D view cannot be shown.");
     case "context-lost":

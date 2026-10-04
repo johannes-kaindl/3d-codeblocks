@@ -1,4 +1,5 @@
-// Build → main.js (PROF-TS-02). obsidian/electron sind extern (vom Host bereitgestellt).
+// Build → main.js (PROF-TS-02). obsidian/electron und die CodeMirror-/Lezer-Module sind extern (vom Host bereitgestellt;
+// eine gebündelte zweite Kopie bricht CodeMirror).
 // three wird mit-gebundelt — ein einziges main.js, keine Laufzeit-Downloads (Spec §2).
 import esbuild from "esbuild";
 
@@ -7,7 +8,22 @@ const prod = process.argv.includes("--production");
 const ctx = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
-  external: ["obsidian", "electron", "node:*"],
+  external: [
+    "obsidian",
+    "electron",
+    "@codemirror/autocomplete",
+    "@codemirror/collab",
+    "@codemirror/commands",
+    "@codemirror/language",
+    "@codemirror/lint",
+    "@codemirror/search",
+    "@codemirror/state",
+    "@codemirror/view",
+    "@lezer/common",
+    "@lezer/highlight",
+    "@lezer/lr",
+    "node:*",
+  ],
   format: "cjs",
   target: "es2022",
   sourcemap: prod ? false : "inline",

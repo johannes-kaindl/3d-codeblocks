@@ -8,7 +8,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **shapes models** (hand-written, no LLM): describe a model as one part per line (`box`, `cylinder`, `sphere`, `cone` with `size`, `at`, `rot`, `color`) in a ``shapes`` code block or a `.shapes` file. A broken line only drops that part and is reported with its line number. Files work in the 3D view, as `![[…]]` embeds and via the ``3d`` block's `file:` key.
+- `.shapes` files open in their own view with **Model | Text | Split**: edit the text and the model re-renders after a short pause; broken lines are marked in the text.
+- Commands **Move shapes block into a .shapes file** and **Move .shapes file into a code block** (also in the editor's right-click menu). Moving a file back into a block only happens when exactly one place uses it (one embed or one ```3d block with nothing but the `file:` line); the file then goes to the trash or is removed, as your *Deleted files* setting says. Embeds with display options and blocks with comment lines are refused, because they would lose them.
+- Command **Export shapes model as glTF**: writes a self-contained `.gltf` to the attachment folder; an existing file is only overwritten after you confirm.
+- A ```` ```shapes ```` fence whose info line contains a backtick (for example a prose line like ```` ```shapes``` text ````) is no longer treated as the start of a code block, following the CommonMark rule. This only matters for Export and Move shapes block into a file with such an unusual line.
 - The GitHub release now also carries a ready-to-unpack `three-d-codeblocks.zip` (the plugin folder with `main.js`, `manifest.json` and `styles.css`) and a `checksums.sha256` file. For a manual install, download the zip and unpack it into `.obsidian/plugins/` instead of creating the folder and saving three files by hand.
+- **Model by prompt:** a prompt panel (command **Open prompt panel**, or the sparkles button **Edit in prompt panel** on a shapes model) creates a shapes model from a description or changes an existing one (move, resize, rotate, recolour, switch shape, add, remove). It streams the answer, shows a preview and the list of changes, keeps every request as a round you can select back, and applies the selected round to a code block, a `.shapes` file or a new model. A quality line says whether the chosen model was measured. Stop works at any moment.
+- Setting **Apply new models as** (code block at the cursor, file in the attachment folder, or ask each time).
+- Section **Language model** in the settings: your endpoints (OpenAI-compatible, keys in Obsidian's secret storage) and the request parameters; the optional LLM Endpoint Manager plugin can supply them instead.
+- After a first Create round the status says `… or press New to start another model.`; a Change round keeps the old text.
+- Arrow keys pan the view after you click the model (a focus ring shows it has the focus; Escape gives it back). Right-drag and Shift-drag pan as before.
+- Shift, Ctrl or Cmd with an arrow key rotates the view instead of panning (OrbitControls default).
+
+### Changed
+
+- **The minimum Obsidian version is now 1.11.4** (was 1.6.6). The prompt panel stores API keys in Obsidian's secret storage, which Obsidian introduced in 1.11.4.
+
+### Fixed
+
+- **`.shapes` file view: the model sat too low and was cut off at the bottom.** The drawing surface could grow beyond the visible pane, so the model was centred in an area that extended below the window. The surface is now bounded by the pane, and the camera frames the model (middle of the box in the middle of the pane) when the file opens and again on every size change as long as you have not moved the view yourself, for example when a sidebar opens or you switch between Split and Model. This applies to code blocks as well. With auto-rotate switched on, the view is not framed again on every size change.
+- **Prompt panel: nothing is cut off or overlapped any more.** With two rounds and a list of changes the answer area collapsed to a thin strip, the status line overlapped the preview caption and Apply/Discard were half cut off at the bottom. The panel now scrolls, the answer area keeps a minimum height of six lines, and the Apply/Discard row stays at the bottom edge.
+- **`.shapes` file view: the editor frame stays a solid line when focused.** CodeMirror drew a dotted outline on a focused editor; the frame now turns accent-coloured instead.
+- **`.shapes` file view: the editor is as tall as its text.** At least about three lines, at most the height of the pane (then it scrolls inside); in Split the text column follows the same rule and the model stays as tall as the pane.
+- **`.shapes` file view: the text and split views had no visible end.** The editor is now a framed field, the area ends in a line, and Split has a divider line between text and model; neither half grows past the area.
 
 ## [0.5.0] — 2026-09-26
 

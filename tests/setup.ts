@@ -19,3 +19,7 @@ if (typeof globalThis.ProgressEvent === "undefined") {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).ProgressEvent = ProgressEventPolyfill;
 }
+
+// Der Obsidian-Lint verlangt `window.setTimeout` (Popout-Fenster); in Node gibt es kein `window`,
+// dort ist es das globale Objekt — vi.useFakeTimers() greift dann weiter.
+(globalThis as { window?: unknown }).window ??= globalThis;

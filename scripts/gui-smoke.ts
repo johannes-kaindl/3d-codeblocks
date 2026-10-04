@@ -56,9 +56,13 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
+import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
+import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
   Cdp,
   clearNotices,
@@ -68,6 +72,7 @@ import {
   openNote as openNoteViaBridge,
   pollUntil,
   reopenNote,
+  requireVisible,
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 
@@ -114,6 +119,28 @@ const SMOKE_MODEL_STL = "_tdcb-smoke-model.stl";
 const SMOKE_MODEL_SPLIT = "_tdcb-smoke-split.gltf";
 const SMOKE_BIN_SPLIT = "_tdcb-smoke-split.bin";
 const SMOKE_NOTE_SPLIT = "_tdcb-gui-smoke-split.md";
+/** shapes-DSL (SH1–SH5). Der Titel `Tisch` bestimmt den Namen der Export-Datei
+    (`Tisch.gltf`, src/core/shapes/export.ts exportBaseName); sie landet im Attachment-
+    Ordner und traegt deshalb kein `_tdcb-`-Praefix — SH5 prueft vorher, dass keine fremde
+    `Tisch.gltf` im Vault liegt, statt sie mitzumessen. */
+const SMOKE_NOTE_SHAPES = "_tdcb-gui-smoke-shapes.md";
+const SMOKE_MODEL_SHAPES = "_tdcb-smoke-model.shapes";
+const SHAPES_EXPORT_NAME = "Tisch.gltf";
+/** Wahr erst, wenn SH5 per Vorpruefung BEWIESEN hat, dass vor dem Export keine
+    `Tisch.gltf` im Vault lag — dann gehoert jede, die danach auftaucht, diesem Lauf.
+    Wird VOR dem Befehl gesetzt (nicht nach dem Poll), damit `cleanupState` (finally UND
+    SIGINT/SIGTERM) die Datei auch bei Abbruch, Timeout oder spaetem Schreiben entfernt. */
+let shapesExportOwned = false;
+const SHAPES_TABLE = [
+  "title: Tisch",
+  "box Platte size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b",
+  "box Bein-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3",
+  "box Bein-2 size 0.05 0.7 0.05 at 0.55 0.35 -0.3",
+  "box Bein-3 size 0.05 0.7 0.05 at -0.55 0.35 0.3",
+  "box Bein-4 size 0.05 0.7 0.05 at 0.55 0.35 0.3",
+].join("\n");
+/** Zeile 1 Kopf + 5 Teile → die kaputte Zeile ist Zeile 7 DES BLOCKS. */
+const SHAPES_BROKEN_LINE = 7;
 const FALLBACK_STL = [
   "solid tdcb",
   "facet normal 0 0 -1",
@@ -238,8 +265,19 @@ function record(name: string, passed: boolean, detail: string): void {
 /** Was der Lauf bewusst NICHT misst. Steht im Protokoll, damit eine Lücke nicht wie
  *  Abdeckung aussieht — ein stillschweigend ausgelassener Punkt liest sich hinterher
  *  wie ein grüner. */
+let skippedCount = 0;
 function skipped(name: string, reason: string): void {
+  skippedCount++;
   console.log(`  – ${name} — übersprungen: ${reason}`);
+}
+
+/** Dritter Zustand neben gruen/rot/uebersprungen: ein Punkt, der NICHT laufen konnte, weil eine
+ *  Voraussetzung fehlt (CORE-TEST-19: „nichts gemessen“ ist ein eigener Zustand und nie gruen).
+ *  `skipped` heisst „bewusst nicht gemessen“, dies heisst „haette gemessen werden sollen und konnte nicht“. */
+let nothingMeasuredCount = 0;
+function nothingMeasured(name: string, reason: string): void {
+  nothingMeasuredCount++;
+  console.log(`  ○ ${name} — nichts gemessen: ${reason}`);
 }
 
 /** Im Renderer: warten, bis `check()` wahr wird (Rendering ist asynchron). */
@@ -435,11 +473,40 @@ const SAMPLER = `
     }
     const n = data.length / 4;
     const background = Math.max(...counts.values());
+    // Huellbox der Pixel, die NICHT der Hintergrundton sind (haeufigster quantisierter Ton), als Anteile der
+    // Canvasgroesse: Mitte (cx, cy) und Ausdehnung (w, h), je 0..1; null, wenn nichts ausser Hintergrund da ist.
+    // Additiv: die uebrigen Felder und der Hash bleiben unveraendert.
+    let bgKey = -1;
+    for (const [k, c] of counts) if (c === background) { bgKey = k; break; }
+    let x0 = off.width, y0 = off.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < off.height; y++) {
+      for (let x = 0; x < off.width; x++) {
+        const i = (y * off.width + x) * 4;
+        const q = ((data[i] >> 3) << 10) | ((data[i + 1] >> 3) << 5) | (data[i + 2] >> 3);
+        if (q === bgKey) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    const box = x1 < 0 ? null : {
+      cx: (x0 + x1 + 1) / 2 / off.width,
+      cy: (y0 + y1 + 1) / 2 / off.height,
+      w: (x1 - x0 + 1) / off.width,
+      h: (y1 - y0 + 1) / off.height,
+      // Abstand der Huelle zu den vier Canvasraendern (Anteile); 0 = die Huelle beruehrt den Rand (abgeschnitten).
+      l: x0 / off.width,
+      t: y0 / off.height,
+      r: (off.width - (x1 + 1)) / off.width,
+      b: (off.height - (y1 + 1)) / off.height,
+    };
     return {
       colors: seen.size,
       coverage: Math.round(((n - background) / n) * 100),
       avg: [Math.round(r / n), Math.round(g / n), Math.round(b / n)],
       hash: hash >>> 0,
+      box,
     };
   };
 `;
@@ -2077,6 +2144,148 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
     );
   }
 
+  // --- SH1–SH5. shapes-DSL ------------------------------------------------
+  // Vier Bloecke in dieser Reihenfolge: (1) ```shapes mit absichtlich kaputter Zeile 7,
+  // (2) ```shapes ohne gueltiges Teil, (3) ```3d file: auf die .shapes-Datei, (4) Embed
+  // derselben Datei. Bloecke 1, 3, 4 muessen zeichnen, Block 2 darf NICHT zeichnen — ein
+  // Lauf, der nur "irgendwo ein Canvas" zaehlt, wuerde auch ohne shapes gruen.
+  await cdp.evaluate(`
+    const path = ${JSON.stringify(SMOKE_MODEL_SHAPES)};
+    const body = ${JSON.stringify(SHAPES_TABLE)};
+    const current = app.vault.getAbstractFileByPath(path);
+    if (current) await app.vault.modify(current, body);
+    else await app.vault.create(path, body);
+    await new Promise((r) => setTimeout(r, 300));
+    return true;
+  `);
+  createdNotes.add(SMOKE_MODEL_SHAPES);
+  await closeExtraLeaves(cdp);
+  await openNote(
+    cdp,
+    SMOKE_NOTE_SHAPES,
+    [
+      "# GUI-Smoke shapes (automatisch erzeugt)",
+      "",
+      `${fence}shapes`,
+      SHAPES_TABLE,
+      "box Kaputt size 1 2",
+      fence,
+      "",
+      `${fence}shapes`,
+      "boxx Nichts size 1",
+      fence,
+      "",
+      `${fence}3d`,
+      `file: ${SMOKE_MODEL_SHAPES}`,
+      fence,
+      "",
+      `![[${SMOKE_MODEL_SHAPES}]]`,
+      "",
+    ].join("\n"),
+    "preview",
+  );
+  const shapes = await pollUntil<{
+    blocks: number;
+    colors: (number | null)[];
+    canvasInBad: boolean;
+    inEmbed: boolean;
+    info: string;
+    error: string;
+  }>(
+    cdp,
+    `
+      ${SAMPLER}
+      const preview = document.querySelector(".markdown-preview-view");
+      const blocks = [...(preview?.querySelectorAll(".tdcb-block") ?? [])];
+      if (blocks.length < 4) return null;
+      // Blöcke 1, 3, 4 zeichnen; Block 2 trägt eine Fehlermeldung statt einer Szene.
+      const drawing = [blocks[0], blocks[2], blocks[3]];
+      const colors = drawing.map((b) => {
+        const canvas = b.querySelector("canvas");
+        return canvas ? (sample(canvas)?.colors ?? 0) : null;
+      });
+      if (colors.some((c) => c === null || c < 3)) return null;
+      const error = blocks[1].querySelector(".tdcb-message-error")?.textContent?.trim() ?? "";
+      if (error === "") return null;
+      return {
+        blocks: blocks.length,
+        colors,
+        canvasInBad: !!blocks[1].querySelector("canvas"),
+        inEmbed: !!blocks[3].closest(".internal-embed"),
+        info: blocks[0].querySelector(".tdcb-message-info")?.textContent?.trim() ?? "",
+        error,
+      };
+    `,
+    40_000,
+  );
+  record(
+    "SH1. Ein ```shapes-Block rendert seine Teile",
+    shapes !== null && (shapes.colors[0] ?? 0) >= 3,
+    shapes ? `${shapes.colors[0]} Farbtöne` : "kein gerenderter shapes-Block (oder Block 2 ohne Fehlermeldung)",
+  );
+  record(
+    "SH2. Eine kaputte Zeile kostet nur sich selbst und wird mit Nummer gemeldet",
+    shapes !== null && shapes.info.includes(`Line ${SHAPES_BROKEN_LINE}:`) && (shapes.colors[0] ?? 0) >= 3,
+    shapes ? shapes.info.slice(0, 80) || "keine Meldung im ersten Block" : "nicht prüfbar",
+  );
+  record(
+    "SH3. Ein Block ohne gültiges Teil sagt das und zeichnet nichts",
+    shapes !== null && shapes.error.includes("no valid part") && !shapes.canvasInBad,
+    shapes ? `${shapes.error.slice(0, 70)} · Canvas im Fehlerblock: ${shapes.canvasInBad}` : "nicht prüfbar",
+  );
+  record(
+    "SH4. Dieselbe DSL als Datei rendert über ```3d file: und als Embed",
+    shapes !== null && shapes.blocks === 4 && shapes.inEmbed && (shapes.colors[1] ?? 0) >= 3 && (shapes.colors[2] ?? 0) >= 3,
+    shapes
+      ? `${shapes.blocks} Blöcke · Farbtöne file:/Embed: ${shapes.colors[1]}/${shapes.colors[2]} · im Embed-Container: ${shapes.inEmbed}`
+      : "nicht prüfbar",
+  );
+
+  // SH5: der Name der Export-Datei kommt aus `title:` und lebt im Attachment-Ordner, ohne
+  // Smoke-Praefix. Liegt dort schon eine Tisch.gltf (Fremdbestand oder Rest), wuerde der
+  // Befehl nach Ueberschreiben fragen und der Lauf haengen oder fremde Daten treffen: nicht
+  // messen, sondern melden.
+  const foreignExport = await cdp.evaluate<string | null>(`
+    return app.vault.getFiles().find((f) => f.name === ${JSON.stringify(SHAPES_EXPORT_NAME)})?.path ?? null;
+  `);
+  if (foreignExport !== null) {
+    skipped("SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt", `${foreignExport} liegt schon im Vault — nicht überschrieben, nicht gemessen`);
+  } else {
+    shapesExportOwned = true;
+    await closeExtraLeaves(cdp);
+    await cdp.evaluate(`
+      const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_MODEL_SHAPES)});
+      await app.workspace.getLeaf(true).openFile(file, { active: true });
+      await new Promise((r) => setTimeout(r, 500));
+      return app.workspace.getActiveFile()?.path ?? null;
+    `);
+    await cdp.evaluate(`
+      app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:export-shapes-gltf`)});
+      return true;
+    `);
+    const exported = await pollUntil<{ path: string; generatedFrom: string; nodes: number }>(
+      cdp,
+      `
+        const out = app.vault.getFiles().find((f) => f.name === ${JSON.stringify(SHAPES_EXPORT_NAME)});
+        if (!out) return null;
+        const doc = JSON.parse(await app.vault.read(out));
+        return {
+          path: out.path,
+          generatedFrom: doc.asset?.extras?.generatedFrom ?? "",
+          nodes: Array.isArray(doc.nodes) ? doc.nodes.length : 0,
+        };
+      `,
+      15_000,
+    );
+    record(
+      "SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt",
+      exported !== null && exported.generatedFrom === SMOKE_MODEL_SHAPES && exported.nodes === 5,
+      exported
+        ? `${exported.path} · Quelle: ${exported.generatedFrom || "(leer)"} · ${exported.nodes} Knoten (erwartet 5)`
+        : `keine ${SHAPES_EXPORT_NAME} nach dem Befehl`,
+    );
+  }
+
   // --- F8. Der Slider in den Einstellungen --------------------------------
   // Am Tab-Container greifen, nicht am Dokument: sind mehrere Fenster desselben Vaults
   // offen, hängt Obsidian das Einstellungs-Modal in `app.setting.win` — ein
@@ -3107,11 +3316,2008 @@ async function sectionClickRace(cdp: Cdp, model: string): Promise<void> {
   `);
 }
 
+// --- SH6–SH12. .shapes-Dateiansicht und Umwandeln -----------------------------
+// Eigener Abschnitt (`--section shapesfile`). `Block -> Datei` legt seine Datei in den Attachment-
+// Ordner, also an einen nicht vorhersagbaren Pfad. Geloescht wird deshalb NUR, was auf einer
+// Weissliste steht: die exakten Namen der SMOKE_*-Konstanten unten plus das nummerierte
+// `_tdcb-smoke-moved( N).shapes`. Eine Datei dieses Namens als fremd zu beweisen, ist nicht
+// moeglich; der Besitznachweis ist die Treiber-Konvention, dass der Namensraum `_tdcb-smoke-` /
+// `_tdcb-gui-smoke-` diesem Treiber gehoert (wie bei allen anderen `_tdcb-`-Konstanten). Jede
+// Loeschung vor dem Lauf wird als Infozeile gedruckt; ausserhalb der Weissliste wird nichts angefasst.
+// Die Weissliste gilt gleich in der Vorab-Raeumung, am Abschnittsende und in `cleanupState`
+// (auch bei SIGINT/SIGTERM). `shapesFileOwned` wird erst gesetzt, wenn danach nichts mehr da ist.
+const SHAPES_VIEW_TYPE = "tdcb-shapes-file";
+const SMOKE_VIEW_SHAPES = "_tdcb-smoke-view.shapes";
+const SMOKE_NOTE_MOVE = "_tdcb-gui-smoke-move.md";
+const SMOKE_NOTE_MOVE2 = "_tdcb-gui-smoke-move2.md";
+const SMOKE_NOTE_MENU = "_tdcb-gui-smoke-move-menu.md";
+const SMOKE_LIVE_SHAPES = "_tdcb-smoke-live.shapes";
+const SMOKE_NOTE_LIVE = "_tdcb-gui-smoke-live.md";
+const SMOKE_NOTE_KEYS = "_tdcb-gui-smoke-keys.md";
+const SMOKE_LINES_5 = "_tdcb-smoke-lines5.shapes";
+const SMOKE_LINES_200 = "_tdcb-smoke-lines200.shapes";
+const SMOKE_LINES_0 = "_tdcb-smoke-lines0.shapes";
+/** `title:` bestimmt den Dateinamen beim Umzug Block -> Datei (exportBaseName). */
+const MOVED_TITLE = "_tdcb-smoke-moved";
+const CMD_BLOCK_TO_FILE = `${PLUGIN_ID}:convert-shapes-block-to-file`;
+const CMD_FILE_TO_BLOCK = `${PLUGIN_ID}:convert-shapes-file-to-block`;
+/** Wahr erst, wenn die Vorab-Raeumung gelaufen ist und nichts Weisslistenartiges mehr liegt. */
+let shapesFileOwned = false;
+/** Renderer-Schnipsel: `mine(file)` = steht auf der Weissliste (exakter Name oder nummerierter Umzugsname). */
+const SHAPES_WHITELIST = `
+  const exactNames = ${JSON.stringify([
+    SMOKE_VIEW_SHAPES,
+    SMOKE_NOTE_MOVE,
+    SMOKE_NOTE_MOVE2,
+    SMOKE_NOTE_MENU,
+    SMOKE_LIVE_SHAPES,
+    SMOKE_NOTE_LIVE,
+    SMOKE_NOTE_KEYS,
+    SMOKE_LINES_5,
+    SMOKE_LINES_200,
+    SMOKE_LINES_0,
+  ])};
+  const movedRe = new RegExp(${JSON.stringify(`^${MOVED_TITLE}( \\d+)?\\.shapes$`)});
+  const mine = (f) => !!f && (exactNames.includes(f.name) || movedRe.test(f.name));
+`;
+/** Renderer-Schnipsel: schliesst nur Ansichten, deren Datei auf der Weissliste steht, loescht die Dateien
+    und liefert deren Pfade. */
+const SHAPES_WIPE = `
+  ${SHAPES_WHITELIST}
+  for (const leaf of app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)})) {
+    if (mine(leaf.view.file)) leaf.detach();
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const wiped = [];
+  for (const f of app.vault.getFiles().filter(mine)) {
+    wiped.push(f.path);
+    await app.vault.delete(f);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+`;
+
+/** Renderer-Schnipsel: Blatt einer .shapes-Datei und der CodeMirror-View ihres Texteditors. */
+const SHAPES_LEAF = `
+  const leafFor = (path) => app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).find((l) => l.view.file?.path === path);
+  const cmOf = (leaf) => {
+    const c = leaf?.view.containerEl.querySelector(".tdcb-shapes-text .cm-content");
+    return c ? (c.cmView?.view ?? c.cmTile?.view ?? null) : null;
+  };
+  const typeAtEnd = (leaf, text) => {
+    const v = cmOf(leaf);
+    if (v) { v.dispatch({ changes: { from: v.state.doc.length, insert: text } }); return "dispatch"; }
+    const c = leaf?.view.containerEl.querySelector(".tdcb-shapes-text .cm-content");
+    if (!c) return "kein Editor";
+    c.focus();
+    const sel = getSelection();
+    sel.selectAllChildren(c);
+    sel.collapseToEnd();
+    document.execCommand("insertText", false, text);
+    return "execCommand";
+  };
+`;
+
+/** Anteil gruener Pixel im Modell-Canvas (0..1), oder null ohne lesbaren Canvas. Gruen heisst
+    hier: Kanal g klar vorn — Beleuchtung dunkelt #00ff00 ab, deshalb keine feste Untergrenze 200. */
+const GREEN_SHARE = `
+  const greenShare = (leaf) => {
+    const canvas = leaf?.view.containerEl.querySelector(".tdcb-shapes-model canvas");
+    if (!canvas) return null;
+    const off = document.createElement("canvas");
+    off.width = 256;
+    off.height = 192;
+    const ctx = off.getContext("2d");
+    try { ctx.drawImage(canvas, 0, 0, 256, 192); } catch (e) { return null; }
+    const d = ctx.getImageData(0, 0, 256, 192).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 1] > 120 && d[i] < 70 && d[i + 2] < 70 && d[i + 1] > d[i] * 2) n++;
+    return n / (256 * 192);
+  };
+`;
+
+/** Wiederholt eine Messung auf der Node-Seite, bis `done` wahr wird — und liefert in jedem Fall
+    den letzten Stand, damit ein rotes Ergebnis sagen kann, was gemessen wurde. */
+async function pollState<T>(
+  cdp: Cdp,
+  expression: string,
+  done: (state: T) => boolean,
+  timeoutMs: number,
+  stepMs = 500,
+): Promise<{ state: T | null; reached: boolean }> {
+  const deadline = Date.now() + timeoutMs;
+  let state: T | null = null;
+  for (;;) {
+    state = await cdp.evaluate<T | null>(expression);
+    if (state && done(state)) return { state, reached: true };
+    if (Date.now() >= deadline) return { state, reached: false };
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+}
+
+/** Datei in einem Blatt der Hauptflaeche oeffnen (nicht in einem Split), danach aufraeumen. */
+async function openFileInLeaf(cdp: Cdp, path: string): Promise<void> {
+  await cdp.evaluate(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+    const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit) ?? app.workspace.getLeaf(true);
+    await leaf.openFile(file, { active: true });
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    await new Promise((r) => setTimeout(r, 400));
+    return true;
+  `);
+  await closeExtraLeaves(cdp);
+}
+
+/** Cursor im aktiven Quellmodus-Editor auf eine Zeile setzen. */
+async function setCursorLine(cdp: Cdp, line: number): Promise<{ mode: string; line: number } | null> {
+  return cdp.evaluate<{ mode: string; line: number } | null>(`
+    const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+    const view = leaf?.view;
+    if (!view?.editor) return null;
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    view.editor.setCursor({ line: ${line}, ch: 0 });
+    return { mode: view.getMode(), line: view.editor.getCursor().line };
+  `);
+}
+
+async function sectionShapesFile(cdp: Cdp): Promise<void> {
+  // Zustand aus Vorlaeufen VOR dem Abschnitt zuruecksetzen: Ansichten der Weisslisten-Dateien schliessen
+  // (sonst schreibt ihr Schlusssichern eine geloeschte Datei neu), die Weisslisten-Dateien loeschen und
+  // nachmessen. Jede Loeschung wird gedruckt. Bleibt etwas stehen, wird nichts gemessen.
+  const reset = await cdp.evaluate<{ wiped: string[]; remaining: string[] }>(`
+    ${SHAPES_WIPE}
+    return { wiped, remaining: app.vault.getFiles().filter(mine).map((f) => f.path) };
+  `);
+  for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
+  const remaining = reset.remaining;
+  if (remaining.length > 0) {
+    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH16", "SH17", "SH9", "SH10", "SH11", "SH12"]) {
+      skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
+    }
+    return;
+  }
+  shapesFileOwned = true;
+
+  // Pillen haengen an der Breite der Ansicht (>= 700 px: drei). Seitenleisten einklappen, damit
+  // die Hauptflaeche breit genug ist, und am Ende zurueckstellen.
+  const sidebars = await cdp.evaluate<{ left: boolean; right: boolean }>(`
+    const left = !app.workspace.leftSplit.collapsed;
+    const right = !app.workspace.rightSplit.collapsed;
+    app.workspace.leftSplit.collapse();
+    app.workspace.rightSplit.collapse();
+    await new Promise((r) => setTimeout(r, 400));
+    return { left, right };
+  `);
+  try {
+    await closeExtraLeaves(cdp);
+
+    // --- SH6. Ansicht mit drei Pillen ---------------------------------------
+    await cdp.evaluate(`
+      const path = ${JSON.stringify(SMOKE_VIEW_SHAPES)};
+      if (!app.vault.getAbstractFileByPath(path)) await app.vault.create(path, ${JSON.stringify(SHAPES_TABLE)});
+      return true;
+    `);
+    createdNotes.add(SMOKE_VIEW_SHAPES);
+    await openFileInLeaf(cdp, SMOKE_VIEW_SHAPES);
+    const pillsExpr = `
+      ${SAMPLER}
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      if (!root) return null;
+      const canvas = root.querySelector(".tdcb-shapes-model canvas");
+      return {
+        width: Math.round(root.getBoundingClientRect().width),
+        pills: [...root.querySelectorAll(".tdcb-shapes-pill")].map((p) => ({
+          label: p.textContent.trim(),
+          visible: p.getClientRects().length > 0,
+          pressed: p.getAttribute("aria-pressed"),
+        })),
+        colors: canvas ? (sample(canvas)?.colors ?? 0) : 0,
+        editors: root.querySelectorAll(".tdcb-shapes-text .cm-content").length,
+      };
+    `;
+    interface PillState {
+      width: number;
+      pills: { label: string; visible: boolean; pressed: string | null }[];
+      colors: number;
+      editors: number;
+    }
+    const six = await pollState<PillState>(cdp, pillsExpr, (s) => s.colors >= 3 && s.width > 0, 20_000);
+    if (six.state === null) {
+      record("SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen", false, "keine .tdcb-shapes-view im Blatt");
+    } else {
+      const s = six.state;
+      const wide = s.width >= 700;
+      const expectedLabels = wide ? ["Model", "Text", "Split"] : ["Model", "Text"];
+      const visibleLabels = s.pills.filter((p) => p.visible).map((p) => p.label);
+      const pressed = s.pills.filter((p) => p.pressed === "true");
+      const expectedPressed = wide ? "Split" : "Model";
+      record(
+        "SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen",
+        visibleLabels.join("|") === expectedLabels.join("|") &&
+          pressed.length === 1 &&
+          pressed[0]?.visible === true &&
+          pressed[0]?.label === expectedPressed &&
+          s.colors >= 3 &&
+          s.editors === 1,
+        `Breite ${s.width} px · sichtbar: ${visibleLabels.join("/")} (erwartet ${expectedLabels.join("/")}) · aria-pressed=true: ${pressed.map((p) => p.label).join("/") || "keine"} (erwartet genau ${expectedPressed}) · ${s.colors} Farbtöne · ${s.editors} Texteditor`,
+      );
+      if (!wide) skipped("SH6b. Drei Pillen und Start in Split ab 700 px", `Ansichtsbreite nur ${s.width} px — der breite Fall wurde nicht gemessen`);
+    }
+
+    // --- SH7. Tippen rendert neu --------------------------------------------
+    const greenLine = "box Neu size 0.4 at 0 0.9 0 color #00ff00";
+    const before = await cdp.evaluate<number | null>(`
+      ${GREEN_SHARE}
+      ${SHAPES_LEAF}
+      return greenShare(leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)}));
+    `);
+    const typed = await cdp.evaluate<string>(`
+      ${SHAPES_LEAF}
+      return typeAtEnd(leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)}), ${JSON.stringify(`\n${greenLine}`)});
+    `);
+    const seven = await pollState<{ onDisk: boolean; share: number | null }>(
+      cdp,
+      `
+        ${GREEN_SHARE}
+        ${SHAPES_LEAF}
+        const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_VIEW_SHAPES)});
+        const text = file ? await app.vault.read(file) : "";
+        return { onDisk: text.includes(${JSON.stringify(greenLine)}), share: greenShare(leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})) };
+      `,
+      (s) => s.onDisk && (s.share ?? 0) > 0.003,
+      10_000,
+    );
+    const share = seven.state?.share ?? null;
+    record(
+      "SH7. Tippen schreibt die Datei und rendert das Modell neu",
+      before === 0 && seven.reached,
+      `Eingabe per ${typed} · grüner Anteil vorher ${before === null ? "nicht lesbar" : (before * 100).toFixed(2) + " %"} (erwartet 0), nachher ${share === null ? "nicht lesbar" : (share * 100).toFixed(2) + " %"} (erwartet > 0,3 %) · Zeile auf der Platte: ${seven.state?.onDisk ?? false}`,
+    );
+
+    // --- SH8. Eine kaputte Zeile ist im Text markiert -----------------------
+    await cdp.evaluate(`
+      ${SHAPES_LEAF}
+      const leaf = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)});
+      const root = leaf.view.containerEl;
+      // Im schmalen Fall ist der Text nur ueber die Pille sichtbar.
+      if (root.querySelector(".tdcb-shapes-text")?.classList.contains("is-hidden")) {
+        root.querySelector('.tdcb-shapes-pill[data-mode="text"]')?.click();
+      }
+      typeAtEnd(leaf, "\\nbox Kaputt size 1 2");
+      return true;
+    `);
+    const eight = await pollState<{ lines: { text: string; title: string }[]; summary: string; total: number }>(
+      cdp,
+      `
+        ${SHAPES_LEAF}
+        const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+        if (!root) return null;
+        return {
+          lines: [...root.querySelectorAll(".tdcb-issue-line.is-error")].map((l) => ({ text: l.textContent ?? "", title: l.getAttribute("title") ?? "" })),
+          summary: root.querySelector(".tdcb-shapes-summary")?.textContent ?? "",
+          total: root.querySelectorAll(".tdcb-shapes-text .cm-line").length,
+        };
+      `,
+      (s) => s.lines.length > 0,
+      8_000,
+    );
+    const e8 = eight.state;
+    record(
+      "SH8. Eine kaputte Zeile ist im Text markiert",
+      e8 !== null &&
+        e8.lines.length === 1 &&
+        e8.lines[0]?.title.includes("needs 1 or 3 numbers") === true &&
+        e8.lines[0]?.text.includes("box Kaputt") === true &&
+        e8.summary.startsWith("1 error") &&
+        e8.summary.includes(`Line ${e8.total}:`),
+      e8
+        ? `${e8.lines.length} Fehlerzeile(n) (erwartet genau 1) · Zeile: ${JSON.stringify(e8.lines[0]?.text ?? "")} · title: ${JSON.stringify(e8.lines[0]?.title ?? "")} · Zusammenfassung: ${JSON.stringify(e8.summary)} (letzte Zeile ${e8.total})`
+        : "keine Ansicht",
+    );
+
+    // --- SH13. Das Modell sitzt in der Mitte und wird bei jeder Groessenaenderung neu gerahmt ------
+    // Ursache des Befunds (Blocker 0.6.0): die Flaeche ragte unten ueber das Pane hinaus, und die Kamera rahmte
+    // nur bei der ersten Groesse. Gemessen wird pro Phase die Huellbox der Nicht-Hintergrund-Pixel (das
+    // Bodengitter zaehlt mit, Hintergrund = haeufigster Ton): Mitte innerhalb 10 % der Canvasmitte, Abstand zu
+    // ALLEN vier Canvasraendern (nichts abgeschnitten), Canvas nicht hoeher als die Flaeche.
+    // Die Phasen Seitenleiste ein/aus aendern nur die Breite; solange die HOEHE begrenzt, sieht ein nicht neu
+    // gerahmtes Modell gleich aus (Distanz und vertikaler Bildwinkel aendern sich nicht). Der tragende Fall ist
+    // deshalb die Phase „schmal“: die Modell-Spalte wird auf Seitenverhaeltnis 0,5 gezwungen. Dort begrenzt die
+    // BREITE; mit Refit passt die Huelle (gemessen 63 %, gerechnet ca. 72 % der Breite), ohne Refit ist sie 88 % breit (gemessen im Gegenprobe-Lauf 2026-10-04, Schwelle deshalb 80 %, nicht 90 %; gerechnet 141 % bei anderer Ausgangsgroesse) und
+    // beruehrt beide Raender (tests/core/refit-policy.test.ts rechnet beides mit fitCamera nach).
+    const centreExpr = `
+      ${SAMPLER}
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      const canvas = root?.querySelector(".tdcb-shapes-model canvas");
+      const model = root?.querySelector(".tdcb-shapes-model");
+      if (!canvas || !model || model.classList.contains("is-hidden")) return null;
+      const s = sample(canvas);
+      const c = canvas.getBoundingClientRect();
+      const m = model.getBoundingClientRect();
+      const b = root.querySelector(".tdcb-shapes-body").getBoundingClientRect();
+      return {
+        box: s?.box ?? null,
+        canvas: [Math.round(c.width), Math.round(c.height)],
+        pane: [Math.round(m.width), Math.round(m.height)],
+        body: [Math.round(b.width), Math.round(b.height)],
+      };
+    `;
+    interface CentreState {
+      box: { cx: number; cy: number; w: number; h: number; l: number; t: number; r: number; b: number } | null;
+      canvas: number[];
+      pane: number[];
+      body: number[];
+    }
+    const centred = (s: CentreState): boolean =>
+      s.box !== null &&
+      Math.abs(s.box.cx - 0.5) < 0.1 &&
+      Math.abs(s.box.cy - 0.5) < 0.1 &&
+      Math.min(s.box.l, s.box.t, s.box.r, s.box.b) > 0 &&
+      (s.canvas[1] ?? 0) <= (s.body[1] ?? 0) + 2;
+    const describeCentre = (s: CentreState | null): string =>
+      s === null
+        ? "keine Modell-Spalte"
+        : `Hüllbox-Mitte ${s.box ? `${(s.box.cx * 100).toFixed(0)} %/${(s.box.cy * 100).toFixed(0)} %` : "keine Pixel"} (erwartet 50 % ± 10) · Ausdehnung ${s.box ? `${(s.box.w * 100).toFixed(0)} %×${(s.box.h * 100).toFixed(0)} %` : "-"} · Randabstand l/o/r/u ${s.box ? [s.box.l, s.box.t, s.box.r, s.box.b].map((v) => (v * 100).toFixed(0) + " %").join("/") : "-"} (erwartet je > 0) · Canvas ${s.canvas.join("×")} · Modell-Spalte ${s.pane.join("×")} · Fläche ${s.body.join("×")} px`;
+    await cdp.evaluate(`
+      ${SHAPES_LEAF}
+      leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="model"]')?.click();
+      await new Promise((r) => setTimeout(r, 600));
+      return true;
+    `);
+    const open13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    // Phase „schmal“: Modell-Spalte auf Seitenverhaeltnis 0,5; der Zwang wird danach IMMER zurueckgenommen.
+    let narrow13: { state: CentreState | null; reached: boolean } = { state: null, reached: false };
+    try {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        const model = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-model");
+        const h = model.getBoundingClientRect().height;
+        // max-width statt Breite/flex: die Hoehe bleibt die der Flaeche (Flex-Wachstum), nur die Breite wird begrenzt.
+        model.style.maxWidth = Math.round(h * 0.5) + "px";
+        await new Promise((r) => setTimeout(r, 900));
+        return true;
+      `);
+      narrow13 = await pollState<CentreState>(
+        cdp,
+        centreExpr,
+        (s) => centred(s) && (s.canvas[0] ?? 0) / Math.max(s.canvas[1] ?? 1, 1) < 0.7 && (s.box?.w ?? 1) < 0.8,
+        10_000,
+      );
+    } finally {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        const model = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-model");
+        if (model) model.style.maxWidth = "";
+        await new Promise((r) => setTimeout(r, 900));
+        return true;
+      `);
+    }
+    const restored13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    // Seitenleiste ein und wieder aus (nur Breite, siehe oben: schaerft den Pane-Zentrum-Teil).
+    await cdp.evaluate(`
+      app.workspace.leftSplit.expand();
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    `);
+    const sidebar13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    await cdp.evaluate(`
+      app.workspace.leftSplit.collapse();
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    `);
+    const back13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    record(
+      "SH13. Das Modell der Dateiansicht sitzt in der Mitte und wird bei jeder Größenänderung neu gerahmt (nichts abgeschnitten, auch im schmalen Pane)",
+      open13.reached && narrow13.reached && restored13.reached && sidebar13.reached && back13.reached,
+      `Öffnen: ${describeCentre(open13.state)} | schmal (Seitenverhältnis 0,5; erwartet Ausdehnung < 80 % der Breite): ${describeCentre(narrow13.state)} | Zwang zurück: ${describeCentre(restored13.state)} | Seitenleiste ein: ${describeCentre(sidebar13.state)} | wieder aus: ${describeCentre(back13.state)}`,
+    );
+
+    // --- SH14. Text- und Split-Ansicht haben ein sichtbares Ende --------------------------------
+    // Rand/Hintergrund des Editors (Computed Style), Abschluss der Flaeche und im Split eine Trennlinie; die
+    // Hoehe von Editor und Modell-Spalte ueberschreitet die der Flaeche nicht.
+    const endsExpr = `
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      const editor = root?.querySelector(".tdcb-shapes-text .cm-editor");
+      const text = root?.querySelector(".tdcb-shapes-text");
+      const model = root?.querySelector(".tdcb-shapes-model");
+      const body = root?.querySelector(".tdcb-shapes-body");
+      if (!editor || !text || !body || text.classList.contains("is-hidden")) return null;
+      const px = (v) => parseFloat(v) || 0;
+      const e = getComputedStyle(editor);
+      const t = getComputedStyle(text);
+      const bd = getComputedStyle(body);
+      const modelShown = !!model && !model.classList.contains("is-hidden");
+      return {
+        editorBorder: Math.max(px(e.borderTopWidth), px(e.borderBottomWidth), px(e.borderLeftWidth), px(e.borderRightWidth)),
+        editorBg: e.backgroundColor,
+        editorBox: e.boxSizing,
+        paneBg: t.backgroundColor,
+        bodyBottom: px(bd.borderBottomWidth),
+        splitDivider: px(t.borderRightWidth),
+        editorH: Math.round(editor.getBoundingClientRect().height),
+        modelH: modelShown ? Math.round(model.getBoundingClientRect().height) : null,
+        bodyH: Math.round(body.getBoundingClientRect().height),
+        split: body.classList.contains("is-split"),
+      };
+    `;
+    interface EndsState {
+      editorBorder: number;
+      editorBg: string;
+      editorBox: string;
+      paneBg: string;
+      bodyBottom: number;
+      splitDivider: number;
+      editorH: number;
+      modelH: number | null;
+      bodyH: number;
+      split: boolean;
+    }
+    const clickPill = async (mode: string): Promise<void> => {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="${mode}"]')?.click();
+        await new Promise((r) => setTimeout(r, 500));
+        return true;
+      `);
+    };
+    const hasEnd = (s: EndsState): boolean =>
+      (s.editorBorder > 0 || s.editorBg !== s.paneBg) && s.editorBox === "border-box" && s.bodyBottom > 0 && s.editorH <= s.bodyH;
+    await clickPill("text");
+    const textEnds = await pollState<EndsState>(cdp, endsExpr, hasEnd, 8_000);
+    const wideNow = await cdp.evaluate<boolean>(`
+      ${SHAPES_LEAF}
+      return !!leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="split"]:not([hidden])');
+    `);
+    let splitEnds: { state: EndsState | null; reached: boolean } | null = null;
+    if (wideNow) {
+      await clickPill("split");
+      splitEnds = await pollState<EndsState>(
+        cdp,
+        endsExpr,
+        (s) => hasEnd(s) && s.split && s.splitDivider > 0 && (s.modelH ?? 0) <= s.bodyH,
+        8_000,
+      );
+    }
+    const t14 = textEnds.state;
+    const s14 = splitEnds?.state ?? null;
+    record(
+      "SH14. Text- und Split-Ansicht haben ein sichtbares Ende: Rahmen, Abschlusslinie, im Split eine Trennlinie, Höhen innerhalb der Fläche",
+      textEnds.reached && (!wideNow || splitEnds?.reached === true),
+      `Text: Rand ${t14?.editorBorder ?? "?"} px, Editor-Hintergrund ${t14?.editorBg ?? "?"} gegen Pane ${t14?.paneBg ?? "?"}, box-sizing ${t14?.editorBox ?? "?"} (erwartet border-box), Abschlusslinie ${t14?.bodyBottom ?? "?"} px, Editor ${t14?.editorH ?? "?"} px ≤ Fläche ${t14?.bodyH ?? "?"} px` +
+        (wideNow
+          ? ` | Split: Trennlinie ${s14?.splitDivider ?? "?"} px, Editor ${s14?.editorH ?? "?"} px, Modell ${s14?.modelH ?? "?"} px ≤ Fläche ${s14?.bodyH ?? "?"} px, is-split ${s14?.split ?? "?"}`
+          : " | Split nicht angeboten (Breite < 700 px) — Split-Teil nicht gemessen"),
+    );
+    if (!wideNow) skipped("SH14b. Trennlinie im Split", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
+
+    // --- SH15. Pfeiltasten schieben die Ansicht (Lesemodus-Block und Live Preview) -----------------
+    // Ungemessen waren: bekommt die Flaeche per echtem Klick den Fokus (tabIndex -1: fokussierbar, kein
+    // Tab-Stopp), und wirken ECHTE Tastendruecke (Input.dispatchKeyEvent) auf die Kamera? Pan aendert die drei
+    // Winkel der Ansicht nicht (siehe B4), gemessen wird deshalb am Bild (Hash der Pixel). Im Live Preview
+    // zusaetzlich: die Cursorzeile des Editors bleibt stehen (die Pfeiltasten gehen nicht an CodeMirror).
+    const keysBody = ["# Pfeiltasten (automatisch erzeugt)", "", `${fence}shapes`, SHAPES_TABLE, fence, "", "Zeile danach", ""].join("\n");
+    // Das Blatt trägt zwei Block-Bäume (Lesemodus und Editor), einer mit Canvas 0×0: nur den sichtbaren nehmen.
+    const blockCanvas = `[...(app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view.containerEl.querySelectorAll(".tdcb-block canvas") ?? [])].find((c) => c.getBoundingClientRect().width > 0)`;
+    const pressKey = async (key: "ArrowUp" | "ArrowLeft"): Promise<void> => {
+      const vk = key === "ArrowLeft" ? 37 : 38;
+      const common = { key, code: key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
+      await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...common });
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
+    };
+    interface KeysState {
+      focused: boolean;
+      tabIndex: number | null;
+      hash: number | null;
+      box: { cx: number; cy: number } | null;
+      line: number | null;
+    }
+    const keysProbe = `
+      ${SAMPLER}
+      const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+      const canvas = [...(view?.containerEl.querySelectorAll(".tdcb-block canvas") ?? [])].find((c) => c.getBoundingClientRect().width > 0);
+      if (!canvas) return null;
+      const s = sample(canvas);
+      return {
+        focused: document.activeElement === canvas,
+        tabIndex: canvas.tabIndex,
+        hash: s?.hash ?? null,
+        box: s?.box ? { cx: s.box.cx, cy: s.box.cy } : null,
+        line: view.editor?.getCursor?.().line ?? null,
+      };
+    `;
+    const measureKeys = async (live: boolean): Promise<{ ready: boolean; detail: string; ok: boolean }> => {
+      // Ein Block steht zuerst als Standbild (`.tdcb-play`) ohne Canvas: erst wecken (gemessen 2026-10-04, wie in PP5).
+      await activateBlock(cdp, 0);
+      const ready = await pollState<KeysState>(cdp, keysProbe, (s) => s.hash !== null && s.box !== null, 15_000);
+      if (!ready.reached) {
+        const dbg = await cdp.evaluate<string>(`${SAMPLER}
+          const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+          const cs = [...(view?.containerEl.querySelectorAll(".tdcb-block canvas") ?? [])];
+          return JSON.stringify({ mode: view?.getMode?.(), canvases: cs.map((c) => { const r = c.getBoundingClientRect(); const s = r.width > 0 ? sample(c) : null; return { rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)], px: [c.width, c.height], hash: s?.hash ?? null, box: s?.box ? "ja" : null }; }), posters: view?.containerEl.querySelectorAll(".tdcb-play").length });`);
+        return { ready: false, ok: false, detail: `kein gezeichneter Block-Canvas im Blatt · ${dbg}` };
+      }
+      // Cursor in die Zeile NACH dem Block (nicht in den Block: im Live Preview zeigt ein Cursor im Block den Quelltext
+      // statt des Widgets, der Canvas verschwindet).
+      if (live) {
+        const last = await cdp.evaluate<number>(`return app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view.editor?.lastLine?.() ?? 0;`);
+        await setCursorLine(cdp, Math.max(0, last - 1));
+      }
+      const clicked = await clickReal(cdp, blockCanvas);
+      await new Promise((r) => setTimeout(r, 400));
+      const before = await cdp.evaluate<KeysState | null>(keysProbe);
+      await pressKey("ArrowUp");
+      await pressKey("ArrowLeft");
+      await new Promise((r) => setTimeout(r, 700));
+      const after = await cdp.evaluate<KeysState | null>(keysProbe);
+      const moved = !!before && !!after && before.hash !== after.hash;
+      const lineKept = !live || (before?.line !== null && before?.line === after?.line);
+      const ok = clicked && before?.focused === true && moved && lineKept;
+      return {
+        ready: true,
+        ok,
+        detail: `Klick angekommen: ${clicked} · Fokus auf dem Canvas nach dem Klick: ${before?.focused} (erwartet true) · tabIndex ${before?.tabIndex} (erwartet -1) · Bild nach ↑ ← ${moved ? "verändert" : "IDENTISCH"} · Hüllbox-Mitte ${before?.box ? `${(before.box.cx * 100).toFixed(1)}/${(before.box.cy * 100).toFixed(1)}` : "?"} → ${after?.box ? `${(after.box.cx * 100).toFixed(1)}/${(after.box.cy * 100).toFixed(1)}` : "?"}` +
+          (live ? ` · Cursorzeile ${before?.line} → ${after?.line} (erwartet gleich)` : ""),
+      };
+    };
+    await closeExtraLeaves(cdp);
+    // Wie PP5: der Öffner, der bei leerem Lesemodus neu rendert und den Block aktiviert (ein Block bleibt sonst als
+    // Standbild mit unsichtbarem Canvas stehen, gemessen 2026-10-04).
+    await ppOpenBlockNote(cdp, SMOKE_NOTE_KEYS, keysBody);
+    const readKeys = await measureKeys(false);
+    record("SH15. Pfeiltasten schieben die Ansicht eines Blocks im Lesemodus (echter Klick fokussiert, echte Tasten)", readKeys.ok, readKeys.detail);
+    await closeExtraLeaves(cdp);
+    const previousLive15 = await cdp.evaluate<unknown>(`return app.vault.getConfig("livePreview");`);
+    try {
+      await openInLivePreview(cdp, SMOKE_NOTE_KEYS);
+      const liveKeys = await measureKeys(true);
+      record("SH15b. Pfeiltasten schieben die Ansicht eines Blocks im Live Preview, die Cursorzeile des Editors bleibt", liveKeys.ok, liveKeys.detail);
+    } finally {
+      await cdp.evaluate(`app.vault.setConfig("livePreview", ${JSON.stringify(previousLive15)}); return true;`);
+      await closeExtraLeaves(cdp);
+    }
+
+    // --- SH16. Die Hoehe des Editors folgt dem Text ------------------------------------------------
+    // Regel (Johannes 2026-10-04): so hoch wie der Text (Zeilen x Zeilenhoehe + Rahmen/Padding), nach oben durch
+    // die Flaeche begrenzt (dann scrollt er innen), Mindesthoehe drei Zeilen; im Split gilt dasselbe fuer die
+    // Textspalte, das Modell bleibt so hoch wie die Flaeche. „Flaeche“ = der Inhaltsbereich der Textspalte
+    // (`.tdcb-shapes-text` ohne Padding), das ist die Obergrenze des Editors. Die Zeilenhoehe wird an `.cm-line`
+    // gemessen. Die drei Dateien legt der Punkt selbst an (Whitelist), das Aufraeumen loescht sie.
+    const lineFile = (n: number): string => ["title: Zeilen", ...Array.from({ length: Math.max(n - 1, 0) }, (_, i) => `box T${i} size 0.2 at ${i} 0 0`)].join("\n");
+    const heightExpr = (path: string): string => `
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(path)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      const editor = root?.querySelector(".tdcb-shapes-text .cm-editor");
+      const text = root?.querySelector(".tdcb-shapes-text");
+      const model = root?.querySelector(".tdcb-shapes-model");
+      const scroller = root?.querySelector(".tdcb-shapes-text .cm-scroller");
+      const content = root?.querySelector(".tdcb-shapes-text .cm-content");
+      const line = root?.querySelector(".tdcb-shapes-text .cm-line");
+      if (!editor || !text || !scroller || !content || !line || text.classList.contains("is-hidden")) return null;
+      const px = (v) => parseFloat(v) || 0;
+      const e = getComputedStyle(editor);
+      const c = getComputedStyle(content);
+      const t = getComputedStyle(text);
+      const modelShown = !!model && !model.classList.contains("is-hidden");
+      return {
+        lh: line.getBoundingClientRect().height,
+        lines: root.querySelectorAll(".tdcb-shapes-text .cm-line").length,
+        editorH: editor.getBoundingClientRect().height,
+        extras: px(e.borderTopWidth) + px(e.borderBottomWidth) + px(c.paddingTop) + px(c.paddingBottom),
+        paneInner: text.getBoundingClientRect().height - px(t.paddingTop) - px(t.paddingBottom),
+        bodyH: root.querySelector(".tdcb-shapes-body").getBoundingClientRect().height,
+        scrolls: scroller.scrollHeight > scroller.clientHeight + 1,
+        modelH: modelShown ? model.getBoundingClientRect().height : null,
+        split: root.querySelector(".tdcb-shapes-body").classList.contains("is-split"),
+      };
+    `;
+    interface HeightState {
+      lh: number;
+      lines: number;
+      editorH: number;
+      extras: number;
+      paneInner: number;
+      bodyH: number;
+      scrolls: boolean;
+      modelH: number | null;
+      split: boolean;
+    }
+    const f1 = (v: number | null | undefined): string => (v === null || v === undefined ? "?" : v.toFixed(1));
+    const describeHeight = (s: HeightState | null): string =>
+      s === null
+        ? "keine Textspalte"
+        : `${s.lines} Zeilen à ${f1(s.lh)} px (+ ${f1(s.extras)} px Rahmen/Padding) → Editor ${f1(s.editorH)} px · Textspalte innen ${f1(s.paneInner)} px · Fläche ${f1(s.bodyH)} px · scrollt innen: ${s.scrolls}` +
+          (s.modelH !== null ? ` · Modell ${f1(s.modelH)} px` : "");
+    const openLines = async (path: string, text: string, mode: string): Promise<void> => {
+      await cdp.evaluate(`
+        const path = ${JSON.stringify(path)};
+        if (!app.vault.getAbstractFileByPath(path)) await app.vault.create(path, ${JSON.stringify(text)});
+        return true;
+      `);
+      createdNotes.add(path);
+      await openFileInLeaf(cdp, path);
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        await new Promise((r) => setTimeout(r, 500));
+        leafFor(${JSON.stringify(path)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="${mode}"]')?.click();
+        await new Promise((r) => setTimeout(r, 700));
+        return true;
+      `);
+    };
+    // (1) fuenf Zeilen: etwa fuenf Zeilenhoehen, deutlich kleiner als die Flaeche
+    await openLines(SMOKE_LINES_5, lineFile(5), "text");
+    const five = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_5), (s) => s.lines === 5, 10_000);
+    const f5 = five.state;
+    const five_ok = f5 !== null && Math.abs(f5.editorH - (5 * f5.lh + f5.extras)) <= f5.lh && f5.editorH < f5.bodyH * 0.5;
+    // (2) 200 Zeilen: Editor = Textspalte innen (±2 px), scrollt innen
+    await openLines(SMOKE_LINES_200, lineFile(200), "text");
+    const many = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_200), (s) => s.scrolls, 10_000);
+    const f200 = many.state;
+    const many_ok = f200 !== null && Math.abs(f200.editorH - f200.paneInner) <= 2 && f200.scrolls;
+    // (3) eine leere Zeile: mindestens drei Zeilenhoehen
+    await openLines(SMOKE_LINES_0, "", "text");
+    const empty = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_0), (s) => s.lh > 0, 10_000);
+    const f0 = empty.state;
+    const empty_ok = f0 !== null && f0.editorH >= 3 * f0.lh - 1;
+    // (4) Split mit fuenf Zeilen: dieselbe Regel in der Textspalte, das Modell fuellt die Flaeche
+    await openFileInLeaf(cdp, SMOKE_LINES_5);
+    const wide16 = await cdp.evaluate<boolean>(`
+      ${SHAPES_LEAF}
+      return !!leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="split"]:not([hidden])');
+    `);
+    let f4: HeightState | null = null;
+    let split_ok = true;
+    if (wide16) {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="split"]')?.click();
+        await new Promise((r) => setTimeout(r, 800));
+        return true;
+      `);
+      const sp = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_5), (s) => s.split && s.lines === 5, 10_000);
+      f4 = sp.state;
+      split_ok = f4 !== null && Math.abs(f4.editorH - (5 * f4.lh + f4.extras)) <= f4.lh && f4.editorH < f4.bodyH * 0.5 && (f4.modelH ?? 0) >= f4.bodyH - 2;
+    }
+    record(
+      "SH16. Die Höhe des Editors folgt dem Text: 5 Zeilen ≈ 5 Zeilenhöhen, 200 Zeilen = Textspalte und scrollen innen, leere Datei ≥ 3 Zeilenhöhen, Split dieselbe Regel",
+      five_ok && many_ok && empty_ok && split_ok,
+      `5 Zeilen (erwartet Editor = 5×Zeile + Rahmen/Padding ± 1 Zeile, < 50 % der Fläche): ${describeHeight(f5)} | 200 Zeilen (erwartet Editor = Textspalte innen ± 2 px, scrollt innen): ${describeHeight(f200)} | leer (erwartet ≥ 3 Zeilenhöhen): ${describeHeight(f0)} | Split, 5 Zeilen (erwartet wie die erste, Modell ≥ Fläche − 2 px): ${wide16 ? describeHeight(f4) : "Split nicht angeboten (Breite < 700 px) — nicht gemessen"}`,
+    );
+    if (!wide16) skipped("SH16b. Split-Teil der Editor-Höhe", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
+
+    // --- SH17. Der Editor-Rahmen bleibt durchgezogen, auch im Fokus -----------------------------
+    // CodeMirrors Basisthema setzt auf den fokussierten Editor `outline: 1px dotted #212121`; das sah wie ein
+    // gepunkteter Rand aus. Erwartet: ohne Fokus Rand solid 1 px; im Fokus kein Outline (none oder Breite 0),
+    // Rand weiter solid, Randfarbe im Fokus anders als ohne Fokus (der Fokus bleibt erkennbar).
+    const frameExpr = `
+      ${SHAPES_LEAF}
+      const editor = leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector(".tdcb-shapes-text .cm-editor");
+      if (!editor) return null;
+      const e = getComputedStyle(editor);
+      return {
+        focused: editor.classList.contains("cm-focused"),
+        outlineStyle: e.outlineStyle,
+        outlineWidth: parseFloat(e.outlineWidth) || 0,
+        borderStyle: e.borderTopStyle,
+        borderWidth: parseFloat(e.borderTopWidth) || 0,
+        borderColor: e.borderTopColor,
+      };
+    `;
+    interface FrameState {
+      focused: boolean;
+      outlineStyle: string;
+      outlineWidth: number;
+      borderStyle: string;
+      borderWidth: number;
+      borderColor: string;
+    }
+    await openFileInLeaf(cdp, SMOKE_LINES_5);
+    await cdp.evaluate(`
+      ${SHAPES_LEAF}
+      leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="text"]')?.click();
+      await new Promise((r) => setTimeout(r, 600));
+      document.activeElement?.blur?.();
+      await new Promise((r) => setTimeout(r, 300));
+      return true;
+    `);
+    const idle17 = await pollState<FrameState>(cdp, frameExpr, (s) => !s.focused, 6_000, 250);
+    const clicked17 = await clickReal(
+      cdp,
+      `app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).find((l) => l.view.file?.path === ${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector(".tdcb-shapes-text .cm-content")`,
+    );
+    const focus17 = await pollState<FrameState>(cdp, frameExpr, (s) => s.focused, 6_000, 250);
+    const i17 = idle17.state;
+    const f17 = focus17.state;
+    record(
+      "SH17. Der Editor-Rahmen bleibt durchgezogen 1 px, im Fokus ohne gepunkteten Outline und mit anderer Randfarbe",
+      i17 !== null &&
+        f17 !== null &&
+        clicked17 &&
+        !i17.focused &&
+        i17.borderStyle === "solid" &&
+        i17.borderWidth === 1 &&
+        f17.focused &&
+        f17.borderStyle === "solid" &&
+        f17.borderWidth === 1 &&
+        (f17.outlineStyle === "none" || f17.outlineWidth === 0) &&
+        f17.borderColor !== i17.borderColor,
+      `ohne Fokus: Rand ${i17?.borderStyle ?? "?"} ${i17?.borderWidth ?? "?"} px ${i17?.borderColor ?? "?"}, Outline ${i17?.outlineStyle ?? "?"} ${i17?.outlineWidth ?? "?"} px (cm-focused: ${i17?.focused ?? "?"}) | Klick angekommen: ${clicked17} | im Fokus: Rand ${f17?.borderStyle ?? "?"} ${f17?.borderWidth ?? "?"} px ${f17?.borderColor ?? "?"}, Outline ${f17?.outlineStyle ?? "?"} ${f17?.outlineWidth ?? "?"} px (cm-focused: ${f17?.focused ?? "?"}) · Randfarbe wechselt: ${!!i17 && !!f17 && i17.borderColor !== f17.borderColor}`,
+    );
+
+    // --- SH9. Block -> Datei -------------------------------------------------
+    const movedBody = [`title: ${MOVED_TITLE}`, "box A size 1", "box B size 0.5 at 1 0 0 color #ff0000"].join("\n");
+    const noteHead = "# GUI-Smoke move (automatisch erzeugt)";
+    await closeExtraLeaves(cdp);
+    await openNote(cdp, SMOKE_NOTE_MOVE, [noteHead, "", `${fence}shapes`, movedBody, fence, ""].join("\n"), "source");
+    await closeExtraLeaves(cdp);
+    const cursor9 = await setCursorLine(cdp, 4);
+    await clearNotices(cdp);
+    const ran9 = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_BLOCK_TO_FILE)});`);
+    const nine = await pollState<{ note: string; files: { path: string; text: string }[] }>(
+      cdp,
+      `
+        const mine = app.vault.getFiles().filter((f) => f.name.startsWith(${JSON.stringify(MOVED_TITLE)}) && f.extension === "shapes");
+        const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_MOVE)}));
+        const files = [];
+        for (const f of mine) files.push({ path: f.path, text: await app.vault.read(f) });
+        return { note, files };
+      `,
+      (s) => s.files.length > 0 && !s.note.includes("```shapes"),
+      10_000,
+    );
+    const n9 = nine.state;
+    const linkMatch = n9 ? /^(.*)\n\n```3d\nfile: (.+)\n```\n?$/s.exec(n9.note) : null;
+    const movedPath = n9?.files[0]?.path ?? "";
+    const linkResolves = linkMatch
+      ? await cdp.evaluate<boolean>(`
+          return app.metadataCache.getFirstLinkpathDest(${JSON.stringify(linkMatch[2])}, ${JSON.stringify(SMOKE_NOTE_MOVE)})?.path === ${JSON.stringify(movedPath)};
+        `)
+      : false;
+    const notice9 = await notices(cdp);
+    record(
+      "SH9. Block → Datei: neue .shapes-Datei mit dem Blocktext, die Notiz verweist darauf",
+      cursor9?.mode === "source" &&
+        ran9 === true &&
+        nine.reached &&
+        n9?.files.length === 1 &&
+        n9.files[0]?.text === `${movedBody}\n` &&
+        linkMatch?.[1] === noteHead &&
+        linkResolves,
+      `Cursor-Zeile ${cursor9?.line ?? "?"} im Modus ${cursor9?.mode ?? "?"} · Befehl lief: ${ran9} · Dateien: ${n9?.files.map((f) => f.path).join(", ") || "keine"} · Text gleich Blocktext+LF: ${n9?.files[0]?.text === `${movedBody}\n`} · Verweis ${linkMatch ? JSON.stringify(linkMatch[2]) : "fehlt"} löst auf die Datei auf: ${linkResolves} · Meldung: ${notice9.slice(0, 80)}`,
+    );
+
+    // --- SH10. Datei -> Block: bei zwei Verweisen abgelehnt, bei einem durchgefuehrt --
+    if (movedPath === "" || !linkMatch) {
+      skipped("SH10. Datei → Block: abgelehnt bei zwei Verweisen, durchgeführt bei einem", "SH9 hat keine Datei erzeugt — nichts zum Zurückwandeln");
+    } else {
+      const link = linkMatch[2];
+      const second = [`# Zweite Notiz`, "", `![[${link}]]`, ""].join("\n");
+      await cdp.evaluate(`
+        await app.vault.create(${JSON.stringify(SMOKE_NOTE_MOVE2)}, ${JSON.stringify(second)});
+        return true;
+      `);
+      createdNotes.add(SMOKE_NOTE_MOVE2);
+      const baseline = await cdp.evaluate<{ move: string; second: string; file: string }>(`
+        const get = (p) => app.vault.read(app.vault.getAbstractFileByPath(p));
+        return { move: await get(${JSON.stringify(SMOKE_NOTE_MOVE)}), second: await get(${JSON.stringify(SMOKE_NOTE_MOVE2)}), file: await get(${JSON.stringify(movedPath)}) };
+      `);
+      // Papierkorb: nur messbar, wenn Obsidian lokal in `.trash` ablegt; sonst (System-Papierkorb,
+      // endgueltig) laesst sich der Verbleib von hier nicht pruefen und bleibt ungemessen.
+      const trashProbe = (base: string): string => `
+        const opt = app.vault.getConfig("trashOption");
+        let count = 0;
+        if (await app.vault.adapter.exists(".trash")) {
+          const l = await app.vault.adapter.list(".trash");
+          count = l.files.filter((p) => p.split("/").pop().startsWith(${JSON.stringify(base)})).length;
+        }
+        return { opt, count };
+      `;
+      const movedBase = (movedPath.split("/").pop() ?? "").replace(/\.shapes$/, "");
+      const trashBefore = await cdp.evaluate<{ opt: string; count: number }>(trashProbe(movedBase));
+      const cursorRefuse = await setCursorLine(cdp, 3);
+      await clearNotices(cdp);
+      const ranRefuse = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});`);
+      const refused = await pollState<{ notice: string }>(
+        cdp,
+        `
+          const text = [...document.querySelectorAll(".notice")].map((n) => n.textContent.trim()).join(" | ");
+          return text.includes("is used in") || text.includes("is now a code block") ? { notice: text } : null;
+        `,
+        () => true,
+        8_000,
+        250,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const afterRefuse = await cdp.evaluate<{ move: string; second: string; fileExists: boolean }>(`
+        const get = (p) => app.vault.read(app.vault.getAbstractFileByPath(p));
+        return {
+          move: await get(${JSON.stringify(SMOKE_NOTE_MOVE)}),
+          second: await get(${JSON.stringify(SMOKE_NOTE_MOVE2)}),
+          fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(movedPath)}),
+        };
+      `);
+      const refusalOk =
+        cursorRefuse?.mode === "source" &&
+        ranRefuse === true &&
+        (refused.state?.notice ?? "").includes("is used in 2 places") &&
+        afterRefuse.fileExists &&
+        afterRefuse.move === baseline.move &&
+        afterRefuse.second === baseline.second;
+
+      // Zweite Notiz weg, dann genau ein Verweis: der Umzug laeuft.
+      await cdp.evaluate(`
+        await app.vault.delete(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_MOVE2)}));
+        await new Promise((r) => setTimeout(r, 500));
+        return true;
+      `);
+      await setCursorLine(cdp, 3);
+      await clearNotices(cdp);
+      const ranDone = await cdp.evaluate<boolean>(`return app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)});`);
+      const done10 = await pollState<{ note: string; fileExists: boolean; sameName: number }>(
+        cdp,
+        `
+          const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_MOVE)}));
+          return {
+            note,
+            fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(movedPath)}),
+            sameName: app.vault.getFiles().filter((f) => f.name === ${JSON.stringify(movedPath.split("/").pop() ?? "")}).length,
+          };
+        `,
+        (s) => s.note.includes("```shapes") && !s.fileExists,
+        10_000,
+      );
+      const trashAfter = await cdp.evaluate<{ opt: string; count: number }>(trashProbe(movedBase));
+      const trashMeasurable = trashAfter.opt === "local";
+      const trashOk = !trashMeasurable || trashAfter.count > trashBefore.count;
+      const notice10 = await notices(cdp);
+      const expectedNote = [noteHead, "", `${fence}shapes`, movedBody, fence, ""].join("\n");
+      record(
+        "SH10. Datei → Block: abgelehnt bei zwei Verweisen, durchgeführt bei einem",
+        refusalOk && ranDone === true && done10.reached && done10.state?.sameName === 0 && trashOk && done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, ""),
+        `Ablehnung: Meldung ${JSON.stringify((refused.state?.notice ?? "keine").slice(0, 70))} · Datei blieb: ${afterRefuse.fileExists} · Notizen unverändert: ${afterRefuse.move === baseline.move && afterRefuse.second === baseline.second} · Umzug: Datei weg ${done10.state ? !done10.state.fileExists : "?"} · Dateien gleichen Namens ${done10.state?.sameName ?? "?"} · Papierkorb (${trashAfter.opt}): ${trashMeasurable ? `Kopie in .trash ${trashBefore.count} → ${trashAfter.count}` : "Verbleib von hier nicht messbar, nur „nicht im Vault“ geprüft"} · Notiz wieder mit shapes-Block und Originaltext: ${done10.state ? done10.state.note.replace(/\n+$/, "") === expectedNote.replace(/\n+$/, "") : "?"} · Meldung: ${notice10.slice(0, 60)}`,
+      );
+    }
+
+    // --- SH11. Offene Ansicht mit ungespeichertem Tippen verliert nichts -----
+    const liveLine = "box Frisch size 0.2 at 0 0 1 color #00ff00";
+    await cdp.evaluate(`
+      await app.vault.create(${JSON.stringify(SMOKE_LIVE_SHAPES)}, ${JSON.stringify(SHAPES_TABLE)});
+      await app.vault.create(${JSON.stringify(SMOKE_NOTE_LIVE)}, ${JSON.stringify(["# Live", "", `${fence}3d`, `file: ${SMOKE_LIVE_SHAPES}`, fence, ""].join("\n"))});
+      return true;
+    `);
+    createdNotes.add(SMOKE_LIVE_SHAPES);
+    createdNotes.add(SMOKE_NOTE_LIVE);
+    await openFileInLeaf(cdp, SMOKE_LIVE_SHAPES);
+    const liveReady = await pollUntil<boolean>(
+      cdp,
+      `
+        ${SHAPES_LEAF}
+        const leaf = leafFor(${JSON.stringify(SMOKE_LIVE_SHAPES)});
+        return leaf && cmOf(leaf) && leaf.view.getViewData() === ${JSON.stringify(SHAPES_TABLE)} ? true : null;
+      `,
+      10_000,
+      250,
+    );
+    if (!liveReady) {
+      record("SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts", false, "Ansicht der Live-Datei kam nicht zustande");
+    } else {
+      await clearNotices(cdp);
+      // Tippen, Platte pruefen und Befehl in EINEM Renderer-Aufruf: weit innerhalb der 2 s
+      // Speicherverzoegerung. Steht die Zeile schon auf der Platte, wurde der Fall nicht erzeugt;
+      // dann laeuft der Befehl NICHT, sondern es wird einmal neu getippt (nach dem Durchschreiben).
+      const typedLines: string[] = [];
+      const attempt = async (line: string): Promise<{ method: string; pending: boolean; ran: boolean; ms: number }> => {
+        typedLines.push(line);
+        return cdp.evaluate(`
+          ${SHAPES_LEAF}
+          const t0 = Date.now();
+          const leaf = leafFor(${JSON.stringify(SMOKE_LIVE_SHAPES)});
+          const method = typeAtEnd(leaf, ${JSON.stringify(`\n${line}`)});
+          const disk = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}));
+          const pending = !disk.includes(${JSON.stringify(line)}) && leaf.view.getViewData().includes(${JSON.stringify(line)});
+          const ran = pending ? app.commands.executeCommandById(${JSON.stringify(CMD_FILE_TO_BLOCK)}) : false;
+          return { method, pending, ran, ms: Date.now() - t0 };
+        `);
+      };
+      let fired = await attempt(liveLine);
+      if (!fired.pending) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        fired = await attempt(`${liveLine.replace("Frisch", "Frisch2")}`);
+      }
+      if (!fired.pending) {
+        const text = `der Ausgangsfall (getippt, noch nicht gespeichert) entstand auch im zweiten Versuch nicht: Eingabe per ${fired.method}, nach ${fired.ms} ms schon auf der Platte oder nicht im Ansichtspuffer`;
+        if (fired.method === "dispatch") {
+          record("SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts", false, `${text} — der Editor nahm die Eingabe an (CM-View erreichbar), der Zustand ließ sich trotzdem nicht erzeugen`);
+        } else {
+          skipped("SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts", `${text} (Rückfall-Eingabe per ${fired.method}, nicht über die CM-View)`);
+        }
+      } else {
+        const fileState = `
+          const note = await app.vault.read(app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_LIVE)}));
+          return {
+            note,
+            fileExists: !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}),
+            onFs: await app.vault.adapter.exists(${JSON.stringify(SMOKE_LIVE_SHAPES)}),
+            views: app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).length,
+          };
+        `;
+        const eleven = await pollState<{ note: string; fileExists: boolean; onFs: boolean; views: number }>(
+          cdp,
+          fileState,
+          (st) => st.note.includes("```shapes") && !st.fileExists && !st.onFs,
+          10_000,
+        );
+        // Wiederauferstehung: ein veralteter Puffer koennte die Datei nach dem Papierkorb neu anlegen.
+        // Ueber 3,5 s alle 250 ms messen, Index UND Dateisystem; EIN Auftauchen genuegt fuer Rot.
+        // Der Poll beginnt erst nach dem Befehl (und nach dem erreichten Endzustand).
+        let reappeared = false;
+        for (let i = 0; i < 14 && eleven.reached; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const back = await cdp.evaluate<boolean>(`
+            return !!app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_LIVE_SHAPES)}) ||
+              app.vault.getFiles().some((f) => f.name === ${JSON.stringify(SMOKE_LIVE_SHAPES)}) ||
+              (await app.vault.adapter.exists(${JSON.stringify(SMOKE_LIVE_SHAPES)}));
+          `);
+          if (back) reappeared = true;
+        }
+        const notice11 = await notices(cdp);
+        const block = eleven.state?.note.includes(`${fence}shapes\n${[SHAPES_TABLE, ...typedLines].join("\n")}\n${fence}`) ?? false;
+        record(
+          "SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts",
+          fired.ran === true && eleven.reached && block && eleven.state?.fileExists === false && eleven.state.onFs === false && eleven.state.views === 0 && !reappeared,
+          `${typedLines.length} Versuch(e) bis zum ausstehenden Speichern · Eingabe per ${fired.method}, Befehl ${fired.ms} ms nach dem Tippen (Zeile noch nicht auf der Platte) · Befehl lief: ${fired.ran} · Notiz trägt Block samt frischer Zeile(n): ${block} · Datei weg (Index/Dateisystem): ${eleven.state ? `${!eleven.state.fileExists}/${!eleven.state.onFs}` : "?"} · offene Ansichten danach: ${eleven.state?.views ?? "?"} · Datei binnen 3,5 s wieder aufgetaucht (Index oder Dateisystem): ${reappeared} · Meldung: ${notice11.slice(0, 70)}`,
+        );
+      }
+    }
+
+    // --- SH12. Befehle, Menüeinträge, Icons ---------------------------------
+    const menuBlock = ["title: Menue", "box A size 1"].join("\n");
+    await closeExtraLeaves(cdp);
+    await openNote(
+      cdp,
+      SMOKE_NOTE_MENU,
+      ["# Menü", "", `${fence}shapes`, ...menuBlock.split("\n"), fence, "", `![[${SMOKE_VIEW_SHAPES}]]`, ""].join("\n"),
+      "source",
+    );
+    await closeExtraLeaves(cdp);
+    // Zeile 0 = Ueberschrift, 3 = im Block, 7 = Embed-Zeile. Je Ort: Verfuegbarkeit laut
+    // checkCallback UND das echte Kontextmenue — ein `contextmenu`-Ereignis an der Cursorposition,
+    // gelesen wird das DOM (`.menu .menu-item`, Titel, Icon-<svg>). Ein Menue, das gar nicht
+    // aufgeht (kein einziger Eintrag), ist KEINE Messung von „kein Eintrag“.
+    interface MenuProbe {
+      block: boolean;
+      file: boolean;
+      opened: boolean;
+      titles: string[];
+      iconOf: Record<string, boolean>;
+    }
+    const probe = async (line: number): Promise<MenuProbe | null> => {
+      const placed = await setCursorLine(cdp, line);
+      if (!placed) return null;
+      const result = await cdp.evaluate<MenuProbe>(`
+        const check = (id) => app.commands.commands[id].checkCallback(true) === true;
+        const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit).view;
+        const cm = view.editor.cm;
+        const out = { block: check(${JSON.stringify(CMD_BLOCK_TO_FILE)}), file: check(${JSON.stringify(CMD_FILE_TO_BLOCK)}), opened: false, titles: [], iconOf: {} };
+        const pos = view.editor.posToOffset(view.editor.getCursor());
+        const rect = cm.coordsAtPos(pos);
+        if (!rect) return out;
+        const x = rect.left + 4, y = (rect.top + rect.bottom) / 2;
+        const target = document.elementFromPoint(x, y) ?? cm.contentDOM;
+        target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline && document.querySelectorAll(".menu .menu-item").length === 0) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        await new Promise((r) => setTimeout(r, 200));
+        const items = [...document.querySelectorAll(".menu .menu-item")];
+        out.opened = items.length > 0;
+        for (const item of items) {
+          const title = item.querySelector(".menu-item-title")?.textContent?.trim() ?? "";
+          out.titles.push(title);
+          out.iconOf[title] = !!item.querySelector(".menu-item-icon svg");
+        }
+        // Menue schliessen: Escape, und zur Sicherheit wegklicken.
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await new Promise((r) => setTimeout(r, 200));
+        if (document.querySelector(".menu")) document.body.click();
+        await new Promise((r) => setTimeout(r, 200));
+        return out;
+      `);
+      return result;
+    };
+    const registered = await cdp.evaluate<{ block: string; file: string }>(`
+      return {
+        block: app.commands.commands[${JSON.stringify(CMD_BLOCK_TO_FILE)}]?.name ?? "",
+        file: app.commands.commands[${JSON.stringify(CMD_FILE_TO_BLOCK)}]?.name ?? "",
+      };
+    `);
+    const onHeading = await probe(0);
+    const inBlock = await probe(3);
+    const onEmbed = await probe(7);
+    const titleBlock = "Move shapes block into a file";
+    const titleFile = "Move .shapes file into a code block";
+    const count = (s: MenuProbe | null, t: string): number => s?.titles.filter((x) => x === t).length ?? -1;
+    const gatingOk =
+      onHeading !== null && inBlock !== null && onEmbed !== null &&
+      !onHeading.block && !onHeading.file &&
+      inBlock.block && !inBlock.file &&
+      !onEmbed.block && onEmbed.file;
+    const probes = [onHeading, inBlock, onEmbed];
+    const menuMeasured = probes.every((p) => p !== null && p.opened);
+    const menuOk =
+      menuMeasured &&
+      count(onHeading, titleBlock) === 0 && count(onHeading, titleFile) === 0 &&
+      count(inBlock, titleBlock) === 1 && inBlock?.iconOf[titleBlock] === true && count(inBlock, titleFile) === 0 &&
+      count(onEmbed, titleFile) === 1 && onEmbed?.iconOf[titleFile] === true && count(onEmbed, titleBlock) === 0;
+    const namesOk =
+      registered.block.endsWith("Move shapes block into a .shapes file") && registered.file.endsWith("Move .shapes file into a code block");
+    const describe = (s: MenuProbe | null): string =>
+      s ? `${s.opened ? "Menü offen" : "Menü NICHT offen"}: Block-Eintrag ${count(s, titleBlock)}${s.iconOf[titleBlock] ? " mit svg" : ""}, Datei-Eintrag ${count(s, titleFile)}${s.iconOf[titleFile] ? " mit svg" : ""}` : "Cursor nicht setzbar";
+    if (menuMeasured) {
+      record(
+        "SH12. Befehle sind registriert, nur am richtigen Ort verfügbar, das echte Kontextmenü trägt die Einträge mit Icon",
+        namesOk && gatingOk && menuOk,
+        `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file} · Kontextmenü Überschrift [${describe(onHeading)}] · im Block [${describe(inBlock)}] · auf Embed [${describe(onEmbed)}]`,
+      );
+    } else {
+      record(
+        "SH12. Befehle sind registriert und nur am richtigen Ort verfügbar",
+        namesOk && gatingOk,
+        `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file}`,
+      );
+      skipped(
+        "SH12b. Kontextmenü-Einträge mit Icon",
+        `das Kontextmenü ging per contextmenu-Ereignis nicht auf (Überschrift [${describe(onHeading)}], im Block [${describe(inBlock)}], auf Embed [${describe(onEmbed)}]) — nur Befehle und Verfügbarkeit gemessen`,
+      );
+    }
+  } finally {
+    // Eigene Dateien am Abschnittsende wegraeumen (cleanupState bleibt das Netz): sie sollen nicht
+    // durch `edit`, `cameras` und `clickrace` leben.
+    await cdp
+      .evaluate(`
+        ${SHAPES_WIPE}
+        return true;
+      `)
+      .catch(() => undefined);
+    await cdp
+      .evaluate(`
+        if (${sidebars.left}) app.workspace.leftSplit.expand();
+        if (${sidebars.right}) app.workspace.rightSplit.expand();
+        return true;
+      `)
+      .catch(() => undefined);
+  }
+}
+
+// --- PP1–PP9. Prompt-Panel gegen einen Ersatz-Endpunkt --------------------------
+// Eigener Abschnitt (`--section promptpanel`). **Der Ersatz-Endpunkt prüft die Verdrahtung, nicht das LLM:**
+// ein lokaler HTTP-Server (`node:http`, Port 0) antwortet mit AUFGEZEICHNETEN Modellantworten aus den
+// Fixtures (Erzeugen: Spike A, Eintrag A02; Verfeinern: Lab-Lauf 2026-10-03, Fall R01). Er sagt nichts über
+// die Qualität eines Modells — dafür gibt es die Messzeile und docs/LAB.md.
+//
+// Zustand, den dieser Abschnitt anlegt, wird VOR dem Lauf zurückgesetzt UND beim Aufräumen entfernt
+// (CORE-TEST-21: ein `finally` erreicht einen Abbruch nicht — `ppCleanup` hängt deshalb auch in `cleanupState`):
+// die Ersatz-Endpunktzeile in den Plugin-Einstellungen, das Panel-Blatt, `acceptAs`, die vier Notizen
+// (`_tdcb-gui-smoke-pp-*.md`, jede wird zu Beginn neu geschrieben) und der Server.
+const PANEL_VIEW_TYPE = "tdcb-prompt-panel";
+const SMOKE_NOTE_PP_NEW = "_tdcb-gui-smoke-pp-new.md";
+const SMOKE_NOTE_PP_EDIT = "_tdcb-gui-smoke-pp-edit.md";
+const SMOKE_NOTE_PP_STALE = "_tdcb-gui-smoke-pp-stale.md";
+const SMOKE_NOTE_PP_BLANK = "_tdcb-gui-smoke-pp-blank.md";
+const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK];
+const PP_ENDPOINT_ID = "tdcb-smoke-ep";
+const PP_MODEL = "smoke-model";
+/** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
+ *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
+const PP_CHUNK_DELAY_MS = 800;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11"] as const;
+const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
+const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
+const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
+const PP_EDIT_LABEL = "Edit in prompt panel";
+/** Selektor der Formen, die ein Lucide-Icon in seinem `<svg>` trägt — ein leeres `<svg>` (unbekannte Icon-ID) hat keine. */
+const PP_ICON_SHAPE = "svg path, svg line, svg circle, svg rect, svg polyline, svg polygon, svg ellipse";
+
+/** Punkte, die dieser Lauf gemessen oder als „nichts gemessen“ verbucht hat. Was am Ende fehlt (Abbruch
+ *  mitten im Abschnitt), wird im `finally` als „nichts gemessen“ nachgetragen, nie als gruen. */
+const ppDone = new Set<string>();
+function ppRecord(id: string, title: string, passed: boolean, detail: string): void {
+  ppDone.add(id);
+  record(`${id}. ${title}`, passed, detail);
+}
+function ppNothing(id: string, title: string, reason: string): void {
+  ppDone.add(id);
+  nothingMeasured(`${id}. ${title}`, reason);
+}
+
+interface Substitute {
+  url: string;
+  /** Wahr: nach dem ersten Stück schweigen (PP6) — die Verbindung bleibt offen, bis der Client sie schliesst. */
+  hang: boolean;
+  requests: { kind: "create" | "refine" | "models" | "unknown"; stream: boolean }[];
+  /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
+  clientClosed: number;
+  close(): Promise<void>;
+}
+
+let ppSubstitute: Substitute | null = null;
+let ppOriginalAcceptAs: unknown = null;
+
+/** Der Ersatz-Endpunkt. `GET …/models` kennt genau ein Modell, `POST …/chat/completions` antwortet je nach
+ *  System-Prompt mit der Erzeugen- oder der Verfeinern-Antwort, in drei `data:`-Stücken. CORS-Köpfe, weil der
+ *  Renderer (app://obsidian.md) per XHR streamt und der Browser sonst vorab fragt. */
+function startSubstitute(answers: { create: string; refine: string }): Promise<Substitute> {
+  const sub: Substitute = {
+    url: "",
+    hang: false,
+    requests: [],
+    clientClosed: 0,
+    close: async () => undefined,
+  };
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Private-Network": "true",
+  };
+  const timers = new Set<NodeJS.Timeout>();
+
+  const chat = (res: ServerResponse, raw: string): void => {
+    let body: { messages?: { role?: string; content?: unknown }[]; stream?: boolean } = {};
+    try {
+      body = JSON.parse(raw) as typeof body;
+    } catch {
+      body = {};
+    }
+    const system = body.messages?.find((m) => m.role === "system")?.content;
+    const kind = typeof system === "string" && system.includes("Du änderst") ? "refine" : "create";
+    const stream = body.stream !== false;
+    sub.requests.push({ kind, stream });
+    const answer = kind === "refine" ? answers.refine : answers.create;
+    const third = Math.ceil(answer.length / 3);
+    const pieces = [answer.slice(0, third), answer.slice(third, 2 * third), answer.slice(2 * third)].filter((p) => p !== "");
+    res.on("close", () => {
+      if (!res.writableEnded) sub.clientClosed++;
+    });
+    if (!stream) {
+      res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ model: PP_MODEL, choices: [{ index: 0, message: { role: "assistant", content: answer }, finish_reason: "stop" }] }));
+      return;
+    }
+    res.writeHead(200, { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+    const send = (delta: Record<string, unknown>, finish: string | null): void => {
+      res.write(`data: ${JSON.stringify({ model: PP_MODEL, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    };
+    send({ role: "assistant", content: pieces[0] ?? "" }, null);
+    if (sub.hang) return;
+    pieces.slice(1).forEach((piece, i) => {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (!res.destroyed) send({ content: piece }, null);
+      }, (i + 1) * PP_CHUNK_DELAY_MS);
+      timers.add(timer);
+    });
+    const endTimer = setTimeout(() => {
+      timers.delete(endTimer);
+      if (res.destroyed) return;
+      send({}, "stop");
+      res.write("data: [DONE]\n\n");
+      res.end();
+    }, pieces.length * PP_CHUNK_DELAY_MS);
+    timers.add(endTimer);
+  };
+
+  const server: Server = createServer((req, res) => {
+    const path = (req.url ?? "").split("?")[0] ?? "";
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors);
+      res.end();
+      return;
+    }
+    // Nur die Pfade, die ein echter Server kennt: LM Studio antwortet auf `GET /models` (ohne /v1) mit
+    // `{"error":"Unexpected endpoint…"}`, Ollama mit 404. Ein Ersatz, der auch `/models` bediente, verdeckte am
+    // 2026-10-04 den Kit-Fehler „Probe fragt /models statt /v1/models“ (CORE-TEST-08: der Prüfling bekam eine
+    // Antwort, die ein echter Server nie gibt).
+    if (req.method === "GET" && path.endsWith("/v1/models")) {
+      sub.requests.push({ kind: "models", stream: false });
+      res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: PP_MODEL }] }));
+      return;
+    }
+    if (req.method === "POST" && path.endsWith("/v1/chat/completions")) {
+      const parts: Buffer[] = [];
+      req.on("data", (c: Buffer) => parts.push(c));
+      req.on("end", () => chat(res, Buffer.concat(parts).toString("utf8")));
+      return;
+    }
+    sub.requests.push({ kind: "unknown", stream: false });
+    res.writeHead(404, { ...cors, "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: `Unexpected endpoint or method. (${req.method} ${path})` }));
+  });
+
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      sub.url = `http://127.0.0.1:${port}/v1`;
+      sub.close = () =>
+        new Promise<void>((done) => {
+          for (const t of timers) clearTimeout(t);
+          timers.clear();
+          server.closeAllConnections();
+          server.close(() => done());
+        });
+      resolve(sub);
+    });
+  });
+}
+
+/** Die aufgezeichneten Antworten aus den Fixtures — oder der Grund, warum es sie nicht gibt. */
+function loadPpAnswers(): { ok: true; create: string; refine: string; sources: string } | { ok: false; reason: string } {
+  const read = (file: string, id: string): string | null => {
+    if (!existsSync(file)) return null;
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (line.trim() === "") continue;
+      const rec = JSON.parse(line) as { id?: string; answer?: string };
+      if (rec.id?.startsWith(id) && typeof rec.answer === "string") return rec.answer;
+    }
+    return null;
+  };
+  const createFile = "tests/fixtures/shapes-spike/a-q27-dsl.jsonl";
+  const refineFile = "tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03-71051822.jsonl";
+  const create = read(createFile, "A02");
+  const refine = read(refineFile, "R01");
+  if (create === null) return { ok: false, reason: `kein Eintrag A02 mit Feld answer in ${createFile}` };
+  if (refine === null) return { ok: false, reason: `kein Eintrag R01 mit Feld answer in ${refineFile}` };
+  // Gegen das AKTUELLE Protokoll prüfen: eine Aufzeichnung, die der heutige Leser ablehnt, würde als
+  // „Plugin-Fehler“ erscheinen, obwohl der Ersatz falsch antwortet.
+  const parts = readPartsAnswer(create);
+  if (!parts.ok || parts.parts.length === 0) return { ok: false, reason: `A02 ist für das aktuelle Protokoll nicht lesbar (${parts.ok ? "keine Teile" : parts.reason})` };
+  const changes = readChangesAnswer(refine);
+  if (!changes.ok || changes.changes.length === 0 || changes.dropped.length > 0) {
+    return { ok: false, reason: `R01 ist für das aktuelle Protokoll nicht lesbar (${changes.ok ? `${changes.dropped.length} verworfen` : changes.reason})` };
+  }
+  return { ok: true, create, refine, sources: `Erzeugen ${createFile} A02.answer · Verfeinern ${refineFile} R01.answer` };
+}
+
+/** Renderer-Schnipsel: Ersatz-Zeile und Ersatz-Modell aus den Einstellungen nehmen, Panel-Blätter schliessen.
+ *  Speichert nur, wenn etwas zu entfernen war. Liefert, was entfernt wurde. */
+const PP_RESET = `
+  const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+  const removed = [];
+  if (plugin) {
+    const isSmoke = (e) => e && (e.id === ${JSON.stringify(PP_ENDPOINT_ID)} || (e.model === ${JSON.stringify(PP_MODEL)} && /^http:\\/\\/127\\.0\\.0\\.1:\\d+\\/v1$/.test(e.url ?? "")));
+    const before = Array.isArray(plugin.settings.endpoints) ? plugin.settings.endpoints : [];
+    const kept = before.filter((e) => !isSmoke(e));
+    let changed = kept.length !== before.length;
+    for (const e of before) if (isSmoke(e)) removed.push(e.url);
+    if (changed) plugin.settings.endpoints = kept;
+    if (plugin.settings.llmModel === ${JSON.stringify(PP_MODEL)}) { plugin.settings.llmModel = ""; changed = true; }
+    if (changed) { await plugin.saveSettings?.(); plugin.llm?.invalidate?.(); }
+  }
+  app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)});
+  await new Promise((r) => setTimeout(r, 200));
+  return removed;
+`;
+
+/** Wie `cleanupState` und das `finally` des Abschnitts es brauchen: schliesst Server, räumt die Einstellungen,
+ *  stellt `acceptAs` zurück. Wirft nie. */
+async function ppCleanup(cdp: Cdp): Promise<void> {
+  const sub = ppSubstitute;
+  ppSubstitute = null;
+  if (sub) await sub.close().catch(() => undefined);
+  if (ppSettingsOpened) {
+    ppSettingsOpened = false;
+    await cdp.evaluate(`app.setting.close(); return true;`).catch(() => undefined);
+  }
+  await cdp.evaluate(PP_RESET).catch(() => undefined);
+  if (ppOriginalAcceptAs !== null) {
+    const value = ppOriginalAcceptAs;
+    ppOriginalAcceptAs = null;
+    await setSetting(cdp, "acceptAs", value).catch(() => undefined);
+  }
+}
+
+interface PpState {
+  phase: string;
+  status: string;
+  tail: string;
+  target: string;
+  send: string;
+  rounds: number;
+  diff: string[];
+  previewVisible: boolean;
+  colors: number;
+  stopVisible: boolean;
+  applyDisabled: boolean;
+  sendDisabled: boolean;
+}
+
+/** Renderer-Schnipsel: der sichtbare Stand des Panels (oder `null`, wenn keines offen ist). */
+const PP_READ = `
+  ${SAMPLER}
+  const root = document.querySelector(".tdcb-prompt");
+  if (!root) return null;
+  const statusRow = root.querySelector(".tdcb-prompt-status");
+  const phase = ["checking", "ok", "error", "warning"].find((p) => statusRow?.classList.contains("is-" + p)) ?? "idle";
+  const canvas = root.querySelector(".tdcb-prompt-preview canvas");
+  const wrap = root.querySelector(".tdcb-prompt-preview");
+  return {
+    phase,
+    status: statusRow?.querySelector(".tdcb-prompt-status-label")?.textContent ?? "",
+    tail: root.querySelector(".okit-stream-tail")?.textContent ?? "",
+    target: root.querySelector(".tdcb-prompt-target")?.textContent ?? "",
+    send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
+    rounds: app.workspace.getLeavesOfType("tdcb-prompt-panel")[0]?.view?.state?.()?.rounds?.rounds?.length ?? 0,
+    diff: [...root.querySelectorAll(".tdcb-prompt-diff li")].map((l) => l.textContent ?? ""),
+    previewVisible: !!wrap && !wrap.classList.contains("is-hidden"),
+    colors: canvas ? (sample(canvas)?.colors ?? 0) : 0,
+    stopVisible: !!root.querySelector(".tdcb-prompt-stop:not(.is-hidden)"),
+    applyDisabled: root.querySelector(".tdcb-prompt-apply")?.disabled ?? true,
+    sendDisabled: root.querySelector(".tdcb-prompt-send")?.disabled ?? true,
+  };
+`;
+
+
+/** PP1 lässt die Einstellungen offen (siehe dort); `ppCleanup` schließt sie am Ende des Laufs. */
+let ppSettingsOpened = false;
+
+const ppRead = (cdp: Cdp): Promise<PpState | null> => cdp.evaluate<PpState | null>(PP_READ);
+const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Die Seitenleiste gleitet beim Einblenden herein (gemessen: ~1 s, x = Fensterbreite → Sollbreite); ein echter Klick
+ *  vorher trifft ausserhalb des Fensters und tut nichts. Warten, bis das Panel ganz im Fenster steht. */
+async function ppWaitPanelInside(cdp: Cdp): Promise<boolean> {
+  const settled = await pollState<{ inside: boolean }>(
+    cdp,
+    `const r = document.querySelector(".tdcb-prompt")?.getBoundingClientRect(); return r ? { inside: r.width > 0 && r.left >= 0 && r.right <= innerWidth } : null;`,
+    (s) => s.inside,
+    10_000,
+    200,
+  );
+  return settled.reached;
+}
+
+
+/** Das Panel frisch öffnen (Blatt zu, Befehl `open-prompt-panel`, Ziel „new“) und warten, bis es steht. */
+async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
+  await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
+  await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
+  const up = await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "", 10_000, 250);
+  if (!up.reached) return false;
+  return ppWaitPanelInside(cdp);
+}
+
+/** Text ins Eingabefeld des Panels schreiben (das Panel liest `value` beim Senden). */
+async function ppType(cdp: Cdp, text: string): Promise<boolean> {
+  return cdp.evaluate<boolean>(`
+    const ta = document.querySelector(".tdcb-prompt .tdcb-prompt-input");
+    if (!ta) return false;
+    ta.value = ${JSON.stringify(text)};
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  `);
+}
+
+/** Echter Mausklick auf einen Knopf des Panels. */
+const ppClick = (cdp: Cdp, selector: string): Promise<boolean> =>
+  clickReal(cdp, `document.querySelector(${JSON.stringify(`.tdcb-prompt ${selector}`)})`);
+
+/** Den Knopf mit dieser Beschriftung in der Aktionsleiste des ersten Blocks im Lesemodus klicken. */
+const ppClickActionButton = (cdp: Cdp, label: string): Promise<boolean> =>
+  clickReal(
+    cdp,
+    `([...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(label)} && b.getBoundingClientRect().width > 0))`,
+  );
+
+/** Notiztext von der Platte lesen. */
+const ppReadNote = (cdp: Cdp, path: string): Promise<string> =>
+  cdp.evaluate<string>(`
+    const file = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+    return file ? await app.vault.read(file) : "";
+  `);
+
+/** Das Fenster muss JETZT sichtbar sein (Lesemodus rendert in einem verdeckten Fenster nichts, 0 Bilder je Sekunde): nach
+ *  der Brücke fiel es gemessen 2026-10-04 mitten im Lauf wieder auf hidden. Hidden → show/moveTop/focus, danach pollen. */
+async function ppEnsureVisible(cdp: Cdp): Promise<string> {
+  const now = await cdp.evaluate<string>(`return document.visibilityState;`);
+  if (now === "visible") return "sichtbar";
+  await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); if (w.isMinimized()) w.restore(); w.show(); w.moveTop(); w.focus(); return true;`).catch(() => undefined);
+  const later = await pollUntil(cdp, `return document.visibilityState === "visible" ? true : null;`, 5000, 300);
+  return later ? "war hidden, geholt" : "bleibt hidden";
+}
+
+/** Eine Notiz mit Tisch-Block im Lesemodus öffnen und warten, bis der Block samt Aktionsleiste steht.
+ *  `null` = der Block rendert nicht (Umgebung, nicht Befund).
+ *
+ *  Der Lesemodus rendert nach dem Öffnen gelegentlich GAR NICHTS (gemessen 2026-10-04: Sizer ohne Abschnitte, 0 Blöcke,
+ *  0 Standbilder, 0 roher Codeblock — nach dem Schließen der Seitenleiste in 1 von 3 Läufen). Erst neu rendern lassen
+ *  (`previewMode.rerender(true)`), dann die Notiz neu öffnen; erst danach heißt es „rendert nicht“. */
+async function ppOpenBlockNote(
+  cdp: Cdp,
+  path: string,
+  body: string,
+): Promise<{ buttons: { label: string; svg: boolean; children: number }[] } | null> {
+  createdNotes.add(path);
+  const visibility = await ppEnsureVisible(cdp);
+  if (visibility !== "sichtbar") console.log(`  (Fenster vor ${path}: ${visibility})`);
+  const open = async (): Promise<void> => {
+    const diag = await cdp.evaluate<string>(`
+      try {
+        const path = ${JSON.stringify(path)};
+        const body = ${JSON.stringify(body)};
+        const existing = app.vault.getAbstractFileByPath(path);
+        if (existing) await app.vault.modify(existing, body);
+        else await app.vault.create(path, body);
+        const file = app.vault.getAbstractFileByPath(path);
+        // Ein NEUES Blatt statt des zuletzt benutzten: ein Blatt, das vorher im Quellmodus stand (PP4), rendert den
+        // Lesemodus danach in der Zweitinstanz gelegentlich gar nicht (gemessen 2026-10-04, auch mit Build 52d8134;
+        // ein frisches Blatt renderte in jedem Versuch). Die alten Markdown-Blätter danach schließen.
+        const old = app.workspace.getLeavesOfType("markdown");
+        const leaf = app.workspace.getLeaf("tab");
+        await leaf.openFile(file, { state: { mode: "preview" } });
+        for (const l of old) l.detach();
+        app.workspace.setActiveLeaf(leaf, { focus: true });
+        await new Promise((r) => setTimeout(r, 200));
+        return "ok";
+      } catch (e) { return "FEHLER " + (e && e.stack ? e.stack : String(e)); }
+    `);
+    if (diag !== "ok") console.log(`  (openNote ${path}: ${diag.slice(0, 600)})`);
+  };
+  const anyBlock = `const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); return { n: root ? root.querySelectorAll(".tdcb-block, .tdcb-play").length : 0 };`;
+  let rendered = false;
+  for (let attempt = 0; attempt < 2 && !rendered; attempt++) {
+    await ppEnsureVisible(cdp);
+    await open();
+    rendered = (await pollState<{ n: number }>(cdp, anyBlock, (s) => s.n > 0, 6_000, 300)).reached;
+    if (!rendered) {
+      const vis = await ppEnsureVisible(cdp);
+      if (vis !== "sichtbar") console.log(`  (Fenster beim Rendern von ${path}: ${vis})`);
+      await cdp.evaluate(`app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view?.previewMode?.rerender?.(true); return true;`);
+      rendered = (await pollState<{ n: number }>(cdp, anyBlock, (s) => s.n > 0, 5_000, 300)).reached;
+    }
+  }
+  // Ein Block steht zuerst als Standbild (`.tdcb-play`); die Aktionsleiste gehört zum lebenden Viewport und
+  // entsteht erst mit der Aktivierung (gemessen 2026-10-04: ohne Klick auf das Standbild keine Leiste).
+  if (rendered) await activateBlock(cdp, 0);
+  const probe = `
+    const bar = document.querySelector(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar");
+    if (!bar) return document.querySelector(".workspace-leaf-content[data-type='markdown'] .tdcb-block") ? { buttons: [] } : null;
+    return {
+      buttons: [...bar.querySelectorAll("button")].map((b) => ({
+        label: b.getAttribute("aria-label") ?? "",
+        svg: !!b.querySelector("svg"),
+        children: b.querySelectorAll(${JSON.stringify(PP_ICON_SHAPE)}).length,
+      })),
+    };
+  `;
+  const up = await pollState<{ buttons: { label: string; svg: boolean; children: number }[] }>(cdp, probe, (s) => s.buttons.length > 0, rendered ? 15_000 : 1_000, 400);
+  if (!up.state) {
+    console.log(`  (Block-Notiz ${path}: ${await describeScene(cdp)})`);
+    console.log(`  (Lesemodus-Diagnose: ${await cdp.evaluate<string>(`
+      const leaves = app.workspace.getLeavesOfType("markdown").map((l) => ({ mode: l.view.getMode?.(), file: l.view.file?.path, sizer: l.view.containerEl.querySelector(".markdown-preview-sizer")?.children.length ?? null, visible: l.view.containerEl.isShown?.(), active: app.workspace.activeLeaf === l }));
+      const probeLeaf = app.workspace.getLeaf("tab");
+      const f = app.vault.getAbstractFileByPath(${JSON.stringify(path)});
+      await probeLeaf.openFile(f, { state: { mode: "preview" } });
+      await new Promise((r) => setTimeout(r, 2500));
+      const fresh = probeLeaf.view.containerEl.querySelector(".markdown-preview-sizer")?.children.length ?? null;
+      probeLeaf.detach();
+      return JSON.stringify({ leaves, freshTabSizer: fresh, settingsOpen: !!document.querySelector(".modal-container"), popouts: app.workspace.floatingSplit?.children?.length ?? 0, rightCollapsed: app.workspace.rightSplit.collapsed });
+    `)})`);
+  }
+  return up.state;
+}
+
+/** Notiz mit einem Tisch-Block (Platte auf 0,725 m). `after` hängt Zeilen an den Rumpf (Leerzeile für PP9). */
+const ppBlockNote = (title: string, bodySuffix = ""): string =>
+  [`# ${title} (automatisch erzeugt, wird nach dem Lauf gelöscht)`, "", `${fence}shapes`, `${SHAPES_TABLE}${bodySuffix}`, fence, ""].join("\n");
+
+/** Zeilen ohne Leerzeilen — Vergleichsform für „bis auf die Platte unverändert“. */
+const nonBlank = (text: string): string[] => text.split("\n").filter((l) => l.trim() !== "");
+
+/** Panel für eine Notiz mit Block öffnen, Wunsch senden und auf das Ende der Runde warten (PP5, PP8, PP9). */
+async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ ready: boolean; reason: string; round: PpState | null; buttons: { label: string; svg: boolean; children: number }[] }> {
+  let step = "Notiz öffnen";
+  let buttons: { label: string; svg: boolean; children: number }[] = [];
+  try {
+    // Panel ZUERST schließen: das Einklappen der Seitenleiste ändert die Breite der Hauptfläche, und ein Block, der
+    // dabei neu rendert, verliert Aktivierung und Aktionsleiste (gemessen 2026-10-04: Knopf danach Breite 0).
+    step = "Panel schließen";
+    await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 1200)); return true;`);
+    step = "Notiz öffnen";
+    const note = await ppOpenBlockNote(cdp, path, body);
+    if (note === null) return { ready: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
+    buttons = note.buttons;
+    step = "Aktionsknopf klicken";
+    // Das Schließen des Panels klappt die Seitenleiste ein, die Hauptfläche wird breiter, der Block rendert neu
+    // (Standbild → Aktivierung) — erst warten, bis der Knopf wieder eine Größe hat.
+    const barBack = await pollState<{ w: number; poster: number }>(
+      cdp,
+      `const b = [...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].filter((x) => x.getAttribute("aria-label") === ${JSON.stringify(PP_EDIT_LABEL)}).find((x) => x.getBoundingClientRect().width > 0); return { w: b ? b.getBoundingClientRect().width : 0, poster: document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-play").length };`,
+      (s) => s.w > 0,
+      6_000,
+      300,
+    );
+    if (!barBack.reached) {
+      const vis = await ppEnsureVisible(cdp);
+      if (vis !== "sichtbar") console.log(`  (Fenster vor dem Klick in ${path}: ${vis})`);
+      await activateBlock(cdp, 0);
+      await sleepMs(500);
+    }
+    if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) {
+      const where = await cdp.evaluate<string>(`const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); const bs = [...(root?.querySelectorAll(".tdcb-toolbar-button") ?? [])].map((b) => (b.getAttribute("aria-label") ?? "?") + ":" + Math.round(b.getBoundingClientRect().width)); const bar = root?.querySelector(".tdcb-toolbar"); const r = root?.getBoundingClientRect(); return JSON.stringify({ win: [innerWidth, innerHeight], leaf: r ? [Math.round(r.width), Math.round(r.height)] : null, left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed, poster: root?.querySelectorAll(".tdcb-play").length, live: root?.querySelectorAll(".tdcb-block canvas").length, buttons: bs, barDisplay: bar ? getComputedStyle(bar).display + "/" + getComputedStyle(bar).opacity : null });`);
+      return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · ${where}`, round: null, buttons };
+    }
+    step = "Panel mit Ziel abwarten";
+    const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
+    if (!up.reached) return { ready: false, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons };
+    step = "Panel stehen lassen";
+    await ppWaitPanelInside(cdp);
+    step = "Wunsch senden";
+    await ppType(cdp, PP_REFINE_PROMPT);
+    await ppClick(cdp, ".tdcb-prompt-send");
+    step = "Ende der Runde abwarten";
+    const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
+    return { ready: done.reached && done.state?.phase === "ok", reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons };
+  } catch (error) {
+    return { ready: false, reason: `Renderer-Fehler im Schritt „${step}“: ${error instanceof Error ? error.message : String(error)}`, round: null, buttons };
+  }
+}
+
+async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
+  ppDone.clear();
+  const T = {
+    PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
+    PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
+    PP3: "Erzeugen streamt in Stücken und zeigt eine Vorschau",
+    PP4: "Übernehmen als Codeblock schreibt einen shapes-Block in die Notiz",
+    PP5: "Ändern über die Aktionsleiste: Ziel, Diff, nur die Platte-Zeile ändert sich",
+    PP6: "Abbruch: „Stopped.“, keine Runde, der Server sah den Abbruch",
+    PP7: "Aktionsleiste: jeder Knopf trägt ein Icon, „Edit in prompt panel“ öffnet das Panel",
+    PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
+    PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
+    PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
+    PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
+  } as const;
+  const nothingFor = (reason: string): void => {
+    for (const id of PP_IDS) if (!ppDone.has(id)) ppNothing(id, T[id], reason);
+  };
+
+  // Zustand aus Vorläufen VOR dem Abschnitt zurücksetzen: eine Ersatz-Zeile eines abgebrochenen Laufs zeigt auf
+  // einen toten Port und würde sich als Befund tarnen.
+  const removed = await cdp.evaluate<string[]>(PP_RESET);
+  for (const url of removed) console.log(`  Aufgeräumt (Rest eines früheren Laufs): Ersatz-Endpunkt ${url}`);
+  try {
+    // Voraussetzungen: ohne sie ist nichts gemessen, nicht rot.
+    const manager = await cdp.evaluate<boolean>(`return app.plugins.plugins["llm-endpoint-manager"] !== undefined;`);
+    if (manager) {
+      nothingFor("das Plugin llm-endpoint-manager ist im Vault aktiv — dann gilt dessen Endpunktliste, nicht die lokale; der Ersatz-Endpunkt wäre wirkungslos");
+      return;
+    }
+    const answers = loadPpAnswers();
+    if (!answers.ok) {
+      nothingFor(answers.reason);
+      return;
+    }
+    console.log(`  Ersatz-Antworten: ${answers.sources}`);
+    ppOriginalAcceptAs = await cdp.evaluate<unknown>(`return app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings.acceptAs ?? null;`);
+    const sub = await startSubstitute(answers);
+    ppSubstitute = sub;
+    console.log(`  Ersatz-Endpunkt: ${sub.url} (Modell ${PP_MODEL})`);
+    await cdp.evaluate(`
+      const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+      plugin.settings.endpoints = [{ id: ${JSON.stringify(PP_ENDPOINT_ID)}, url: ${JSON.stringify(sub.url)}, model: ${JSON.stringify(PP_MODEL)} }];
+      plugin.settings.llmModel = "";
+      plugin.settings.acceptAs = "block";
+      await plugin.saveSettings();
+      plugin.llm.invalidate();
+      return true;
+    `);
+
+    // --- PP1. Settings --------------------------------------------------------
+    // Erster GUI-Beleg für `renderSettings`. Der Anfrage-Titel stammt aus dem vendorten Kit-Modul, nicht aus dem Gedächtnis.
+    const requestTitle = LLM_CONNECTION_STRINGS_EN.request.title;
+    ppSettingsOpened = true;
+    const settings = await cdp.evaluate<{ rows: number; endpointRow: boolean; endpointValues: string[]; titles: string[]; group: boolean; statusOk: boolean; statusError: boolean }>(`
+      app.setting.open();
+      app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
+      const read = () => {
+        const container = app.setting.activeTab?.containerEl;
+        const inputs = [...(container?.querySelectorAll(".okit-ep-row input") ?? [])].map((i) => i.value);
+        return {
+          rows: container?.querySelectorAll(".setting-item").length ?? 0,
+          endpointRow: inputs.some((v) => v.includes(${JSON.stringify(sub.url)})),
+          endpointValues: inputs,
+          titles: [...(container?.querySelectorAll(".okit-collapsible-title") ?? [])].map((t) => t.textContent ?? ""),
+          group: [...(container?.querySelectorAll(".setting-item-heading, .setting-item-name") ?? [])].some((h) => (h.textContent ?? "").includes("Model by prompt")),
+          statusOk: !!container?.querySelector(".okit-ep-row .okit-ep-status.is-ok"),
+          statusError: !!container?.querySelector(".okit-ep-row .okit-ep-status.is-error"),
+        };
+      };
+      const deadline = Date.now() + 12000;
+      let state = read();
+      // Auch auf das Ergebnis der Erreichbarkeits-Probe warten (Symbol is-ok oder is-error), nicht nur auf die Zeile.
+      while (Date.now() < deadline && !(state.endpointRow && state.titles.length > 0 && (state.statusOk || state.statusError))) {
+        await new Promise((r) => setTimeout(r, 300));
+        state = read();
+      }
+      // NICHT schließen: in der Zweitinstanz ist das Einstellungen-Fenster ein Pop-out, und sein Schließen mitten im Lauf
+      // lässt den Lesemodus des Hauptfensters danach nichts mehr rendern (gemessen 2026-10-04: mit Schließen 4 von 10
+      // Punkten „nichts gemessen“ in zwei von drei Läufen, ohne Schließen 10/10 grün). Das Schließen folgt in ppCleanup.
+      return state;
+    `);
+    if (settings.rows === 0) {
+      ppNothing("PP1", T.PP1, "der Settings-Tab lieferte keine Zeilen (Einstellungen-Fenster nicht lesbar)");
+    } else {
+      ppRecord(
+        "PP1",
+        T.PP1,
+        settings.endpointRow && settings.titles.includes(requestTitle),
+        `Zeile mit Ersatz-URL: ${settings.endpointRow ? "ja" : `nein (Felder: ${settings.endpointValues.join(" | ") || "keine"})`} · Abschnitt „${requestTitle}“: ${settings.titles.includes(requestTitle) ? "ja" : `nein (Titel: ${settings.titles.join(" | ") || "keine"})`} · Gruppe „Model by prompt“: ${settings.group ? "ja" : "nein"} · ${settings.rows} Zeilen`,
+      );
+    }
+
+    // --- PP10. Die Ersatz-Zeile ist ERREICHBAR ----------------------------------
+    // „Vorhanden“ (PP1) ist nicht „erreichbar“: am 2026-10-04 fragte die Kit-Probe `/models` statt `/v1/models`, und jede
+    // echte lokale Zeile (LM Studio, Ollama) stand als „not reachable — skipped“ da, während der damalige Ersatz (der auch
+    // `/models` bediente) grün blieb. Der Ersatz bedient jetzt nur noch `/v1/…`; dieser Punkt misst die Wirkung: Symbol der
+    // Zeile is-ok, die Auflösung wählt die Ersatz-Zeile, und das Modell steht in der Modell-Liste.
+    if (settings.rows === 0) {
+      ppNothing("PP10", T.PP10, "der Settings-Tab lieferte keine Zeilen (Einstellungen-Fenster nicht lesbar)");
+    } else {
+      const reach = await cdp.evaluate<{ resolvedUrl: string | null; resolvedModel: string; listed: boolean; listDetail: string }>(`
+        const llm = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].llm;
+        const source = await llm.resolve({ force: true });
+        const list = await llm.models({ force: true });
+        const text = JSON.stringify(list);
+        return {
+          resolvedUrl: source?.config?.url ?? null,
+          resolvedModel: source?.model ?? "",
+          listed: text.includes(${JSON.stringify(PP_MODEL)}),
+          listDetail: text.slice(0, 160),
+        };
+      `);
+      const unknownHits = sub.requests.filter((r) => r.kind === "unknown").length;
+      ppRecord(
+        "PP10",
+        T.PP10,
+        settings.statusOk && !settings.statusError && reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") && reach.listed,
+        `Symbol der Zeile: ${settings.statusOk ? "is-ok" : settings.statusError ? "is-error" : "ohne Ergebnis"} · Auflösung: ${reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") ? "Ersatz-Zeile" : `${reach.resolvedUrl ?? "keine Zeile"} (erwartet ${sub.url.replace(/\/v1$/, "")})`}, Modell „${reach.resolvedModel}“ · Modell „${PP_MODEL}“ in der Liste: ${reach.listed ? "ja" : `nein (${reach.listDetail})`} · Anfragen an unbekannte Pfade: ${unknownHits}`,
+      );
+    }
+
+    // --- PP2. Panel öffnet ----------------------------------------------------
+    const opened = await ppOpenFresh(cdp);
+    const two = await cdp.evaluate<{ tabs: string[]; quality: string; qualityWarning: boolean; placeholder: string; send: string; examples: string } | null>(`
+      const root = document.querySelector(".tdcb-prompt");
+      if (!root) return null;
+      const q = root.querySelector(".tdcb-prompt-quality");
+      return {
+        tabs: [...root.querySelectorAll(".okit-hub-tab-label")].map((t) => t.textContent ?? ""),
+        quality: q?.textContent ?? "",
+        qualityWarning: !!q && q.classList.contains("is-warning"),
+        placeholder: root.querySelector(".tdcb-prompt-input")?.getAttribute("placeholder") ?? "",
+        send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
+        examples: root.querySelector(".tdcb-prompt-examples:not(.is-hidden)")?.textContent ?? "",
+      };
+    `);
+    if (!opened || two === null) {
+      ppRecord("PP2", T.PP2, false, "kein Panel nach dem Befehl open-prompt-panel");
+    } else {
+      ppRecord(
+        "PP2",
+        T.PP2,
+        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
+        `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
+      );
+    }
+
+    // --- PP3. Erzeugen --------------------------------------------------------
+    if (!opened) {
+      ppNothing("PP3", T.PP3, "PP2 öffnete das Panel nicht");
+    } else {
+      await ppType(cdp, PP_CREATE_PROMPT);
+      const armed = await cdp.evaluate<boolean>(`
+        const tail = document.querySelector(".tdcb-prompt .okit-stream-tail");
+        if (!tail) return false;
+        window.__ppTail = [];
+        window.__ppObs?.disconnect();
+        window.__ppObs = new MutationObserver(() => {
+          const n = (tail.textContent ?? "").length;
+          const list = window.__ppTail;
+          if (n > 0 && list[list.length - 1] !== n) list.push(n);
+        });
+        window.__ppObs.observe(tail, { childList: true, characterData: true, subtree: true });
+        return true;
+      `);
+      const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+      const run = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
+      // Vorschau-Canvas braucht einen Moment nach dem Status.
+      const shown = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.colors >= 3, 15_000, 400);
+      const lens = (await cdp.evaluate<number[] | null>(`window.__ppObs?.disconnect(); return window.__ppTail ?? null;`)) ?? [];
+      const finalLen = lens.length > 0 ? Math.max(...lens) : 0;
+      const intermediate = lens.filter((n) => n < finalLen).length;
+      const final = shown.state ?? run.state;
+      const createSeen = sub.requests.some((r) => r.kind === "create" && r.stream);
+      ppRecord(
+        "PP3",
+        T.PP3,
+        armed && clicked && run.reached && intermediate >= 2 && shown.reached && createSeen,
+        `Tail-Stände ${lens.join("→") || "keine"} (${intermediate} Zwischenstände, erwartet ≥ 2) · Status ${final?.phase ?? "?"}: „${final?.status ?? ""}“ · Vorschau ${final?.previewVisible ? "sichtbar" : "nicht sichtbar"}, ${final?.colors ?? 0} Farbtöne (erwartet ≥ 3) · Ersatz sah Erzeugen als Stream: ${createSeen} · Ziel „${final?.target ?? "?"}“ · Senden gesperrt: ${final?.sendDisabled ?? "?"} · Ersatz-Anfragen: ${sub.requests.map((r) => r.kind).join(",") || "keine"}`,
+      );
+    }
+
+    // --- PP4. Übernehmen als Codeblock ----------------------------------------
+    // Quellmodus und Cursor am Ende: nur dort fügt das Panel einen Block ein. Die Runde aus PP3 steht im Panel.
+    const roundsBefore = (await ppRead(cdp))?.rounds ?? 0;
+    if (roundsBefore === 0) {
+      ppNothing("PP4", T.PP4, "das Panel trägt keine Runde (PP3 lieferte keine)");
+    } else {
+      await setSetting(cdp, "acceptAs", "block");
+      await openNote(cdp, SMOKE_NOTE_PP_NEW, "# PP4 (automatisch erzeugt, wird nach dem Lauf gelöscht)\n\nEine Zeile vor dem Block.\n", "source");
+      await cdp.evaluate(`
+        const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+        const editor = view?.editor;
+        if (!editor) return false;
+        const last = editor.lastLine();
+        editor.setCursor({ line: last, ch: editor.getLine(last).length });
+        return true;
+      `);
+      const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
+      const written = await pollState<{ text: string; buffer: string; bufferPath: string }>(
+        cdp,
+        `
+          // Die Einfügung steht zuerst im Editor-Puffer; die Platte folgt mit dem Autospeichern. Wir speichern
+          // selbst, damit das Prüfen nicht von dessen Takt abhängt (der Einfüge-Weg ist der Editor, nicht die Datei).
+          const leafView = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+          if (leafView?.editor?.getValue?.().includes(${JSON.stringify(`${fence}shapes`)})) await leafView.save?.();
+          const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_NEW)});
+          const text = file ? await app.vault.read(file) : "";
+          const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+          return { text, buffer: view?.editor?.getValue?.() ?? "", bufferPath: view?.file?.path ?? "" };
+        `,
+        (s) => s.text.includes(`${fence}shapes`),
+        12_000,
+        500,
+      );
+      const after = await ppRead(cdp);
+      const text = written.state?.text ?? "";
+      const block = /```shapes\n([\s\S]*?)\n```/.exec(text)?.[1] ?? "";
+      ppRecord(
+        "PP4",
+        T.PP4,
+        clicked && written.reached && /^box Platte /m.test(block) && after !== null && after.rounds === 0,
+        `Block auf der Platte: ${written.reached ? "ja" : "nein"} (${block.split("\n").length} Zeilen, Platte ${/^box Platte /m.test(block) ? "ja" : "nein"}) · Editor-Puffer ${written.state?.bufferPath ?? "?"} ${written.state?.buffer.includes(`${fence}shapes`) ? "trägt den Block" : "ohne Block"} (${written.state?.buffer.length ?? 0} Zeichen; Platte ${text.length}) · Runden danach ${after?.rounds ?? "?"} (erwartet 0) · Status ${after?.phase ?? "?"}: „${after?.status ?? ""}“`,
+      );
+    }
+    await setSetting(cdp, "acceptAs", ppOriginalAcceptAs ?? "block");
+
+    // --- PP5 + PP7. Ändern über die Aktionsleiste -----------------------------
+    const editBody = ppBlockNote("PP5");
+    const edit = await ppRefineRound(cdp, SMOKE_NOTE_PP_EDIT, editBody);
+    // PP7 zuerst: Icons und Öffnen des Panels sind eigene Punkte, auch wenn der Wunsch danach scheitert.
+    if (edit.buttons.length === 0) {
+      ppNothing("PP7", T.PP7, edit.reason);
+    } else {
+      const panelLeaves = await cdp.evaluate<number>(`return app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}).length;`);
+      const icons = edit.buttons.map((b) => `${b.label || "(ohne Beschriftung)"}: ${b.svg ? `svg, ${b.children} Formen` : "KEIN svg"}`);
+      ppRecord(
+        "PP7",
+        T.PP7,
+        edit.buttons.every((b) => b.svg && b.children > 0) && edit.buttons.some((b) => b.label === PP_EDIT_LABEL) && panelLeaves === 1,
+        `${icons.join(" · ")} · Blätter vom Typ ${PANEL_VIEW_TYPE} nach dem Klick: ${panelLeaves} (erwartet 1)`,
+      );
+    }
+    if (edit.round === null) {
+      ppNothing("PP5", T.PP5, edit.reason);
+    } else {
+      const s = edit.round;
+      const targetOk = /^Edit: Tisch/.test(s.target);
+      const diffOk = s.diff.some((l) => /^Platte: at/.test(l));
+      let applied = false;
+      let detail = "";
+      if (edit.ready && diffOk && targetOk) {
+        await ppClick(cdp, ".tdcb-prompt-apply");
+        const changed = await pollState<{ text: string }>(
+          cdp,
+          `const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_EDIT)}); return { text: file ? await app.vault.read(file) : "" };`,
+          (n) => n.text !== editBody,
+          12_000,
+          500,
+        );
+        const before = editBody.split("\n");
+        const now = (changed.state?.text ?? editBody).split("\n");
+        const differing = before.map((l, i) => i).filter((i) => before[i] !== now[i]);
+        const platte = now.find((l) => l.startsWith("box Platte "));
+        applied = changed.reached && now.length === before.length && differing.length === 1 && platte !== undefined && platte.includes(" 0.925 ");
+        detail = `geänderte Zeilen ${differing.length} (erwartet 1, Länge ${before.length}→${now.length}) · Platte-Zeile „${platte ?? "fehlt"}“`;
+      } else {
+        detail = `Apply nicht gefahren (${edit.ready ? "" : edit.reason}${targetOk ? "" : " · Ziel falsch"}${diffOk ? "" : " · Diff ohne „Platte: at“"})`;
+      }
+      ppRecord("PP5", T.PP5, applied && targetOk && diffOk, `Ziel „${s.target}“ · Diff ${JSON.stringify(s.diff)} · ${detail}`);
+    }
+
+    // --- PP6. Abbruch ---------------------------------------------------------
+    // Ersatz-Endpunkt schweigt nach dem ersten Stück; nach 1 s „Stop“.
+    if (!(await ppOpenFresh(cdp))) {
+      ppNothing("PP6", T.PP6, "das Panel öffnete nicht");
+    } else {
+      const closedBefore = sub.clientClosed;
+      sub.hang = true;
+      try {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        await ppClick(cdp, ".tdcb-prompt-send");
+        const streaming = await pollState<PpState>(cdp, PP_READ, (s) => s.tail.length > 0 && s.stopVisible, 15_000, 250);
+        await sleepMs(1000);
+        const stopClicked = streaming.reached ? await ppClick(cdp, ".tdcb-prompt-stop") : false;
+        const stopped = await pollState<PpState>(cdp, PP_READ, (s) => s.status === "Stopped." && !s.stopVisible, 10_000, 250);
+        const seenAbort = await (async () => {
+          const deadline = Date.now() + 8000;
+          while (Date.now() < deadline) {
+            if (sub.clientClosed > closedBefore) return true;
+            await sleepMs(250);
+          }
+          return false;
+        })();
+        const s = stopped.state;
+        ppRecord(
+          "PP6",
+          T.PP6,
+          streaming.reached && stopClicked && stopped.reached && s?.rounds === 0 && seenAbort,
+          `Lauf sichtbar (Tail + Stop): ${streaming.reached} · Stop geklickt: ${stopClicked} · Status „${s?.status ?? "?"}“ (${s?.phase ?? "?"}) · Runden ${s?.rounds ?? "?"} (erwartet 0) · Server sah die geschlossene Verbindung: ${seenAbort}`,
+        );
+      } finally {
+        sub.hang = false;
+      }
+    }
+
+    // --- PP8. Handänderung zwischen Anfrage und Übernehmen ---------------------
+    const staleBody = ppBlockNote("PP8");
+    const stale = await ppRefineRound(cdp, SMOKE_NOTE_PP_STALE, staleBody);
+    if (!stale.ready) {
+      ppNothing("PP8", T.PP8, stale.reason);
+    } else {
+      const edited = staleBody.replace("box Bein-2 size 0.05 0.7 0.05 at 0.55 0.35 -0.3", "box Bein-2 size 0.05 0.7 0.05 at 0.55 0.35 -0.3 color #112233");
+      await cdp.evaluate(`
+        const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_STALE)});
+        await app.vault.modify(file, ${JSON.stringify(edited)});
+        await new Promise((r) => setTimeout(r, 1500));
+        return true;
+      `);
+      const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
+      const refused = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== stale.round?.status, 8000, 250);
+      const noteNow = await ppReadNote(cdp, SMOKE_NOTE_PP_STALE);
+      ppRecord(
+        "PP8",
+        T.PP8,
+        edited !== staleBody && clicked && refused.state?.status === PP_STALE_MESSAGE && refused.state.phase === "error" && noteNow === edited,
+        `Meldung „${refused.state?.status ?? "keine"}“ (${refused.state?.phase ?? "?"}) · Notiz gleich der Handfassung: ${noteNow === edited}`,
+      );
+    }
+
+    // --- PP9. Leerzeile am Ende des Rumpfs --------------------------------------
+    // Messung, keine Wertung der Wahl: gemessen wird, ob das Ergebnis SICHER ist (angewendet und bis auf die
+    // Platte unverändert, oder abgelehnt und die Notiz unverändert) und welcher der beiden Ausgänge eintrat.
+    const blankBody = ppBlockNote("PP9", "\n");
+    const blank = await ppRefineRound(cdp, SMOKE_NOTE_PP_BLANK, blankBody);
+    if (!blank.ready) {
+      ppNothing("PP9", T.PP9, blank.reason);
+    } else {
+      const target = await cdp.evaluate<{ len: number; endsWithNewline: boolean; tail: string } | null>(`
+        const view = app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)})[0]?.view;
+        const body = view?.state?.().target?.body;
+        return typeof body === "string" ? { len: body.length, endsWithNewline: body.endsWith("\\n"), tail: JSON.stringify(body.slice(-8)) } : null;
+      `);
+      await ppClick(cdp, ".tdcb-prompt-apply");
+      const outcome = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== blank.round?.status, 10_000, 250);
+      await sleepMs(1200);
+      const noteNow = await ppReadNote(cdp, SMOKE_NOTE_PP_BLANK);
+      const message = outcome.state?.status ?? "";
+      const ok = outcome.state?.phase === "ok";
+      const before = nonBlank(blankBody);
+      const now = nonBlank(noteNow);
+      const differing = before.map((_, i) => i).filter((i) => before[i] !== now[i]);
+      const platte = now.find((l) => l.startsWith("box Platte "));
+      const opens = (noteNow.match(/^```shapes$/gm) ?? []).length;
+      const safeApplied = ok && now.length === before.length && differing.length === 1 && platte !== undefined && platte.includes(" 0.925 ") && opens === 1;
+      const safeRefused = !ok && outcome.state !== null && noteNow === blankBody;
+      ppRecord(
+        "PP9",
+        T.PP9,
+        safeApplied || safeRefused,
+        `Ausgang: ${ok ? "angewendet" : "abgelehnt"} — Meldung „${message}“ · Rumpf-Fingerabdruck des Panels: ${target ? `${target.len} Zeichen, endet mit Zeilenumbruch: ${target.endsWithNewline}, Ende ${target.tail}` : "nicht lesbar"} · Notiz: ${noteNow === blankBody ? "unverändert" : `geändert (nicht-leere Zeilen ${before.length}→${now.length}, abweichend ${differing.length}, Leerzeile am Ende ${/\n\n```\n?$/.test(noteNow) ? "erhalten" : "weg"})`}`,
+      );
+    }
+
+    // --- PP11. Panel mit zwei Runden und Diff-Liste: nichts abgeschnitten, nichts ueberlagert --------
+    // Befund der Realprobe (Fenster 1500x949): der Stream-Bereich fiel auf einen leeren Streifen zusammen, die
+    // Statuszeile ueberlagerte „Preview of round 2“, Apply/Discard waren unten halb abgeschnitten. Gemessen werden
+    // die Rects: Apply und Discard liegen ganz im Fenster UND ganz im sichtbaren Bereich des Rumpfs, Statuszeile
+    // und Vorschau-Beschriftung schneiden sich nicht, der Stream hat mehr als 60 px. Die Fensterhoehe steht im
+    // Detail (der Punkt sagt nur dann etwas, wenn das Panel wirklich voll ist: Erzeugen, dann gleich Verfeinern).
+    const opened11 = await ppOpenFresh(cdp);
+    if (!opened11) {
+      ppNothing("PP11", T.PP11, "das Panel öffnete nicht");
+    } else {
+      await ppType(cdp, PP_CREATE_PROMPT);
+      const clickedCreate = await ppClick(cdp, ".tdcb-prompt-send");
+      const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
+      await ppType(cdp, PP_REFINE_PROMPT);
+      const clickedRefine = first.reached ? await ppClick(cdp, ".tdcb-prompt-send") : false;
+      const second = await pollState<PpState>(cdp, PP_READ, (s) => (s.phase === "ok" || s.phase === "error") && s.rounds === 2 && s.diff.length > 0, 40_000, 300);
+      await sleepMs(600);
+      // Das Panel ist erst bei knapper Hoehe „voll“ (Gegenprobe 2026-10-04: mit dem alten styles.css blieb PP11 bei
+      // Fenster 1024x800 gruen, weil die Zeilen noch passten): Fenster fuer die Messung auf 640 px Hoehe, danach zurueck.
+      const sizeBefore = await cdp.evaluate<number[] | null>(`const w = window.require("electron").remote.getCurrentWindow(); const s = w.getSize(); w.setSize(s[0], 640); await new Promise((r) => setTimeout(r, 900)); return s;`).catch(() => null);
+      const geo = await cdp.evaluate<{
+        innerH: number;
+        buttons: { name: string; top: number; bottom: number }[];
+        panel: { top: number; bottom: number };
+        statusRect: number[];
+        captionRect: number[];
+        streamH: number;
+        sticky: string;
+        scrollable: boolean;
+      } | null>(`
+        const root = document.querySelector(".tdcb-prompt");
+        if (!root) return null;
+        const r = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
+        const panel = root.querySelector(".okit-hub-panel:not(.is-hidden)");
+        const pr = panel.getBoundingClientRect();
+        const btn = (cls, name) => { const b = root.querySelector(cls).getBoundingClientRect(); return { name, top: b.top, bottom: b.bottom }; };
+        return {
+          innerH: innerHeight,
+          buttons: [btn(".tdcb-prompt-apply", "Apply"), btn(".tdcb-prompt-discard", "Discard")],
+          panel: { top: pr.top, bottom: pr.bottom },
+          statusRect: r(root.querySelector(".tdcb-prompt-status")),
+          captionRect: r(root.querySelector(".tdcb-prompt-preview-caption")),
+          streamH: root.querySelector(".tdcb-prompt-stream").getBoundingClientRect().height,
+          sticky: getComputedStyle(root.querySelector(".tdcb-prompt-end")).position,
+          scrollable: panel.scrollHeight > panel.clientHeight + 1,
+        };
+      `);
+      if (sizeBefore) await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); w.setSize(${sizeBefore[0] ?? 1024}, ${sizeBefore[1] ?? 800}); await new Promise((r) => setTimeout(r, 700)); return true;`).catch(() => undefined);
+      if (geo === null || !second.reached) {
+        ppRecord("PP11", T.PP11, false, `Vorbereitung unvollständig: Erzeugen ${clickedCreate ? (first.reached ? "ok" : "ohne zweite Vorbedingung") : "Klick fehlt"}, Verfeinern ${clickedRefine ? (second.reached ? "ok" : `nicht fertig (Runden ${second.state?.rounds ?? "?"}, Diff ${second.state?.diff.length ?? "?"}, Status „${second.state?.status ?? ""}“)`) : "Klick fehlt"}, Geometrie ${geo ? "gelesen" : "nicht lesbar"}`);
+      } else {
+        const inWindow = geo.buttons.every((b) => b.top >= 0 && b.bottom <= geo.innerH);
+        const inPanel = geo.buttons.every((b) => b.top >= geo.panel.top - 1 && b.bottom <= geo.panel.bottom + 1);
+        const [sl, st, sr, sb] = geo.statusRect as [number, number, number, number];
+        const [cl, ct, cr, cb] = geo.captionRect as [number, number, number, number];
+        const overlap = sl < cr && cl < sr && st < cb && ct < sb;
+        ppRecord(
+          "PP11",
+          T.PP11,
+          inWindow && inPanel && !overlap && geo.streamH > 60,
+          `Fensterhöhe ${geo.innerH} px · ${geo.buttons.map((b) => `${b.name} ${b.top.toFixed(0)}–${b.bottom.toFixed(0)}`).join(", ")} (Rumpf sichtbar ${geo.panel.top.toFixed(0)}–${geo.panel.bottom.toFixed(0)}; im Fenster: ${inWindow}, im Rumpf: ${inPanel}) · Knopfzeile ${geo.sticky} · Rumpf scrollbar: ${geo.scrollable} · Statuszeile ${[st, sb].map((v) => v.toFixed(0)).join("–")} gegen Beschriftung ${[ct, cb].map((v) => v.toFixed(0)).join("–")}: ${overlap ? "ÜBERLAGERT" : "getrennt"} · Stream ${geo.streamH.toFixed(0)} px (erwartet > 60) · Runden ${second.state?.rounds}, Diff-Zeilen ${second.state?.diff.length}`,
+        );
+      }
+    }
+  } finally {
+    await ppCleanup(cdp);
+    await cdp
+      .evaluate(`
+        for (const path of ${JSON.stringify(PP_NOTES)}) {
+          const file = app.vault.getAbstractFileByPath(path);
+          if (file) await app.vault.delete(file);
+        }
+        return true;
+      `)
+      .catch(() => undefined);
+    // Ein Abbruch mitten im Abschnitt: was nicht verbucht wurde, ist nicht gemessen — nie grün.
+    nothingFor("der Abschnitt endete, bevor dieser Punkt lief");
+  }
+}
+
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
   { key: "basis", title: "Basis-Checkliste (SMOKE.md Punkte 1-10)", run: sectionBasics },
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
+  { key: "shapesfile", title: "shapes-Dateiansicht und Umwandeln (SMOKE.md 2026-10-03)", run: sectionShapesFile },
+  { key: "promptpanel", title: "Prompt-Panel gegen Ersatz-Endpunkt (SMOKE.md 2026-10-03)", run: sectionPromptPanel },
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
   { key: "cameras", title: "Kameras aus der Datei (SMOKE.md 2026-09-02)", run: sectionCameras },
   { key: "clickrace", title: "Klick-Sturm-Probe (Task 'clickReal misst am ersetzten DOM womoeglich vorbei')", run: sectionClickRace },
@@ -3183,9 +5389,9 @@ async function main(): Promise<void> {
   const vault = flag("vault");
   const sectionArg = flag("section");
 
-  const sections = sectionArg
-    ? SECTIONS.filter((s) => s.key === sectionArg)
-    : SECTIONS;
+  // `--skip a,b` lässt Abschnitte weg (Gegenprobe: misst ein Abschnitt den Rest des Laufs mit?).
+  const skipped = new Set((flag("skip") ?? "").split(",").filter((k) => k !== ""));
+  const sections = (sectionArg ? SECTIONS.filter((s) => s.key === sectionArg) : SECTIONS).filter((s) => !skipped.has(s.key));
   if (sections.length === 0) {
     throw new Error(`Unbekannter --section ${sectionArg}. Bekannt: ${SECTIONS.map((s) => s.key).join(", ")}`);
   }
@@ -3193,6 +5399,22 @@ async function main(): Promise<void> {
   console.log(`GUI-Smoke — Obsidian auf Port ${port}`);
   assertDeployedBuildMatches(vault);
   const cdp = await Cdp.attach(port, vault);
+  // Ein verdecktes Fenster (anderer Space, Fokus bei einer anderen App) rendert nichts: Lesemodus leer, 0 Bilder je Sekunde,
+  // `visibilityState` hidden (gemessen 2026-10-04: PP5/7/8/9 und SH15 rot oder nicht gemessen, ohne Codeaenderung). Erst sichtbar
+  // machen, sonst misst der Lauf nur die Umgebung (CORE-TEST-22). Die Brücke legt das Fenster zuerst nur daneben (setBounds),
+  // statt den Vordergrund zu nehmen.
+  await requireVisible(cdp).catch((e: unknown) => console.error(`requireVisible: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`));
+  // Stufe 1b meldet „genuegte“, solange `visibilityState` im Moment der Verschiebung sichtbar war; gemessen 2026-10-04
+  // fiel das Fenster danach zurück auf hidden (0 Bilder je Sekunde, Lesemodus leer). Deshalb NACH der Brücke noch einmal
+  // prüfen und im Space-Fall (Stufe 2 der Brücke) das Fenster wirklich holen: show/moveTop/focus. Nimmt den Vordergrund
+  // — der Lock (`--exclusive focus`) ist dafür da.
+  const stillVisible = await pollUntil(cdp, `return document.visibilityState === "visible" ? true : null;`, 2500, 300);
+  if (!stillVisible) {
+    console.error("requireVisible: Fenster nach der Brücke wieder hidden — hole es nach vorn (show/moveTop/focus)");
+    await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); if (w.isMinimized()) w.restore(); w.show(); w.moveTop(); w.focus(); return true;`).catch(() => undefined);
+    const later = await pollUntil(cdp, `return document.visibilityState === "visible" ? true : null;`, 5000, 300);
+    if (!later) throw new Error("Obsidian-Fenster bleibt hidden (anderer Space, Bildschirm gesperrt?) — der DOM misst dann nichts; Fenster von Hand nach vorn holen und den Lauf wiederholen.");
+  }
   // Ausserhalb des try, damit das `finally` ihn auch nach einem Abbruch mitten im Lauf
   // zurueckschreiben kann — sonst bliebe der Vault im Smoke-Zustand stehen.
   // Ein Schnappschuss der GANZEN Einstellungen, nicht nur des einen Feldes: die
@@ -3214,6 +5436,29 @@ async function main(): Promise<void> {
           if (plugin) {
             Object.assign(plugin.settings, JSON.parse(${JSON.stringify(previousSettings)}));
             await plugin.saveSettings?.();
+          }
+          return true;
+        `)
+        .catch(() => undefined);
+    }
+    // Prompt-Panel-Abschnitt: Ersatz-Endpunkt aus den Einstellungen, Panel-Blatt zu, Server zu. Nach der
+    // Wiederherstellung oben, weil ein Schnappschuss aus einem abgebrochenen Vorlauf den Ersatz mitbringen kann.
+    await ppCleanup(cdp);
+    if (!keep && shapesFileOwned) {
+      // Nur Weissliste (siehe sectionShapesFile); Ansichten zuerst schliessen, sonst legt ihr
+      // Schlusssichern eine geloeschte Datei neu an.
+      await cdp
+        .evaluate(`
+          ${SHAPES_WIPE}
+          return true;
+        `)
+        .catch(() => undefined);
+    }
+    if (!keep && shapesExportOwned) {
+      await cdp
+        .evaluate(`
+          for (const f of app.vault.getFiles().filter((f) => f.name === ${JSON.stringify(SHAPES_EXPORT_NAME)})) {
+            await app.vault.delete(f);
           }
           return true;
         `)
@@ -3433,7 +5678,13 @@ async function main(): Promise<void> {
   }
 
   const failed = results.filter((check) => !check.passed);
-  console.log(`${results.length - failed.length}/${results.length} grün`);
+  // Nenner = ALLE Pruefpunkte des Treibers in diesem Lauf, auch uebersprungene und nicht gemessene —
+  // sonst sieht eine Luecke wie Abdeckung aus.
+  const total = results.length + skippedCount + nothingMeasuredCount;
+  console.log(`${results.length - failed.length}/${total} grün`);
+  console.log(
+    `Bilanz: ${results.length - failed.length} grün · ${failed.length} rot · ${skippedCount} übersprungen · ${nothingMeasuredCount} nichts gemessen`,
+  );
   if (failed.length > 0) {
     console.log("Rot:");
     for (const check of failed) console.log(`  - ${check.name}: ${check.detail}`);
