@@ -3616,7 +3616,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     // Die Phasen Seitenleiste ein/aus aendern nur die Breite; solange die HOEHE begrenzt, sieht ein nicht neu
     // gerahmtes Modell gleich aus (Distanz und vertikaler Bildwinkel aendern sich nicht). Der tragende Fall ist
     // deshalb die Phase „schmal“: die Modell-Spalte wird auf Seitenverhaeltnis 0,5 gezwungen. Dort begrenzt die
-    // BREITE; mit Refit passt die Huelle (gerechnet: ca. 72 % der Breite), ohne Refit ist sie 141 % breit und
+    // BREITE; mit Refit passt die Huelle (gemessen 63 %, gerechnet ca. 72 % der Breite), ohne Refit ist sie 88 % breit (gemessen im Gegenprobe-Lauf 2026-10-04, Schwelle deshalb 80 %, nicht 90 %; gerechnet 141 % bei anderer Ausgangsgroesse) und
     // beruehrt beide Raender (tests/core/refit-policy.test.ts rechnet beides mit fitCamera nach).
     const centreExpr = `
       ${SAMPLER}
@@ -3674,7 +3674,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       narrow13 = await pollState<CentreState>(
         cdp,
         centreExpr,
-        (s) => centred(s) && (s.canvas[0] ?? 0) / Math.max(s.canvas[1] ?? 1, 1) < 0.7 && (s.box?.w ?? 1) < 0.9,
+        (s) => centred(s) && (s.canvas[0] ?? 0) / Math.max(s.canvas[1] ?? 1, 1) < 0.7 && (s.box?.w ?? 1) < 0.8,
         10_000,
       );
     } finally {
@@ -3703,7 +3703,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     record(
       "SH13. Das Modell der Dateiansicht sitzt in der Mitte und wird bei jeder Größenänderung neu gerahmt (nichts abgeschnitten, auch im schmalen Pane)",
       open13.reached && narrow13.reached && restored13.reached && sidebar13.reached && back13.reached,
-      `Öffnen: ${describeCentre(open13.state)} | schmal (Seitenverhältnis 0,5; erwartet Ausdehnung < 90 % der Breite): ${describeCentre(narrow13.state)} | Zwang zurück: ${describeCentre(restored13.state)} | Seitenleiste ein: ${describeCentre(sidebar13.state)} | wieder aus: ${describeCentre(back13.state)}`,
+      `Öffnen: ${describeCentre(open13.state)} | schmal (Seitenverhältnis 0,5; erwartet Ausdehnung < 80 % der Breite): ${describeCentre(narrow13.state)} | Zwang zurück: ${describeCentre(restored13.state)} | Seitenleiste ein: ${describeCentre(sidebar13.state)} | wieder aus: ${describeCentre(back13.state)}`,
     );
 
     // --- SH14. Text- und Split-Ansicht haben ein sichtbares Ende --------------------------------
@@ -3791,7 +3791,8 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     // Winkel der Ansicht nicht (siehe B4), gemessen wird deshalb am Bild (Hash der Pixel). Im Live Preview
     // zusaetzlich: die Cursorzeile des Editors bleibt stehen (die Pfeiltasten gehen nicht an CodeMirror).
     const keysBody = ["# Pfeiltasten (automatisch erzeugt)", "", `${fence}shapes`, SHAPES_TABLE, fence, "", "Zeile danach", ""].join("\n");
-    const blockCanvas = `app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view.containerEl.querySelector(".tdcb-block canvas")`;
+    // Das Blatt trägt zwei Block-Bäume (Lesemodus und Editor), einer mit Canvas 0×0: nur den sichtbaren nehmen.
+    const blockCanvas = `[...(app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view.containerEl.querySelectorAll(".tdcb-block canvas") ?? [])].find((c) => c.getBoundingClientRect().width > 0)`;
     const pressKey = async (key: "ArrowUp" | "ArrowLeft"): Promise<void> => {
       const vk = key === "ArrowLeft" ? 37 : 38;
       const common = { key, code: key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
@@ -3808,7 +3809,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     const keysProbe = `
       ${SAMPLER}
       const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
-      const canvas = view?.containerEl.querySelector(".tdcb-block canvas");
+      const canvas = [...(view?.containerEl.querySelectorAll(".tdcb-block canvas") ?? [])].find((c) => c.getBoundingClientRect().width > 0);
       if (!canvas) return null;
       const s = sample(canvas);
       return {
@@ -3820,9 +3821,22 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       };
     `;
     const measureKeys = async (live: boolean): Promise<{ ready: boolean; detail: string; ok: boolean }> => {
+      // Ein Block steht zuerst als Standbild (`.tdcb-play`) ohne Canvas: erst wecken (gemessen 2026-10-04, wie in PP5).
+      await activateBlock(cdp, 0);
       const ready = await pollState<KeysState>(cdp, keysProbe, (s) => s.hash !== null && s.box !== null, 15_000);
-      if (!ready.reached) return { ready: false, ok: false, detail: "kein gezeichneter Block-Canvas im Blatt" };
-      if (live) await setCursorLine(cdp, 6);
+      if (!ready.reached) {
+        const dbg = await cdp.evaluate<string>(`${SAMPLER}
+          const view = app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view;
+          const cs = [...(view?.containerEl.querySelectorAll(".tdcb-block canvas") ?? [])];
+          return JSON.stringify({ mode: view?.getMode?.(), canvases: cs.map((c) => { const r = c.getBoundingClientRect(); const s = r.width > 0 ? sample(c) : null; return { rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)], px: [c.width, c.height], hash: s?.hash ?? null, box: s?.box ? "ja" : null }; }), posters: view?.containerEl.querySelectorAll(".tdcb-play").length });`);
+        return { ready: false, ok: false, detail: `kein gezeichneter Block-Canvas im Blatt · ${dbg}` };
+      }
+      // Cursor in die Zeile NACH dem Block (nicht in den Block: im Live Preview zeigt ein Cursor im Block den Quelltext
+      // statt des Widgets, der Canvas verschwindet).
+      if (live) {
+        const last = await cdp.evaluate<number>(`return app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view.editor?.lastLine?.() ?? 0;`);
+        await setCursorLine(cdp, Math.max(0, last - 1));
+      }
       const clicked = await clickReal(cdp, blockCanvas);
       await new Promise((r) => setTimeout(r, 400));
       const before = await cdp.evaluate<KeysState | null>(keysProbe);
@@ -3841,7 +3855,9 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       };
     };
     await closeExtraLeaves(cdp);
-    await openNote(cdp, SMOKE_NOTE_KEYS, keysBody, "preview");
+    // Wie PP5: der Öffner, der bei leerem Lesemodus neu rendert und den Block aktiviert (ein Block bleibt sonst als
+    // Standbild mit unsichtbarem Canvas stehen, gemessen 2026-10-04).
+    await ppOpenBlockNote(cdp, SMOKE_NOTE_KEYS, keysBody);
     const readKeys = await measureKeys(false);
     record("SH15. Pfeiltasten schieben die Ansicht eines Blocks im Lesemodus (echter Klick fokussiert, echte Tasten)", readKeys.ok, readKeys.detail);
     await closeExtraLeaves(cdp);
