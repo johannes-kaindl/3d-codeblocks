@@ -613,6 +613,504 @@ Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurüc
 
 Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprungen · nichts gemessen); der Nenner ist die Zahl aller Punkte des Laufs, auch der übersprungenen und nicht gemessenen.
 
+**Bilanz (2026-10-04, Zweitinstanz Port 9362, Obsidian 1.14.4):** Mit dem Build `56226fe` lief der Gesamtlauf in einem frischen Prozess zweimal hintereinander mit 92 grün · 0 rot · 8 übersprungen · 0 nichts gemessen von 100 Punkten (Baseline ohne diesen Abschnitt, `--skip promptpanel`: 83 grün · 0 rot · 8 übersprungen; dazu kommen PP1–PP9). Mit dem Build der Spitze `2ce8efa` (nach der letzten Fix-Runde) brach der Gesamtlauf in vier Läufen mit „Zeitüberschreitung: Runtime.evaluate“ ab, an wechselnden Stellen in den Abschnitten vor dem Prompt-Panel. Ein A/B mit dem alten Build `56226fe` brach danach ebenfalls ab: Das ist die Umgebung (lange Läufe in einer Zweitinstanz neben Ollama und der regulären Instanz), kein Rückschritt des Plugins, und ohne Ursachenklärung nur als Messung festgehalten. Deshalb ist die Bilanz der Spitze abschnittsweise gemessen, jeder Abschnitt in einem frischen Prozess (`--section`, drei Abschnitte brauchten einen zweiten Anlauf wegen einer Zeitüberschreitung beziehungsweise eines nicht gestarteten Prozesses): Aktiver Block 9 grün · Ansicht merken 15 grün, 1 übersprungen · Basis 19 grün, 3 übersprungen · Datei-nativer Ausbau 18 grün · shapes-Dateiansicht 8 grün, 1 übersprungen · Prompt-Panel 10 grün (PP1–PP9 und die Vorab-Prüfung auf liegen gebliebene Dateien) · Edit mode 9 grün, 3 übersprungen · Kameras 8 grün · Klick-Sturm 4 grün. Summe 100 grün · 0 rot · 8 übersprungen · 0 nichts gemessen, die 8 übersprungenen sind dieselben wie in der Baseline (jeder Abschnitt zählt seine Vorab-Prüfung auf liegen gebliebene Dateien mit, deshalb 8 grün mehr als im Gesamtlauf). Der Ersatz-Endpunkt prüft die Verdrahtung, nicht das LLM.
+
+**Gegenprobe:** die `.bin` nach dem Schreiben gelöscht → **nur B18 rot**
+> („nichts gezeichnet — die .bin wurde nicht gefunden oder nicht geladen"). Danach
+> zurückgebaut, voller Lauf **65/65**.
+>
+> > ✅ **B17 AUFGEKLÄRT am 2026-09-03 — es war B8, nicht die Beleuchtung** (`2234376`).
+> B8 verschiebt den ersten Knoten der Prüfmodell-Kopie um `+25/+15` und nahm das nie
+> zurück. Jeder folgende Prüfpunkt lief gegen ein Modell, dessen erster Knoten 25 Einheiten
+> neben dem Rest steht; der Auto-Fit passt darauf korrekt ein — auf eine Box mit Radius ~24
+> statt ~5 (`bounds` bis `(29,15,3.1)`, Blickziel `(12.5,7.5,0)`). Das eigentliche Modell
+> ist dann ein Fleck am Bildrand: `coverage 3` gegen die geforderten 5. **Das erklärt, warum
+> B17 isoliert grün und im Lauf rot war.** Gefunden, indem der Viewport nach seiner eigenen
+> Bounding-Box gefragt wurde statt nach dem Bild. Gegenprobe: `applyLighting()` totgelegt →
+> drei identische Hashes, nur B17 rot.
+>
+> ⚠️ **Merksatz für neue Prüfpunkte:** wer den Prüfling verändert, stellt ihn wieder her —
+> sonst erbt jeder folgende Punkt den Zustand, und der Befund erscheint irgendwo anders.
+>
+> **1. (historisch) B17 ist neu und grün — aber nicht aus diesem Lauf.** Im Treiber-Durchlauf meldete er
+> „kein Bild"; belastbar wurde er erst **isoliert** gemessen: `off`/`faithful`/`contrast`
+> liefern drei verschiedene Bildhashes (`#3745294529` · `#2406501078` · `#78492787`).
+> **Gegenprobe:** `applyLighting()` mit einem `return;` totgelegt → **alle drei Hashes
+> identisch**, und zwar exakt der `off`-Wert. Der Punkt misst also seinen Gegenstand.
+>
+> ✅ **AUFGEKLÄRT am 2026-09-03 — die Ursache war der Prüfpunkt, nicht das Plugin.** Der
+> Treiber suchte die Fehlerblöcke mit `document.querySelectorAll(".tdcb-block")`, also im
+> **ganzen Dokument**. Obsidian hält aber beide Ansichten derselben Notiz im DOM: die
+> Live-Preview-Fassung im `markdown-source-view` (unsichtbar, `0x0`, ohne Canvas und ohne
+> Meldung) und die gerenderte im `markdown-preview-view`. Jeder Block existierte damit
+> **zweimal**, und `.find()` nahm den ersten — den leeren. Gemessen mit einer
+> Instrumentierung, die den Zustand **während** des Laufs protokolliert (Ahnenpfad,
+> `offsetParent`, Größe je Block):
+>
+> | # | Titel | sichtbar | Canvas | Container |
+> |---|---|---|---|---|
+> | 1–3 | Fehlt/Endung/Tippfehler | nein, `0x0` | 0 | `markdown-source-view` |
+> | 4–6 | Fehlt/Endung/Tippfehler | ja | 0/0/1 | `markdown-preview-view` |
+>
+> Die Blöcke 4–6 trugen alle korrekten Meldungen. **Das Plugin war nie beteiligt.**
+>
+> **Das erklärt auch, warum dieselben Punkte am 2026-08-19 im outpost-Vault grün waren:**
+> dort steht `livePreview: false`, im Legacy-Quelltextmodus rendert Obsidian den Codeblock
+> im Source-View gar nicht — es gibt keine Doppelung. Die „Umgebung", die man seit dem
+> 30.08. verdächtigte, war genau diese eine Einstellung.
+>
+> **Der Fix ist ein Scope**, kein neues Verfahren: `.markdown-preview-view` als Wurzel, wie
+> es B10–B12 längst tun. **Gegenprobe (2026-09-03):** die beiden Meldungen in
+> `view-model.ts` durch `"GEGENPROBE"` ersetzt → **nur B13 und B14 rot**, mit genau diesem
+> Text im Ergebnis; B15 blieb grün (sein Hinweis kommt aus anderer Quelle). Danach
+> zurückgebaut → 15/17.
+>
+> ⚠️ **Was das über die Fehlersuche sagt:** die Vermutung „etwas im Ablauf vergiftet den
+> Zustand" war die ganze Zeit falsch, und sie war **plausibel** — fünf Punkte kippen
+> gemeinsam, das sieht nach einem gemeinsamen Zustand aus. Es war stattdessen ein
+> gemeinsamer *Selektor*. Beantwortet hat es keine Theorie, sondern eine Messung, die
+> ausdruckt, **wo** die gefundenen Elemente im Baum hängen.
+>
+> **2. (historisch) B13–B16 sind rot, und die Ursache ist offen.** Was belegt ist: sie kommen **nicht**
+> von der Beleuchtungs-Arbeit. Der Nachweis war eine **Baseline** — derselbe Treiber gegen
+> den `main`-Stand, also ohne die Änderung. Ergebnis Zeichen für Zeichen identisch: 12/17,
+> dieselben fünf rot. Ohne diese Baseline wäre die Suche im neuen Code gelandet.
+> ⚠️ Am 2026-08-19 waren dieselben Punkte im outpost-Vault **grün**, inklusive Gegenprobe.
+> Die Variable ist also die Umgebung, nicht der Code — wie schon beim Irrtum vom 15.08.
+>
+> **3. Ein Irrtum, der hierher gehört, weil er sich sonst wiederholt.** Zwischenzeitlich
+> stand hier die Erklärung, ein früherer Abschnitt setze `viewMode` auf `on-click` und
+> nehme ihn nicht zurück. **Falsch:** `sectionBasics` setzt ihn in Zeile ~1156 auf
+> `immediate`. Gesehen wurde der Zustand **nach** dem Lauf — der Treiber stellt im `finally`
+> den Vault-Zustand wieder her. Ein Diagnoseskript, das *nach* dem Prüfling läuft, misst
+> nicht, was der Prüfling gesehen hat. Der Fehler war nicht die Beobachtung, sondern die
+> dazuerfundene Ursache: genau das Muster, vor dem der Eintrag vom 2026-08-19 warnt.
+>
+> **Was aus dem Lauf blieb — zwei Härtungen am Treiber:**
+> - **Build-Guard** (`assertDeployedBuildMatches`): Der Treiber deployt nicht, er hängt sich
+>   an ein laufendes Obsidian. Gemessen an diesem Tag lag im Staging-Vault ein Build vom
+>   **15.08.** (666.980 Bytes) gegen 696.246 im Repo — **beide `0.3.1`**, also für jede
+>   Versionsprüfung unsichtbar. Zwei Wochen Änderungen fehlten in jedem Lauf, der sie zu
+>   prüfen glaubte. Der Guard bricht jetzt ab und nennt die Deploy-Zeile.
+> - **B17 stellt seine Vorbedingung selbst her** (`viewMode`), statt sie von fünfhundert
+>   Zeilen weiter oben zu erben. Belegt an einem eigenen Fall: das isolierte Messskript
+>   erbte `on-click` aus der `data.json` des Vaults und meldete dreimal „kein Bild" — jeder
+>   Block eine Klickfläche statt eines Canvas, **ohne Fehlermeldung**.
+
+- [ ] **1. Grundfall** — Block mit gültiger GLB rendert; Orbit (linke Maustaste), Zoom
+      (Rad) und Pan (rechte Maustaste) funktionieren.
+- [ ] **2. Kamera zurücksetzen** — Doppelklick setzt die Ansicht zurück.
+- [ ] **3. Mehrere Blöcke** — Note mit fünf 3D-Blöcken: flüssiges Scrollen, kein Block
+      wird schwarz, Lüfter bleibt ruhig (Aktivitätsanzeige beobachten).
+- [ ] **4. Regenerierung** — Datei extern neu erzeugen (Skript/Export). Die Ansicht
+      aktualisiert sich ohne Obsidian-Neustart.
+- [ ] **5. Theme** — hell ↔ dunkel umschalten: Hintergrund und STL-Material folgen
+      sofort, ohne die Note neu zu öffnen.
+- [ ] **6. Layout** — Pane-Breite ändern und die Note im Split öffnen: der Viewport
+      skaliert korrekt mit.
+- [ ] **7. Kein Leck** — im Live Preview *innerhalb* des Blocks tippen (mehrere
+      Sekunden). Speicherverbrauch bleibt stabil, keine verwaisten Canvas im
+      DevTools-Elementbaum.
+- [ ] **8. Klick-Modus** — Setting auf „Still image, activate on click": Standbild
+      erscheint, Klick aktiviert den Viewport.
+- [ ] **9. Fehlerfälle** — je die richtige Meldung:
+      - [ ] fehlende Datei → „File not found: <pfad>"
+      - [ ] falsche Endung (`.obj`) → „Unsupported format …"
+      - [ ] Draco-GLB → „Compressed glTF is not supported …"
+      - [ ] Tippfehler-Schlüssel (`heigth: 400`) → Hinweis unter dem Viewport, Modell
+            wird trotzdem angezeigt
+- [ ] **10. STL** — lädt und ist in hellem wie dunklem Theme gut sichtbar.
+
+## Zusätzlich zu beobachten
+
+- [ ] **Popout-Fenster** — Note in ein eigenes Fenster ziehen: der Viewport rendert
+      weiter (rAF hängt am Fenster des Containers, nicht am Haupt-Window).
+- [ ] **Kontext-Budget** — „Maximum live 3D views" auf 2 stellen, Note mit fünf Blöcken
+      durchscrollen: ältere Ansichten werden zu Standbildern statt schwarz zu werden.
+- [ ] **Poster-Qualität** — das eingefrorene Standbild zeigt das Modell, nicht eine
+      leere Fläche (falls doch: `preserveDrawingBuffer` in `viewer/viewport.ts` prüfen).
+
+## Datei-nativer Ausbau (2026-07-24)
+
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui -- --section files`
+> Alle sechs Punkte fährt der CDP-Treiber (Abschnitt `files`): **11 Prüfpunkte.**
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | Datei öffnen | F1 (richtige View **und** gezeichnetes Modell) · F2 (drehen, Doppelklick-Reset) · F3 (zweites Format: `.glb`/`.stl`, sobald eines im Vault liegt) |
+> | Embed | F4 (rendert im Embed-Container) · F5 (`![[modell\|300]]` → 300px) |
+> | `gltf`-Codeblock | F6 (gültiges JSON rendert) · F7 (kaputtes meldet „not valid JSON") |
+> | Slider | F8 (`input[type=range]`, 0..12) · F9 (0 = aus: nichts wird eingefroren — das Gegenstück zu B11) |
+> | Koexistenz | F10 (Codeblock und Embed in derselben Notiz) |
+> | Theme in Embed/gltf-Block | F11 (beide Wege folgen hell↔dunkel, am Pixel gemessen) |
+>
+> **Was der Lauf dabei gelernt hat:** OrbitControls läuft mit `enableDamping` — nach
+> einem Drag zieht die Kamera noch nach, und ein Rücksetzen mitten in dieser Nachbewegung
+> ist erst ein paar Frames später am Ziel. Der Treiber wartet deshalb auf Ruhe (drei
+> gleiche Messungen), nicht auf eine feste Frist; die erste Fassung meldete 38°/32° statt
+> 45°/30° und sah aus wie ein Defekt.
+>
+> **Gegenprobe (2026-08-14):** Embed-Höhe ignoriert → nur F5 rot; „0 = aus" im
+> Kontext-Budget aufgehoben → nur F9 rot.
+
+- [ ] **Datei öffnen** — `.gltf` im Datei-Explorer anklicken → 3D-View im ganzen Pane,
+      voll interaktiv, Doppelklick-Reset geht. Auch `.glb`/`.stl`.
+- [ ] **Embed** — `![[weltmodell/3d/eg.gltf]]` in einer Notiz → gerendert;
+      `![[weltmodell/3d/eg.gltf|300]]` → Höhe 300.
+- [ ] **`gltf`-Codeblock** — gültiges glTF-JSON → gerendert; kaputtes JSON → Meldung
+      „The glTF code is not valid JSON."
+- [ ] **Slider** — Settings: „Maximum live 3D views" ist ein Slider (0–12). Auf 0 →
+      keine Degradierung (alle inline live); auf 2 → nur 2 gleichzeitig live, Rest Standbild.
+- [ ] **Koexistenz** — bestehende ` ```3d file: `-Blöcke funktionieren unverändert.
+- [ ] **Theme im Embed/gltf-Block** — hell↔dunkel wechseln → Hintergrund folgt auch
+      in Embeds und gltf-Blöcken.
+
+## Ansicht merken (2026-07-25)
+
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui`
+> Die Punkte 1–8 fährt der CDP-Treiber (`scripts/gui-smoke.ts`, Abschnitt `view`) gegen ein
+> laufendes Obsidian: **14 Prüfpunkte, 22/22 im Gesamtlauf**, zweimal in Folge. Von Hand
+> abzuhaken ist hier nichts mehr; die Beschreibungen bleiben als Begründung stehen, was
+> jeder Punkt eigentlich prüft.
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | 1. Speichern und wiederfinden | V1 (echter Maus-Drag bewegt die Kamera) · V2 (`view:`-Zeile entsteht) · V3 (Ansicht nach Neuöffnen wieder da) · V3b (kein Drift über zwei Speicherzyklen) |
+> | 2. Namens-Schreibweise | V4 (`view: iso` statt drei Zahlen) |
+> | 3. Undo im Editor | V6 (Live Preview, Write im Buffer, `undo()` nimmt ihn zurück) |
+> | 4. Lesemodus / Clear view | V5 (entfernt die Zeile — und prüft vorher, dass eine da war) |
+> | 5. Fünf Etagen, Aktiv-Rahmen | **bewusst nicht doppelt** — Abschnitt „aktiver Block" deckt das mit 5–7 ab; der Treiber sagt das im Lauf an, statt es stillschweigend auszulassen |
+> | 6. Sidebar auf/zu | V7 (Hover-Leiste kommt und geht) · V8 (ohne Neuaufbau der Notiz) |
+> | 7. Ohne Codeblock kein Merken | V9/V10 (Embed: Save/Clear aus, Fit an, mit Begründung im Tooltip) · V11 (dasselbe für die geöffnete Datei) |
+> | 8. `view: quatsch` | V12 (Hinweiszeile) · V13 (Modell bleibt sichtbar) |
+>
+> **Zwei Voraussetzungen prüft der Treiber selbst**, weil ihre Verletzung sonst wie ein
+> Plugin-Defekt aussieht: Fensterfokus (sonst drosselt Chromium den Renderer — der Lauf
+> bricht mit Ansage ab) und der geladene Plugin-Stand (er lädt das Plugin neu, weil
+> `npm run deploy` nur Dateien ersetzt und die laufende Instanz sonst den alten Code misst).
+
+- [ ] **1. Ansicht speichern und wiederfinden** — Modell drehen, **Save view** drücken
+      (Sidebar oder Pin-Button in der Hover-Leiste) → `view:`-Zeile erscheint im Block,
+      das Bild bleibt nach dem Neuaufbau gleich. Notiz schließen und neu öffnen → dieselbe
+      Ansicht.
+- [ ] **2. Namens-Schreibweise** — nahe an einen Standardwinkel drehen und speichern → im
+      Block steht der Name (`iso`, `top`, …) statt drei Zahlen.
+      **Toleranz ist 5°** (seit 0.1.3, vorher 2° — das traf von Hand niemand). Weiter
+      daneben bleiben Zahlen stehen, und das ist richtig so: der Name ist verlustbehaftet,
+      ab einer gewissen Abweichung würde die Kamera beim Wiederherstellen sichtbar auf den
+      Standardwinkel springen. `top` liegt bei 89° (Anschlag, weil OrbitControls bei 90°
+      umkippt) — von Hand landet man dort typisch bei 70–80° und bekommt dann Zahlen.
+- [ ] **3. Undo im Editor** — im Quelltext-Editor speichern → Strg+Z (Cmd+Z) macht die
+      `view:`-Zeile rückgängig.
+- [ ] **4. Lesemodus** — im Lesemodus speichern → funktioniert; **Clear view** entfernt
+      die Zeile wieder.
+- [ ] **5. Fünf Etagen mit Aktiv-Rahmen** — Notiz mit fünf `3d`-Blöcken → der `tdcb-active`-
+      Rahmen folgt dem zuletzt bedienten Modell, Sidebar/Toolbar beziehen sich sichtbar
+      darauf.
+- [ ] **6. Sidebar auf/zu** — Sidebar schließen → Hover-Leiste erscheint auf dem Modell;
+      Sidebar öffnen → Leiste verschwindet wieder, ohne die Notiz neu zu laden (prüft das
+      `layout-change`-Nachziehen aus Task 13).
+- [ ] **7. Embed/FileView deaktiviert** — `![[haus.glb]]`-Embed und geöffnete Datei →
+      **Save view**/**Clear view** deaktiviert mit Tooltip „The view can only be saved in
+      a \`3d\` code block", **Fit** funktioniert trotzdem.
+- [ ] **8. `view: quatsch`** — von Hand eintippen → Hinweiszeile unter dem Viewport,
+      Modell trotzdem sichtbar.
+- [x] **9. Fremdänderung während offener Notiz — gestrichen, in der GUI nicht herstellbar
+      (gemessen 2026-07-26).** Zwei Anläufe im echten Vault: eine einzelne externe Änderung,
+      dann 60 Änderungen in 15 s bei gleichzeitigen `Save view`-Klicks. **Jedes Mal
+      „View saved", Notiz jedes Mal unbeschädigt.** Kein Zufall, sondern strukturell: der
+      Guard vergleicht `expectedBody` gegen **die Quelle, in die er schreibt** — Datei
+      (`vault.read`) bzw. Editor-Buffer (`editor.getValue()`). Ein externer Schreiber
+      trifft beide Seiten gleichzeitig; entweder Obsidian lädt nach (alles aktuell) oder
+      nicht (beide Seiten konsistent alt). Die Divergenz, die der Guard fängt, entsteht
+      nur durch Obsidian-**interne** Veralterung von `getSectionInfo`/`source` — von außen
+      nicht erzwingbar. Abdeckung liegt bei `tests/obsidian/block-writer.test.ts` (beide
+      Schreibwege, geänderter Rumpf, verschobener Block, Fence-Sprache, CRLF, „ohne den
+      Buffer anzufassen"). Gestrichen aus demselben Grund wie Punkt 10.
+- [x] **10. Trailing newline — erledigt durch Punkt 1, keine eigene Beobachtung nötig.**
+      Ursprünglich als offene Frage notiert („liefert Obsidian den `source` mit oder ohne
+      abschließendes `\n`?"). Beantwortet sich implizit: der Schreibweg vergleicht den
+      gemerkten Blockrumpf gegen die Notiz, und `stripTrailingNewline` (`block-child.ts`)
+      deckt beide Fälle ab. **Speichert Punkt 1 erfolgreich, ist der reale Fall abgedeckt** —
+      und nur das ist die verwertbare Information. Welcher der beiden Fälle es ist, ändert
+      am Code nichts, kostet aber einen Devtools-Umweg. Bewusst gestrichen statt beobachtet.
+
+## Edit mode (2026-07-26)
+
+> [!success] Seit 2026-08-14 automatisiert — `npm run smoke:gui -- --section edit`
+> Die Punkte 1–5 fährt der CDP-Treiber (Abschnitt `edit`): **8 Prüfpunkte.**
+>
+> | Punkt | Prüfpunkte im Treiber |
+> |---|---|
+> | 1. Betreten | E1 (Modus an, `.tdcb-editing` am Viewport, Move/Scale da) · E2 (Klick wählt einen Knoten) |
+> | 2. Speichern | E3 (Verschiebung macht „Save edits" bedienbar, Notice + `.edit.gltf` entstehen) · E4 (das Original bleibt unangetastet) |
+> | 3. Wiedereinstieg | E5 (Notice „Loaded existing edits" **und** derselbe Knoten trägt wieder seinen gespeicherten Wert) |
+> | 4. Locked-Präfix | E6 (beide Hälften: mit `env__` nie auswählbar, ohne Sperre sehr wohl) |
+> | 5. Dirty-Discard | E7 (Rückfrage erscheint, „Keep editing" bleibt, „Discard" verlässt) |
+> | 6. Abnahme-Test | nicht automatisiert — prüft ein Python-Skript im Konsumenten-Repo |
+> | 7. Regeneration im Modus | nicht automatisiert — braucht einen Erzeuger, der während des offenen Modus umbenennt |
+> | 8. Geteiltes Mesh | E8 (Klick auf einen Knoten mit geteiltem `mesh`-Index wählt nichts aus **und** meldet eine Notice — Welle 6) |
+>
+> **E8 (Welle 6, 2026-09-17):** bis dahin blieb ein Klick auf einen Knoten mit geteiltem
+> `mesh`-Index (s. `duplicatedIndices`, `src/viewer/edit-controls.ts`) STUMM —
+> ununterscheidbar von einem Klick daneben oder einem kaputten Plugin. Am eigenen Fixture
+> betrifft das 8 von 11 Knoten, der Regelfall bei jedem Blender-Export mit kopierten
+> Objekten. `EditRigCallbacks.onSelectBlocked("duplicate")` löst jetzt
+> `EDIT_BLOCKED_DUPLICATE` als Notice aus ("This node shares its mesh with others and
+> cannot be edited individually"). Task
+> [[Edit-Modus greift bei geteilten Meshes ins Leere]], Entscheidung Johannes: mindestens
+> Weg 1 (Panel-Meldung) — Weg 2 (eigene Indexvergabe) bleibt mit der S6-Animationsarbeit
+> verknüpft und ist damit weiterhin offen.
+>
+> **Der Gizmo-Drag selbst bleibt ungeprüft** und der Lauf sagt das an: der Griff ist eine
+> 3D-Trefferfläche in der Szene, seine Pixelposition hängt an Modell und Kamera — ein Drag
+> darauf wäre eine Wette. E3 fährt dieselbe Kette (`applyTrs` → Session → dirty → Save)
+> über die Zahlenfelder des Panels.
+>
+> **Zwei Dinge, die der Treiber selbst herstellt:** Er baut sein eigenes Prüfmodell (eine
+> Kopie, in der ein Top-Level-Knoten das gesperrte Präfix trägt) — sonst wüsste er nicht,
+> welcher Knoten gesperrt sein *sollte*. Und er wählt Knoten über ein Klick-Raster aus der
+> Draufsicht: von schräg oben verdecken sie sich gegenseitig, das Raster traf dann immer
+> dieselben zwei von sechs.
+>
+> ⚠️ **E6 war von 2026-08-30 bis 2026-09-02 unerfüllbar — und sah dabei aus wie ein
+> Plugin-Befund.** Beide Hälften meldeten denselben Knoten (`ohne Sperre: Floor · mit
+> Sperre: Floor`), der Punkt verglich also zwei identische Messungen. Zwei Ursachen, beide
+> im Prüfwerkzeug:
+>
+> 1. **Der gesperrte Knoten war gar nicht auswählbar.** Der Treiber nahm den *letzten*
+>    Top-Level-Knoten. Knoten, die sich einen `mesh`-Index teilen, sind aber generell nicht
+>    auswählbar: three's `GLTFLoader` klont für sie dasselbe Objekt und gibt allen Klonen
+>    dieselbe `associations`-Wertreferenz — danach tragen mehrere Kinder denselben
+>    `tdcbNodeIndex`, und `duplicatedIndices` sperrt solche Indizes bewusst. Im Fixture
+>    betrifft das **8 von 11 Knoten** (die vier Wände tragen alle den Index 4); auswählbar
+>    sind nur `Floor`, `Stairs`, `Stove`. Gemessen in Node über `loadModel` +
+>    `duplicatedIndices`, ohne Obsidian. Der Treiber wählt jetzt nur aus Knoten mit
+>    ungeteiltem `mesh`.
+> 2. **Das Raster traf den kleinen Körper nie.** Für „was ist überhaupt auswählbar" ist ein
+>    Raster richtig, für „ist GENAU DIESER Knoten auswählbar" nicht. E6 klickt den Knoten
+>    jetzt gezielt an: Weltposition → Kamera-Projektion → Pixel (`clickNodeNamed`).
+>
+> Damit ist auch die **Reihenfolge** der beiden Hälften umgedreht: erst *ohne* Sperre
+> klicken (belegt, dass der Klickpunkt trifft), dann *mit* Sperre auf dieselbe Stelle. Ohne
+> diesen Beleg wäre die zweite Hälfte wertlos — ein Klick ins Leere sieht genauso aus wie
+> eine wirksame Sperre.
+>
+> **Gegenprobe (2026-08-14):** Laden der `.edit`-Datei stillgelegt → nur E5 rot;
+> Präfix-Sperre ausgehebelt → nur E6 rot (und E2 sieht folgerichtig einen Knoten mehr).
+>
+> **Gegenprobe (2026-09-02, nach dem Umbau):** `isSelectable` auf „immer wahr" gesetzt →
+> **nur E6 rot**, mit sprechender Meldung (`mit Sperre: env__Stove` statt `nichts`); kein
+> anderer Punkt fiel mit. Danach zurückgebaut, Lauf wieder 7/7. Gefahren gegen eine
+> **Zweitinstanz** (eigenes `--user-data-dir`, Port 9333), weil die reguläre Instanz unter
+> einem fremden `--exclusive focus`-Lock stand und der Treiber `Page.bringToFront` nutzt.
+
+- [ ] **1. Betreten** — Block mit `eg.gltf` → **Edit model** (Pencil in der Hover-Leiste
+      oder in der Sidebar) → Raum anklicken → Gizmo erscheint, Rahmen um den Raum sichtbar.
+- [ ] **2. Speichern** — Raum mit dem Gizmo verschieben → **Save edits** → Notice „Edits
+      saved to …edit.gltf" → `eg.edit.gltf` existiert neben `eg.gltf`; die mtime von
+      `eg.gltf` selbst bleibt unverändert.
+- [ ] **3. Wiedereinstieg** — Edit-Modus erneut betreten → Notice „Loaded existing edits
+      for 1 node(s)", die Verschiebung sitzt wieder auf dem frisch gelesenen Original.
+- [ ] **4. Locked-Präfix** — einen `env__`-Node anklicken → keine Auswahl, kein Gizmo.
+- [ ] **5. Dirty-Discard** — Node verschieben (dirty, nicht gespeichert) → **Discard
+      edits** → Confirm-Dialog „Discard unsaved edits?"; **Keep editing** bleibt im
+      Modus, **Discard** verwirft und schließt.
+- [ ] **6. Abnahme-Test (Kontrakt §Abnahme)** — im outpost-Repo:
+      `uv run python scripts/outpost_floorplan.py --diff weltmodell/3d/eg.edit.gltf` →
+      Prosa-Zeile + Zielwerte, die zur im Editor vorgenommenen Verschiebung passen.
+- [ ] **7. Regeneration im Edit-Modus** — bei offenem Edit-Modus das outpost-Skript
+      laufen lassen, das `eg.gltf` neu erzeugt → Edits bleiben nach dem Reload erhalten;
+      wurde dabei ein bearbeiteter Node umbenannt/entfernt, erscheint die Notice „N
+      edited node(s) no longer exist: …" statt die Session stillschweigend zu verlieren.
+
+## Unapplied-edits-Badge (2026-07-29)
+
+Der Hinweis, der den Smoke-#5-Befund schließt: außerhalb des Edit-Modus zeigt der Viewer
+weiter das Original — der Badge sagt, dass daneben ein ungenutzter Änderungswunsch liegt.
+
+> [!check] Durchlauf 2026-07-30 — alle acht Punkte grün
+> Gefahren gegen die laufende Obsidian-Instanz (1.13.4) im outpost-Vault, über den
+> Electron-Debug-Port statt von Hand: echte Toolbar-Klicks, echtes WebGL, beide Themes.
+> Dabei gefunden: der three-r169-`dispose()`-Fehler (siehe `## Befunde`) — der Badge
+> selbst lief auf Anhieb wie entworfen.
+
+- [x] **1. Erscheinen** — Block mit `eg.gltf`, `eg.edit.gltf` existiert bereits (aus dem
+      Edit-Smoke oben) → oben **links** im Viewport steht „Unapplied edits" mit
+      Stift-Icon. Tooltip nennt den Pfad `…/eg.edit.gltf`.
+- [x] **2. Direkt nach dem Speichern** — mit einer Datei OHNE Edit-Datei starten:
+      Edit-Modus → verschieben → **Save edits** → Edit-Modus verlassen → der Badge
+      erscheint **ohne** Reload der Notiz.
+- [x] **3. Im Edit-Modus unsichtbar** — Edit-Modus betreten → Badge verschwindet
+      (dort sind die Edits ohnehin zu sehen) → verlassen → Badge ist zurück.
+- [x] **4. Verschwinden** — `eg.edit.gltf` im Datei-Explorer löschen → der Badge
+      verschwindet ohne Reload.
+- [x] **5. Alle Wege** — derselbe Zustand in `![[eg.gltf]]`-Embed und in der FileView
+      (Datei im Explorer anklicken).
+- [x] **6. Kein Bedien-Hindernis** — auf dem Badge ziehen: der Orbit reagiert normal,
+      der Badge fängt den Drag nicht ab.
+- [x] **7. Nicht bei der Edit-Datei selbst** — `eg.edit.gltf` direkt öffnen → **kein**
+      Badge (man schaut ja genau auf den Wunsch).
+- [x] **8. Theme** — hell ↔ dunkel: Badge bleibt lesbar (nur Theme-Variablen).
+
+## Kameras aus der Datei (2026-09-02)
+
+`view: camera:<name>` fährt eine Kamera an, die der Autor des Modells selbst gesetzt hat —
+Position, Blickrichtung und Bildwinkel kommen aus der Datei, danach orbitiert man frei um
+deren Blickziel (Roadmap S5).
+
+**Automatisiert:** `npm run smoke:gui -- --section cameras`. Der Abschnitt bringt sein
+Prüfmaterial selbst mit (`camera-floor.gltf` aus `docs/images/fixture/make-models.mjs`) und
+räumt es hinterher weg. Grund: er redet über **konkrete** Kameranamen — ein beliebiges
+Modell aus dem Vault trägt sie nicht, der Abschnitt wäre dort dauerhaft rot statt aussagend.
+Die Voraussetzungen des Materials hält `tests/fixture-models.test.ts` fest, damit ein
+kaputtes Fixture nicht wie ein Plugin-Defekt aussieht.
+
+Die fünf Kameras im Prüfmodell und wofür jede steht:
+
+| Name | Art | prüft |
+|---|---|---|
+| `Front` | perspektivisch | der Normalfall — Bild ≠ Auto-Einpassen |
+| `Schnitt A` | perspektivisch | **Name mit Leerzeichen** — three macht daraus beim Laden `Schnitt_A` |
+| `Doppel` (2×) | perspektivisch | doppelt vergebener Name — erster Treffer, Mehrdeutigkeit gemeldet |
+| `Plan` | orthographisch | wird gefunden, aber nicht angefahren |
+
+> [!check] Durchlauf 2026-09-02 — alle sieben Punkte grün, vier Gegenproben rot
+> Gefahren gegen Obsidian 1.13.7 im Staging-Vault `3d-codeblocks` (eigener Build, der
+> Guard bestätigte Byte-Gleichheit). `npm run smoke:gui -- --section cameras`: **7/7**,
+> im Gesamtlauf ebenfalls 7/7.
+>
+> **Der Wert steckt in den Gegenproben** — vier Mutationen, jede mit vorher notierter
+> Erwartung, und jede einzelne traf genau ihre Punkte, ohne dass ein anderer mitfiel:
+>
+> | Feature totgelegt | erwartet rot | gemessen |
+> |---|---|---|
+> | `setFileCamera` → `setView(null)` | K1, K2, K6 | K1, K2, K6 |
+> | Kamera-Hinweise auf `[]` | K4, K5, K6 | K4, K5, K6 |
+> | Namen aus dem **Szenengraph** statt aus dem JSON | K2, K4, K6 | K2, K4, K6 |
+> | Format-Guard entfernt | K7 | K7 |
+> | Controls nach dem Anfahren deaktiviert | K3 | K3 |
+>
+> Die dritte Zeile ist die interessante: sie stellt genau die Bauart her, die S5
+> verhindert, und der Prüfling meldete daraufhin wörtlich
+> `this file has: Front, Schnitt_A, Doppel, Doppel_1, Plan` — der Unterstrich und die
+> erfundene fünfte Kamera, sichtbar im Bild statt nur im Unit-Test.
+>
+> **K7 fiel bei der zweiten Mutation NICHT mit**, obwohl erwartet: die Formatmeldung
+> liegt auf einem früheren `return`-Pfad in `applyView`. Erwartung war ungenau, nicht die
+> Messung — die vierte Mutation holt den Punkt nach.
+>
+> Zwei Treiberfehler fand erst der Lauf, nicht das Schreiben: ein blankes `return null`
+> aus `evaluate` kommt als `undefined` an (K3 las sich als „Drag scheiterte"), und der
+> Selbstaufruf-Guard von `make-models.mjs` griff im **gebündelten** Treiber, weil
+> `import.meta.url` dort aufs Bundle zeigt — `-- --section cameras` legte dadurch ein
+> Verzeichnis `--section/models/` im Repo an. Beides behoben.
+
+- [x] **K1. Angefahren** — Block mit `view: camera:Front` zeigt ein **anderes** Bild als
+      derselbe Block ohne `view:`-Zeile. Keine Meldung darunter.
+- [x] **K2. Leerzeichen** — `view: camera:Schnitt A` lädt still und zeigt ein drittes Bild.
+      Der Punkt, an dem sich entscheidet, ob die Auflösung auf dem rohen JSON läuft: gegen
+      den Szenengraph gesucht hieße hier „unknown camera".
+- [x] **K3. Frei danach** — nach dem Anfahren mit der Maus ziehen → das Bild ändert sich.
+      Die Kamera setzt Position, Ziel und Bildwinkel auf einmal; bliebe dabei etwas hängen,
+      sähe das Standbild richtig aus und wäre trotzdem eingefroren.
+- [x] **K4. Unbekannter Name** — `view: camera:Gibtsnicht` nennt den Namen **und** die
+      vorhandenen (`Front, Schnitt A, Doppel, Plan`); das Modell bleibt sichtbar. Ein
+      Tippfehler ist kein Ladefehler.
+- [x] **K5. Orthographisch** — `view: camera:Plan` meldet „orthographic camera — not
+      supported"; das Modell bleibt sichtbar.
+- [x] **K6. Mehrdeutig** — `view: camera:Doppel` meldet „names more than one camera — using
+      the first" **und** fährt an (Bild ≠ Auto-Einpassen). Mehrdeutig ist kein Fehler.
+- [x] **K7. Falsches Format** — `view: camera:Front` auf einer `.stl` meldet
+      „`view: camera:…` needs a glTF file"; das Modell bleibt sichtbar.
+
+## Klick-Sturm-Probe (2026-09-16)
+
+> [!success] Automatisiert seit 2026-09-16 — `npm run smoke:gui -- --section clickrace`
+> Beantwortet die Cockpit-Task „clickReal misst am ersetzten DOM womoeglich vorbei":
+> `ControlPanelView.draw()` (`control-panel.ts:82`) ruft bei jedem Zustandswechsel
+> `root.empty()` und ersetzt damit jeden Panel-Knopf. Der Treiber benutzt für Panel-Klicks
+> aber nirgends `clickReal` (echter Press/Release-Split über zwei CDP-Roundtrips) — jeder
+> Klick (`clickPanelButton`/`clickEditButton`) ist ein synchrones `element.click()`
+> **innerhalb eines einzigen `cdp.evaluate()`-Aufrufs**, ohne `await` zwischen Suchen und
+> Klicken. Der Renderer hat einen Thread: `draw()` kann dazwischen nicht laufen.
+>
+> | Punkt | Was gemessen wird |
+> |---|---|
+> | R1. Grundlinie | 20 atomare Klicks auf "Fit" ohne Störung — muss 20/20 sein, sonst ist alles Folgende wertlos |
+> | R2. Lastfall | dieselben 20 Klicks, während `active.notify()` alle 10ms `root.empty()` auslöst — der reale Klick-Pfad |
+> | R3. Positivkontrolle | dieselben 20 Klicks, aber mit `clickReal` (15ms Haltezeit) statt `element.click()` — muss Treffer verlieren, sonst wäre der Sturm zu schwach, um R2 etwas zu beweisen |
+>
+> **Ergebnis (2026-09-16, Obsidian 1.14.2):** R1 20/20 · R2 20/20 · R3 0/20. Der reale
+> Klick-Mechanismus ist strukturell immun; die Positivkontrolle belegt, dass der Sturm
+> stark genug ist, den Fehler aus der Task tatsächlich auszulösen — wäre der Treiber je
+> auf `clickReal` oder ein `await` zwischen Suchen und Klicken umgestellt, würde R2 das
+> fangen. Kein Fix nötig, weder hier noch in der Bruecke (`tools/obsidian-cdp/cdp.ts`).
+
+## shapes-DSL (2026-10-03)
+
+> [!success] Automatisiert seit 2026-10-03 — `npm run smoke:gui -- --section files` (Punkte SH1–SH5 am Ende des Abschnitts)
+
+Die Textsprache `shapes` (Teile aus Quader, Zylinder, Kugel, Kegel) wird als ```shapes-Block, als `.shapes`-Datei über ```3d file: und als Embed angezeigt und lässt sich als glTF exportieren. Der Abschnitt bringt sein Prüfmaterial selbst mit (eine Tisch-DSL mit einer absichtlich kaputten Zeile) und räumt es weg.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| SH1 | Ein ```shapes-Block rendert seine Teile (Farbtöne im Canvas), obwohl eine Zeile kaputt ist |
+| SH2 | Die kaputte Zeile kostet nur sich selbst und wird mit Zeilennummer gemeldet (`Line 7: …`) |
+| SH3 | Ein Block ohne gültiges Teil sagt das („The shapes code has no valid part. Line 1: …") und zeichnet nichts |
+| SH4 | Dieselbe DSL rendert als Datei über ```3d file: und als Embed (vier Blöcke, Farbtöne beider 15/15) |
+| SH5 | Der Befehl „Export shapes model as glTF" schreibt `Tisch.gltf` mit `generatedFrom` = Quelle und fünf Knoten; liegt dort schon eine `Tisch.gltf`, wird der Punkt als übersprungen gemeldet statt gemessen |
+
+**Ergebnis (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess):** Baseline vor den shapes-Tasks 71 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen (+5 = SH1–SH5, die sieben Skips sind unverändert bewusste Handarbeit).
+
+**Gegenprobe (CORE-TEST-01):** derselbe Treiber gegen den Plugin-Stand von `main` ohne shapes (Build davor, `59a5734`) meldet 71 grün und genau SH1–SH5 rot — die Punkte können also fehlschlagen und messen das Feature, nicht ihren eigenen Aufbau.
+
+### shapes-Dateiansicht und Umwandeln (Plan 2)
+
+> [!info] Automatisiert — `npm run smoke:gui -- --section shapesfile` (Punkte SH6–SH12, eigener Abschnitt)
+
+Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakten `_tdcb-…`-Namen seiner Konstanten plus den nummerierten Umzugsnamen `_tdcb-smoke-moved( N).shapes`, wo auch immer im Vault; der Umzug Block → Datei legt seine Datei in den Attachment-Ordner), druckt jede Löschung als Infozeile und misst nur, wenn danach nichts mehr da ist. Der Besitznachweis ist die Treiber-Konvention, dass dieser Namensraum dem Treiber gehört. Dieselbe Weißliste gilt am Abschnittsende und im Aufräumen, auch bei Abbruch. Er klappt die Seitenleisten ein, damit die Ansicht breit genug ist, und stellt sie danach zurück.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| SH6 | Die `.shapes`-Datei öffnet in der eigenen Ansicht: bei Breite ab 700 px genau drei sichtbare Pillen (Model, Text, Split), sonst zwei; genau eine Pille mit `aria-pressed="true"` (Split bei breiter, Model bei schmaler Ansicht); Canvas mit mindestens 3 Farbtönen; genau ein Texteditor. Ist die Ansicht schmaler als 700 px, wird der breite Fall als übersprungen gemeldet (SH6b) |
+| SH7 | Eine per Editor angehängte grüne Zeile steht nach dem Speichern auf der Platte, und das Canvas zeigt grüne Pixel (vorher genau 0, nachher über 0,3 %) |
+| SH8 | Eine angehängte Zeile `box Kaputt size 1 2` ergibt genau eine `.tdcb-issue-line.is-error` mit „needs 1 or 3 numbers" im `title`, und die Zusammenfassung neben den Pillen nennt „1 error" und die richtige Zeilennummer |
+| SH9 | Befehl „Move shapes block into a .shapes file" mit Cursor im Block: genau eine neue `.shapes`-Datei mit dem Blocktext plus Zeilenumbruch, die Notiz trägt einen ```3d-Block, dessen `file:`-Wert auf diese Datei auflöst |
+| SH10 | Bei zwei Verweisen lehnt „Move .shapes file into a code block" ab („is used in 2 places"): Datei bleibt, beide Notizen unverändert. Nach dem Löschen der zweiten Notiz läuft der Umzug: die Notiz trägt wieder den ```shapes-Block mit dem Originaltext, die Datei ist weg |
+| SH11 | Datei → Block bei offener Ansicht mit Tippen, das noch nicht gespeichert ist (der Befehl läuft im selben Aufruf, weit innerhalb der 2 s Speicherverzögerung; steht die Zeile schon auf der Platte, wird einmal neu getippt; gelingt es auch dann nicht, ist der Punkt rot, wenn die Eingabe über die CM-View lief, und übersprungen nur beim Rückfall auf `execCommand`): die Notiz trägt den Block samt frischer Zeile, die Datei ist weg (Index UND Dateisystem), keine offene Ansicht bleibt, und binnen 3,5 s taucht die Datei weder im Index noch im Dateisystem wieder auf |
+| SH12 | Beide Befehle sind registriert; je Cursor-Ort (Überschrift, im Block, auf einer Embed-Zeile) stimmt, ob sie verfügbar sind, und das echte Kontextmenü (`contextmenu`-Ereignis, gelesen aus dem DOM) trägt den Eintrag genau einmal und nur am richtigen Ort, mit `<svg>`-Icon. Geht das Menü nicht auf, wird das als übersprungen gemeldet (SH12b), nicht als grün |
+
+**Ergebnis Plan 2 (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess, Vault aus dem Fixture):** vorher (nach Plan 1) 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 83 grün · 0 rot · 8 übersprungen · 0 nichts gemessen (+7 grün = SH6–SH12; der achte Skip ist SH12b, die Icon-Existenzprüfung — `require("obsidian")` ist im Renderer nicht erreichbar, die Icons stehen nur als Menü-Eintrags-Attribut fest, ihre Darstellung ist nicht gemessen).
+
+**Gemessen im echten Obsidian, nicht nur gegen die Attrappe:** (1) SH11 — der Befehl „Datei → Block“ 2 ms nach dem Tippen, also vor dem verzögerten Speichern: die Notiz trägt den Block samt frischer Zeile, die Datei ist weg und tauchte binnen 3,5 s nicht wieder auf (keine Wiederauferstehung durch das Schluss-Speichern der geschlossenen Ansicht); (2) eine externe Änderung kommt als `setViewData(…, false)` an, der Cursor bleibt, kein Echo beim eigenen Speichern, Tippen plus externe Änderung vor dem Speichern führt Obsidian selbst zusammen; (3) `getAvailablePathForAttachment` liefert bei belegtem Namen einen nummerierten Pfad (`Tisch-probe 1.shapes`), auch bei abweichender Groß-/Kleinschreibung.
+
+**Gegenprobe Plan 2 (CORE-TEST-01):** derselbe Treiber gegen den Plugin-Stand nach Plan 1 (`dedb545`, ohne Dateiansicht) meldet SH1–SH5 grün, SH6 und SH7 rot („keine .tdcb-shapes-view im Blatt“, „kein Editor“) und bricht in SH8 ab — die Punkte können also fehlschlagen und messen das Feature; der Abbruch räumt auf (Vault danach ohne Reste).
+
+### Prompt-Panel (Plan 3b)
+
+> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP9, eigener Abschnitt)
+
+The substitute endpoint checks the wiring, not the LLM.
+
+Der Abschnitt startet einen lokalen HTTP-Server (`node:http`, Port 0), der `GET …/models` mit einem Modell (`smoke-model`) beantwortet und `POST …/chat/completions` als SSE mit aufgezeichneten Antworten in drei Stücken (je 800 ms Abstand): Erzeugen mit Eintrag A02 aus `tests/fixtures/shapes-spike/a-q27-dsl.jsonl`, Verfeinern mit Fall R01 aus `tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03-71051822.jsonl` (Platte um 20 cm nach oben); beide werden vor dem Lauf gegen das aktuelle Protokoll geprüft. Der Server trägt den Endpunkt in die Plugin-Einstellungen ein (`endpoints`, ein Eintrag mit Adresse und Modell) und merkt, ob ein Client eine Chat-Verbindung schloss, bevor er fertig war (PP6). Ist das Plugin `llm-endpoint-manager` im Vault aktiv, gilt dessen Liste und der Ersatz wäre wirkungslos: dann sind alle neun Punkte „nichts gemessen“.
+
+Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurückgesetzt, was der Abschnitt anlegt: die Ersatz-Zeile samt Ersatz-Modell in den Einstellungen, das Panel-Blatt, `acceptAs` (Vorwert zurück), die vier Notizen `_tdcb-gui-smoke-pp-*.md` (jede wird zu Beginn neu geschrieben) und der Server. Was bis zum Abschnittsende nicht verbucht wurde, zählt als „nichts gemessen“, nie als grün.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| PP1 | Der Settings-Tab zeigt eine Endpunkt-Zeile mit der Ersatz-Adresse und den eingeklappten Abschnitt mit dem Titel aus `LLM_CONNECTION_STRINGS_EN.request.title` („Request“). Erster GUI-Beleg für `renderSettings`. Liefert der Tab gar keine Zeilen, ist der Punkt „nichts gemessen“ |
+| PP2 | Befehl `open-prompt-panel`: Hub mit den Tabs Prompt und Versions, Messzeile „Not measured for this model …“ mit `is-warning`, Platzhalter im Eingabefeld mit Beispiel („e.g.“), Knopf „Create“ |
+| PP3 | Erzeugen: der Tail wächst in mindestens zwei Zwischenständen (MutationObserver im Renderer), danach Status `is-ok` und ein Vorschau-Canvas mit mindestens drei Farbtönen; der Ersatz sah genau eine Erzeugen-Anfrage als Stream |
+| PP4 | Übernehmen als Codeblock (`acceptAs: block`, Notiz im Quellmodus, Cursor am Ende): die Notiz trägt einen ```shapes-Block mit der Zeile `box Platte …`, die Runden sind danach leer |
+| PP5 | Ändern über die Aktionsleiste: Klick (`clickReal`) auf „Edit in prompt panel“, Zielzeile „Edit: Tisch“, Diff-Zeile beginnt mit „Platte: at“, nach Apply ändert sich genau eine Zeile der Notiz (die Platte-Zeile mit `0.925`), alle übrigen sind byte-gleich |
+| PP6 | Abbruch: der Ersatz schweigt nach dem ersten Stück; nach 1 s „Stop“ — Status „Stopped.“, keine Runde, der Server sah die geschlossene Verbindung |
+| PP7 | Jeder Knopf der Aktionsleiste eines shapes-Blocks trägt ein `<svg>` mit mindestens einer Form (`path`, `line`, …) — eine unbekannte Icon-ID (`sparkles`, `file-output` waren bis dahin ungeprüft) lässt den Punkt scheitern; der Klick auf „Edit in prompt panel“ öffnet genau ein Blatt vom Typ `tdcb-prompt-panel` |
+| PP8 | Der Block wird zwischen Anfrage und Apply von Hand geändert (eine Bein-Zeile bekommt eine Farbe): Apply meldet „The block changed — nothing was applied.“ und die Notiz bleibt gleich der Handfassung |
+| PP9 | Ein Block, dessen Rumpf mit einer Leerzeile endet: Anfrage und Apply müssen sicher ausgehen — angewendet (bis auf die Platte-Zeile unverändert, ein Zaun) oder abgelehnt (Notiz unverändert). Welcher der beiden Ausgänge eintrat und der Rumpf-Fingerabdruck des Panels stehen im Detail; die Wahl selbst wird nicht gewertet |
+
+Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprungen · nichts gemessen); der Nenner ist die Zahl aller Punkte des Laufs, auch der übersprungenen und nicht gemessenen.
+
 **Bilanz (2026-10-04, Zweitinstanz Port 9362, Obsidian 1.14.4, frischer Prozess, zwei Gesamtläufe nacheinander): 92 grün · 0 rot · 8 übersprungen · 0 nichts gemessen von 100 Punkten.** Die Baseline ohne diesen Abschnitt (`--skip promptpanel`) war 83 grün · 0 rot · 8 übersprungen; die neun Punkte PP1–PP9 kommen dazu, die acht übersprungenen sind dieselben wie vorher. Der Ersatz-Endpunkt prüft die Verdrahtung, nicht das LLM.
 
 **Gegenprobe:** Mit abgeschaltetem Fingerabdruck-Vergleich in `locateBlock` (`src/obsidian/panel-accept.ts`) lief der Abschnitt 9 grün · 1 rot — PP8 meldet „Applied to Tisch.“ statt der Ablehnung und die Notiz weicht von der Handfassung ab. Vor den Korrekturen am Panel (`lastEditor`) war PP4 rot („Open a note to insert a code block.“), und vor dem Warten auf die einblendende Seitenleiste waren PP3 und PP6 rot, weil der Klick außerhalb des Fensters landete.
