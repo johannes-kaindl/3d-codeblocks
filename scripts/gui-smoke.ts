@@ -3470,7 +3470,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
   for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
   const remaining = reset.remaining;
   if (remaining.length > 0) {
-    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH16", "SH9", "SH10", "SH11", "SH12"]) {
+    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH16", "SH17", "SH9", "SH10", "SH11", "SH12"]) {
       skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
     }
     return;
@@ -3986,6 +3986,65 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
     );
     if (!wide16) skipped("SH16b. Split-Teil der Editor-Höhe", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
 
+    // --- SH17. Der Editor-Rahmen bleibt durchgezogen, auch im Fokus -----------------------------
+    // CodeMirrors Basisthema setzt auf den fokussierten Editor `outline: 1px dotted #212121`; das sah wie ein
+    // gepunkteter Rand aus. Erwartet: ohne Fokus Rand solid 1 px; im Fokus kein Outline (none oder Breite 0),
+    // Rand weiter solid, Randfarbe im Fokus anders als ohne Fokus (der Fokus bleibt erkennbar).
+    const frameExpr = `
+      ${SHAPES_LEAF}
+      const editor = leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector(".tdcb-shapes-text .cm-editor");
+      if (!editor) return null;
+      const e = getComputedStyle(editor);
+      return {
+        focused: editor.classList.contains("cm-focused"),
+        outlineStyle: e.outlineStyle,
+        outlineWidth: parseFloat(e.outlineWidth) || 0,
+        borderStyle: e.borderTopStyle,
+        borderWidth: parseFloat(e.borderTopWidth) || 0,
+        borderColor: e.borderTopColor,
+      };
+    `;
+    interface FrameState {
+      focused: boolean;
+      outlineStyle: string;
+      outlineWidth: number;
+      borderStyle: string;
+      borderWidth: number;
+      borderColor: string;
+    }
+    await openFileInLeaf(cdp, SMOKE_LINES_5);
+    await cdp.evaluate(`
+      ${SHAPES_LEAF}
+      leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="text"]')?.click();
+      await new Promise((r) => setTimeout(r, 600));
+      document.activeElement?.blur?.();
+      await new Promise((r) => setTimeout(r, 300));
+      return true;
+    `);
+    const idle17 = await pollState<FrameState>(cdp, frameExpr, (s) => !s.focused, 6_000, 250);
+    const clicked17 = await clickReal(
+      cdp,
+      `app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).find((l) => l.view.file?.path === ${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector(".tdcb-shapes-text .cm-content")`,
+    );
+    const focus17 = await pollState<FrameState>(cdp, frameExpr, (s) => s.focused, 6_000, 250);
+    const i17 = idle17.state;
+    const f17 = focus17.state;
+    record(
+      "SH17. Der Editor-Rahmen bleibt durchgezogen 1 px, im Fokus ohne gepunkteten Outline und mit anderer Randfarbe",
+      i17 !== null &&
+        f17 !== null &&
+        clicked17 &&
+        !i17.focused &&
+        i17.borderStyle === "solid" &&
+        i17.borderWidth === 1 &&
+        f17.focused &&
+        f17.borderStyle === "solid" &&
+        f17.borderWidth === 1 &&
+        (f17.outlineStyle === "none" || f17.outlineWidth === 0) &&
+        f17.borderColor !== i17.borderColor,
+      `ohne Fokus: Rand ${i17?.borderStyle ?? "?"} ${i17?.borderWidth ?? "?"} px ${i17?.borderColor ?? "?"}, Outline ${i17?.outlineStyle ?? "?"} ${i17?.outlineWidth ?? "?"} px (cm-focused: ${i17?.focused ?? "?"}) | Klick angekommen: ${clicked17} | im Fokus: Rand ${f17?.borderStyle ?? "?"} ${f17?.borderWidth ?? "?"} px ${f17?.borderColor ?? "?"}, Outline ${f17?.outlineStyle ?? "?"} ${f17?.outlineWidth ?? "?"} px (cm-focused: ${f17?.focused ?? "?"}) · Randfarbe wechselt: ${!!i17 && !!f17 && i17.borderColor !== f17.borderColor}`,
+    );
+
     // --- SH9. Block -> Datei -------------------------------------------------
     const movedBody = [`title: ${MOVED_TITLE}`, "box A size 1", "box B size 0.5 at 1 0 0 color #ff0000"].join("\n");
     const noteHead = "# GUI-Smoke move (automatisch erzeugt)";
@@ -4353,7 +4412,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11"] as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
 const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
@@ -4820,6 +4879,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
     PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
     PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
+    PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
   } as const;
   const nothingFor = (reason: string): void => {
     for (const id of PP_IDS) if (!ppDone.has(id)) ppNothing(id, T[id], reason);
@@ -5169,6 +5229,67 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         safeApplied || safeRefused,
         `Ausgang: ${ok ? "angewendet" : "abgelehnt"} — Meldung „${message}“ · Rumpf-Fingerabdruck des Panels: ${target ? `${target.len} Zeichen, endet mit Zeilenumbruch: ${target.endsWithNewline}, Ende ${target.tail}` : "nicht lesbar"} · Notiz: ${noteNow === blankBody ? "unverändert" : `geändert (nicht-leere Zeilen ${before.length}→${now.length}, abweichend ${differing.length}, Leerzeile am Ende ${/\n\n```\n?$/.test(noteNow) ? "erhalten" : "weg"})`}`,
       );
+    }
+
+    // --- PP11. Panel mit zwei Runden und Diff-Liste: nichts abgeschnitten, nichts ueberlagert --------
+    // Befund der Realprobe (Fenster 1500x949): der Stream-Bereich fiel auf einen leeren Streifen zusammen, die
+    // Statuszeile ueberlagerte „Preview of round 2“, Apply/Discard waren unten halb abgeschnitten. Gemessen werden
+    // die Rects: Apply und Discard liegen ganz im Fenster UND ganz im sichtbaren Bereich des Rumpfs, Statuszeile
+    // und Vorschau-Beschriftung schneiden sich nicht, der Stream hat mehr als 60 px. Die Fensterhoehe steht im
+    // Detail (der Punkt sagt nur dann etwas, wenn das Panel wirklich voll ist: Erzeugen, dann gleich Verfeinern).
+    const opened11 = await ppOpenFresh(cdp);
+    if (!opened11) {
+      ppNothing("PP11", T.PP11, "das Panel öffnete nicht");
+    } else {
+      await ppType(cdp, PP_CREATE_PROMPT);
+      const clickedCreate = await ppClick(cdp, ".tdcb-prompt-send");
+      const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
+      await ppType(cdp, PP_REFINE_PROMPT);
+      const clickedRefine = first.reached ? await ppClick(cdp, ".tdcb-prompt-send") : false;
+      const second = await pollState<PpState>(cdp, PP_READ, (s) => (s.phase === "ok" || s.phase === "error") && s.rounds === 2 && s.diff.length > 0, 40_000, 300);
+      await sleepMs(600);
+      const geo = await cdp.evaluate<{
+        innerH: number;
+        buttons: { name: string; top: number; bottom: number }[];
+        panel: { top: number; bottom: number };
+        statusRect: number[];
+        captionRect: number[];
+        streamH: number;
+        sticky: string;
+        scrollable: boolean;
+      } | null>(`
+        const root = document.querySelector(".tdcb-prompt");
+        if (!root) return null;
+        const r = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
+        const panel = root.querySelector(".okit-hub-panel:not(.is-hidden)");
+        const pr = panel.getBoundingClientRect();
+        const btn = (cls, name) => { const b = root.querySelector(cls).getBoundingClientRect(); return { name, top: b.top, bottom: b.bottom }; };
+        return {
+          innerH: innerHeight,
+          buttons: [btn(".tdcb-prompt-apply", "Apply"), btn(".tdcb-prompt-discard", "Discard")],
+          panel: { top: pr.top, bottom: pr.bottom },
+          statusRect: r(root.querySelector(".tdcb-prompt-status")),
+          captionRect: r(root.querySelector(".tdcb-prompt-preview-caption")),
+          streamH: root.querySelector(".tdcb-prompt-stream").getBoundingClientRect().height,
+          sticky: getComputedStyle(root.querySelector(".tdcb-prompt-end")).position,
+          scrollable: panel.scrollHeight > panel.clientHeight + 1,
+        };
+      `);
+      if (geo === null || !second.reached) {
+        ppRecord("PP11", T.PP11, false, `Vorbereitung unvollständig: Erzeugen ${clickedCreate ? (first.reached ? "ok" : "ohne zweite Vorbedingung") : "Klick fehlt"}, Verfeinern ${clickedRefine ? (second.reached ? "ok" : `nicht fertig (Runden ${second.state?.rounds ?? "?"}, Diff ${second.state?.diff.length ?? "?"}, Status „${second.state?.status ?? ""}“)`) : "Klick fehlt"}, Geometrie ${geo ? "gelesen" : "nicht lesbar"}`);
+      } else {
+        const inWindow = geo.buttons.every((b) => b.top >= 0 && b.bottom <= geo.innerH);
+        const inPanel = geo.buttons.every((b) => b.top >= geo.panel.top - 1 && b.bottom <= geo.panel.bottom + 1);
+        const [sl, st, sr, sb] = geo.statusRect as [number, number, number, number];
+        const [cl, ct, cr, cb] = geo.captionRect as [number, number, number, number];
+        const overlap = sl < cr && cl < sr && st < cb && ct < sb;
+        ppRecord(
+          "PP11",
+          T.PP11,
+          inWindow && inPanel && !overlap && geo.streamH > 60,
+          `Fensterhöhe ${geo.innerH} px · ${geo.buttons.map((b) => `${b.name} ${b.top.toFixed(0)}–${b.bottom.toFixed(0)}`).join(", ")} (Rumpf sichtbar ${geo.panel.top.toFixed(0)}–${geo.panel.bottom.toFixed(0)}; im Fenster: ${inWindow}, im Rumpf: ${inPanel}) · Knopfzeile ${geo.sticky} · Rumpf scrollbar: ${geo.scrollable} · Statuszeile ${[st, sb].map((v) => v.toFixed(0)).join("–")} gegen Beschriftung ${[ct, cb].map((v) => v.toFixed(0)).join("–")}: ${overlap ? "ÜBERLAGERT" : "getrennt"} · Stream ${geo.streamH.toFixed(0)} px (erwartet > 60) · Runden ${second.state?.rounds}, Diff-Zeilen ${second.state?.diff.length}`,
+        );
+      }
     }
   } finally {
     await ppCleanup(cdp);

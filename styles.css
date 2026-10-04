@@ -359,6 +359,13 @@
   min-height: calc(3 * 1.4em);
   min-height: 3lh;
 }
+/* Der Editor der Dateiansicht hat einen durchgezogenen 1-px-Rand. CodeMirrors Basisthema setzt auf einen fokussierten
+   Editor `outline: 1px dotted #212121` (node_modules/@codemirror/view, buildTheme "&.cm-focused"): das sah wie ein
+   gepunkteter Rand aus. Ersatz: kein Outline, der Rand selbst nimmt die Akzentfarbe an (Fokus bleibt erkennbar). */
+.tdcb-shapes-text .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
 /* Split: eine deutliche Trennlinie zwischen Editor und Modell; beide Haelften enden an der Hoehe der Flaeche. */
 .tdcb-shapes-body.is-split .tdcb-shapes-text {
   border-right: var(--divider-width) solid var(--divider-color);
@@ -542,6 +549,23 @@
 .tdcb-prompt-versions { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-2); }
 .tdcb-prompt .okit-hub-panel.is-hidden { display: none; }
 .tdcb-prompt-stream { flex: 0 1 auto; max-height: 14em; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
+/* Ursache des zusammengefallenen Stream-Bereichs und der halb abgeschnittenen Knoepfe: der Hub-Panel-Rumpf ist ein
+   Flex-Container fester Hoehe (height: 100% aus dem Kit), alle Kinder ausser dem Stream tragen `flex: 0 0 auto`;
+   der Stream (`flex: 0 1 auto`, Kit-`.okit-stream { min-height: 0 }`, Body `flex: 1 1 auto; min-height: 0`) ist das
+   EINZIGE schrumpfbare Kind und gibt bei viel Inhalt (Vorschau 260 px, Diff, zwei Runden) allen Platz her, bis nur der
+   Streifen der Statuszeile bleibt; deren Inhalt ragt dann ueber die Box und ueberlagert die Vorschau-Beschriftung.
+   Die Regeln darunter (hoehere Spezifitaet, das Kit-CSS bleibt wortgleich): der Stream schrumpft nicht mehr und hat
+   eine Mindesthoehe von sechs Zeilen, der Rumpf rollt, die Knopfzeile Apply/Discard klebt unten. */
+.tdcb-prompt .tdcb-prompt-stream { flex: 0 0 auto; min-height: 6em; }
+.tdcb-prompt > .okit-hub-content .okit-hub-panel { overflow-y: auto; min-height: 0; }
+.tdcb-prompt .tdcb-prompt-end {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--size-4-2) 0;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+}
 .tdcb-prompt-preview, .tdcb-prompt-diff, .tdcb-prompt-rounds, .tdcb-prompt-empty { flex: 0 0 auto; }
 .tdcb-prompt-empty { padding: var(--size-4-2); border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s); color: var(--text-muted); }
 .tdcb-prompt-diff ul { margin: 0; padding-left: var(--size-4-4); font-size: var(--font-ui-small); }

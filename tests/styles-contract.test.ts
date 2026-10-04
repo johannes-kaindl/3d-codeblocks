@@ -16,6 +16,26 @@ function declarations(selector: string): string {
 }
 const has = (selector: string, decl: RegExp): boolean => decl.test(declarations(selector));
 
+describe("prompt panel layout (stream collapsed, buttons cut off)", () => {
+  it("the stream does not shrink and has a minimum height in em", () => {
+    expect(has(".tdcb-prompt .tdcb-prompt-stream", /flex:\s*0 0 auto/)).toBe(true);
+    expect(has(".tdcb-prompt .tdcb-prompt-stream", /min-height:\s*[\d.]+em/)).toBe(true);
+  });
+  it("the body scrolls and the Apply/Discard row sticks to the bottom with a theme background", () => {
+    expect(has(".tdcb-prompt > .okit-hub-content .okit-hub-panel", /overflow-y:\s*auto/)).toBe(true);
+    expect(has(".tdcb-prompt .tdcb-prompt-end", /position:\s*sticky/)).toBe(true);
+    expect(has(".tdcb-prompt .tdcb-prompt-end", /bottom:\s*0/)).toBe(true);
+    expect(has(".tdcb-prompt .tdcb-prompt-end", /background:\s*var\(--background-primary\)/)).toBe(true);
+  });
+});
+
+describe("editor focus frame", () => {
+  it("the dotted CodeMirror focus outline is replaced by an accent border (outline none, border colour accent)", () => {
+    expect(has(".tdcb-shapes-text .cm-editor.cm-focused", /outline:\s*none/)).toBe(true);
+    expect(has(".tdcb-shapes-text .cm-editor.cm-focused", /border-color:\s*var\(--interactive-accent\)/)).toBe(true);
+  });
+});
+
 describe("canvas focus", () => {
   it("a focused canvas shows a ring (a click focuses it so the arrow keys work)", () => {
     expect(has(".tdcb-stage canvas:focus-visible", /outline:\s*2px solid var\(--interactive-accent\)/)).toBe(true);

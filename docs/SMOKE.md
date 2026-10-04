@@ -596,6 +596,7 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 | SH15 | Block im Lesemodus (Notiz mit einem ```` ```shapes ````-Block): ein echter Mausklick (`Input.dispatchMouseEvent`) fokussiert den Canvas (`document.activeElement === canvas`, `tabIndex` −1), danach verändern echte Tasten ↑ und ← (`Input.dispatchKeyEvent`) das Bild (Pixel-Hash; Pan ändert die Winkel nicht, siehe B4) |
 | SH15b | Dasselbe im Live Preview; zusätzlich bleibt die Cursorzeile des Editors gleich (die Pfeiltasten gehen nicht an CodeMirror). Bleibt der Fokus nach dem Klick beim Editor, ist der Punkt rot und der Satz zu den Pfeiltasten in CHANGELOG und Guide zu streichen (je eine Zeile) |
 | SH16 | Die Höhe des Editors der Dateiansicht folgt dem Text (Zeilenhöhe an `.cm-line` gemessen, Rahmen und Padding aus dem Computed Style). Fünf Zeilen: Editor = 5 × Zeile + Rahmen/Padding ± 1 Zeile und unter 50 % der Fläche. 200 Zeilen: Editor = Inhaltsbereich der Textspalte ± 2 px und `.cm-scroller` scrollt (`scrollHeight` > `clientHeight`). Leere Datei: Editor ≥ 3 Zeilenhöhen. Split (ab 700 px, sonst SH16b übersprungen): fünf Zeilen dieselbe Regel, Modell-Spalte ≥ Fläche − 2 px. Die drei Dateien `_tdcb-smoke-lines{5,200,0}.shapes` legt der Punkt an und räumt sie auf (Whitelist) |
+| SH17 | Der Editor-Rahmen bleibt durchgezogen: ohne Fokus `border-top-style: solid`, 1 px; im Fokus (echter Klick in den Editor, `cm-focused`) kein Outline (`none` oder Breite 0, CodeMirrors Basisthema setzt sonst `1px dotted #212121`), Rand weiter solid 1 px, Randfarbe im Fokus ≠ Randfarbe ohne Fokus |
 
 **Ergebnis Plan 2 (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess, Vault aus dem Fixture):** vorher (nach Plan 1) 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 83 grün · 0 rot · 8 übersprungen · 0 nichts gemessen (+7 grün = SH6–SH12; der achte Skip ist SH12b, die Icon-Existenzprüfung — `require("obsidian")` ist im Renderer nicht erreichbar, die Icons stehen nur als Menü-Eintrags-Attribut fest, ihre Darstellung ist nicht gemessen).
 
@@ -605,7 +606,7 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 
 ### Prompt-Panel (Plan 3b)
 
-> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP9, eigener Abschnitt)
+> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP11, eigener Abschnitt)
 
 The substitute endpoint checks the wiring, not the LLM.
 
@@ -625,6 +626,7 @@ Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurüc
 | PP8 | Der Block wird zwischen Anfrage und Apply von Hand geändert (eine Bein-Zeile bekommt eine Farbe): Apply meldet „The block changed — nothing was applied.“ und die Notiz bleibt gleich der Handfassung |
 | PP9 | Ein Block, dessen Rumpf mit einer Leerzeile endet: Anfrage und Apply müssen sicher ausgehen — angewendet (bis auf die Platte-Zeile unverändert, ein Zaun) oder abgelehnt (Notiz unverändert). Welcher der beiden Ausgänge eintrat und der Rumpf-Fingerabdruck des Panels stehen im Detail; die Wahl selbst wird nicht gewertet |
 | PP10 | Die Ersatz-Zeile ist **erreichbar**, nicht nur vorhanden: ihr Status-Symbol in den Einstellungen ist `is-ok`, die Auflösung der Verbindung wählt sie, und das Modell steht in der Modell-Liste. Der Ersatz-Endpunkt bedient nur `GET /v1/models` und `POST /v1/chat/completions` (alles andere 404 mit `{"error":"Unexpected endpoint or method. …"}` wie LM Studio) — ein Ersatz, der auch `/models` bediente, ließ den Kit-Fehler „Probe fragt `/models` statt `/v1/models`“ (obsidian-kit 0.49.1) grün durchgehen, während jede echte lokale Zeile „not reachable — skipped“ zeigte (2026-10-04). Gegenprobe: mit dem vendorten `llm-connection.ts` von 0.49.1 wird PP10 rot (Symbol `is-error`, keine Zeile aufgelöst, Modell nicht in der Liste) und PP3, PP5, PP6 mit („No language model is set up yet.“) |
+| PP11 | Panel mit zwei Runden und Diff-Liste (Erzeugen, dann gleich Verfeinern ohne New; der Ersatz-Endpunkt liefert A02 und R01). Apply und Discard liegen ganz im Fenster und ganz im sichtbaren Bereich des Rumpfs (die Knopfzeile ist `position: sticky`), die Statuszeile und die Beschriftung der Vorschau überschneiden sich nicht, der Stream-Bereich ist höher als 60 px. Das Detail nennt Fensterhöhe, Rects, ob der Rumpf scrollt. Gegenprobe: vor dem Fix fiel der Stream auf einen Streifen zusammen, die Statuszeile überlagerte die Beschriftung, die Knöpfe waren unten halb abgeschnitten (Fenster 1500×949) |
 
 Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprungen · nichts gemessen); der Nenner ist die Zahl aller Punkte des Laufs, auch der übersprungenen und nicht gemessenen.
 
@@ -1100,6 +1102,7 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 | SH15 | Block im Lesemodus (Notiz mit einem ```` ```shapes ````-Block): ein echter Mausklick (`Input.dispatchMouseEvent`) fokussiert den Canvas (`document.activeElement === canvas`, `tabIndex` −1), danach verändern echte Tasten ↑ und ← (`Input.dispatchKeyEvent`) das Bild (Pixel-Hash; Pan ändert die Winkel nicht, siehe B4) |
 | SH15b | Dasselbe im Live Preview; zusätzlich bleibt die Cursorzeile des Editors gleich (die Pfeiltasten gehen nicht an CodeMirror). Bleibt der Fokus nach dem Klick beim Editor, ist der Punkt rot und der Satz zu den Pfeiltasten in CHANGELOG und Guide zu streichen (je eine Zeile) |
 | SH16 | Die Höhe des Editors der Dateiansicht folgt dem Text (Zeilenhöhe an `.cm-line` gemessen, Rahmen und Padding aus dem Computed Style). Fünf Zeilen: Editor = 5 × Zeile + Rahmen/Padding ± 1 Zeile und unter 50 % der Fläche. 200 Zeilen: Editor = Inhaltsbereich der Textspalte ± 2 px und `.cm-scroller` scrollt (`scrollHeight` > `clientHeight`). Leere Datei: Editor ≥ 3 Zeilenhöhen. Split (ab 700 px, sonst SH16b übersprungen): fünf Zeilen dieselbe Regel, Modell-Spalte ≥ Fläche − 2 px. Die drei Dateien `_tdcb-smoke-lines{5,200,0}.shapes` legt der Punkt an und räumt sie auf (Whitelist) |
+| SH17 | Der Editor-Rahmen bleibt durchgezogen: ohne Fokus `border-top-style: solid`, 1 px; im Fokus (echter Klick in den Editor, `cm-focused`) kein Outline (`none` oder Breite 0, CodeMirrors Basisthema setzt sonst `1px dotted #212121`), Rand weiter solid 1 px, Randfarbe im Fokus ≠ Randfarbe ohne Fokus |
 
 **Ergebnis Plan 2 (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess, Vault aus dem Fixture):** vorher (nach Plan 1) 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 83 grün · 0 rot · 8 übersprungen · 0 nichts gemessen (+7 grün = SH6–SH12; der achte Skip ist SH12b, die Icon-Existenzprüfung — `require("obsidian")` ist im Renderer nicht erreichbar, die Icons stehen nur als Menü-Eintrags-Attribut fest, ihre Darstellung ist nicht gemessen).
 
@@ -1109,7 +1112,7 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 
 ### Prompt-Panel (Plan 3b)
 
-> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP9, eigener Abschnitt)
+> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP11, eigener Abschnitt)
 
 The substitute endpoint checks the wiring, not the LLM.
 

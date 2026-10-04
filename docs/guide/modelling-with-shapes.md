@@ -178,7 +178,7 @@ If an answer cannot be turned into a model, the panel says why and adds a hint b
 
 ### Create a model
 
-Leave the target at `New model`, describe the model in the box, then click **Create** or press Cmd/Ctrl+Enter. The raw answer streams in as it arrives. When it is complete, a preview of the model appears with the message `Done — check the preview, then apply or change further.` The answer is read as a list of parts and written as shapes lines; parts that cannot be used are left out, and an answer without a usable part is reported instead.
+Leave the target at `New model`, describe the model in the box, then click **Create** or press Cmd/Ctrl+Enter. The raw answer streams in as it arrives. When it is complete, a preview of the model appears with the message `Done — check the preview, then apply or change further, or press New to start another model.` After this first result every further request builds on that model (the button reads **Change**); a new model starts with **New**. The answer is read as a list of parts and written as shapes lines; parts that cannot be used are left out, and an answer without a usable part is reported instead.
 
 ### Change a model
 

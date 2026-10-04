@@ -24,6 +24,7 @@ export const PANEL_TEXTS = {
   reasoning: "Thinking…",
   running: (model: string) => `Asking ${model}… this can take several minutes.`,
   done: "Done — check the preview, then apply or change further.",
+  doneCreate: "Done — check the preview, then apply or change further, or press New to start another model.",
   aborted: "Stopped.",
   noEndpoint: "No language model is set up yet.",
   openSettings: "Open settings",

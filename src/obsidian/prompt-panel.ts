@@ -253,7 +253,7 @@ export class PromptPanelView extends ItemView {
     this.diffEl = c.createDiv({ cls: "tdcb-prompt-diff" });
     this.roundsEl = c.createDiv({ cls: "tdcb-prompt-rounds" });
 
-    const end = c.createDiv({ cls: "tdcb-prompt-actions" });
+    const end = c.createDiv({ cls: "tdcb-prompt-actions tdcb-prompt-end" });
     this.applyBtn = end.createEl("button", { cls: "mod-cta tdcb-prompt-apply", text: PANEL_TEXTS.accept, attr: { type: "button" } });
     this.applyBtn.addEventListener("click", () => void this.apply());
     this.discardBtn = end.createEl("button", { cls: "tdcb-prompt-discard", text: PANEL_TEXTS.discard, attr: { type: "button" } });
@@ -400,7 +400,8 @@ export class PromptPanelView extends ItemView {
         ? { kind: "create", instruction, text: made.text, model, at }
         : { kind: "refine", instruction, changes: made.changes, basedOn, text: made.text, diff: made.diff, model, at };
     this.panel = { ...this.panel, rounds: pushRound(this.panel.rounds, round) };
-    this.setStatus("ok", PANEL_TEXTS.done);
+    // Nach der ersten Create-Runde baut jede weitere Anfrage auf dem Ergebnis auf; ein NEUES Modell beginnt mit „New“.
+    this.setStatus("ok", made.kind === "create" ? PANEL_TEXTS.doneCreate : PANEL_TEXTS.done);
     this.renderAll();
     await this.renderPreview();
   }

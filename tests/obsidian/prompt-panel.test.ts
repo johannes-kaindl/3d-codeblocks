@@ -89,6 +89,20 @@ describe("PromptPanelView", () => {
     expect(statusText(view)).toContain("Done");
   });
 
+  it("after a create round the status points to New for another model; after a refine round it does not", async () => {
+    const created = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'));
+    await created.view.onOpen();
+    await send(created.view, "a box");
+    expect(statusText(created.view)).toBe("Done — check the preview, then apply or change further, or press New to start another model.");
+    const refined = makeView(answer('{"changes":[{"op":"change","name":"Platte","position":[0,0.925,0]}]}'), { readTargetText: vi.fn(async () => TABLE) });
+    await refined.view.onOpen();
+    refined.view.setTarget(BLOCK);
+    await send(refined.view, "raise");
+    expect(refined.view.state().rounds.rounds).toHaveLength(1);
+    expect(statusText(refined.view)).toBe("Done — check the preview, then apply or change further.");
+    expect(statusText(refined.view)).not.toContain("press New");
+  });
+
   it("turns an unusable answer into a status with the hint, and no round", async () => {
     const { view, loadModel } = makeView(answer("Sorry, I cannot"));
     await view.onOpen();
