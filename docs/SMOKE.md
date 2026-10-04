@@ -117,7 +117,16 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > data-URI-Buffer des vorhandenen Prüfmodells in eine echte `.bin` aus —, statt vom Fixture
 > abzuhängen; sonst liefe der Punkt nur im Staging-Vault und würde anderswo still
 > übersprungen (dieselbe Entscheidung wie bei B16/STL).
-> **Gegenprobe:** die `.bin` nach dem Schreiben gelöscht → **nur B18 rot**
+> **Nachtrag zur Bilanz (2026-10-04, abends, Build `c7d3345` plus Treiber-Härtung):** Abschnittsweise je frischem Prozess gegen einen eigenen Wegwerf-Vault `3d-codeblocks-smoke` (der Staging-Vault `3d-codeblocks` war in der regulären Instanz offen): Aktiver Block 9 grün · Ansicht merken 15 grün, 1 übersprungen · Basis 19 grün, 3 übersprungen · Datei-nativer Ausbau 18 grün · shapes-Dateiansicht 12 grün, 1 übersprungen (SH13 bis SH15b neu) · Prompt-Panel 11 grün (PP1–PP10) · Edit mode 9 grün, 3 übersprungen · Kameras 8 grün · Klick-Sturm 4 grün; 0 rot, 0 nichts gemessen. Das Prompt-Panel lief in sechs Anläufen mit dem letzten Stand dreimal vollständig grün, einmal in der Serie und zweimal einzeln; in einem Anlauf von dreien blieb es bei 7 grün · 1 rot · 3 nichts gemessen (PP5, PP7, PP8, PP9 hängen am Lesemodus-Baum): ungeklärte Instabilität der Zweitinstanz, siehe die Fallen unten.
+
+**Zusätzliche Fallen dieses Nachtrags (alle gemessen):**
+- Ein verdecktes Fenster (anderer Space, andere App im Vordergrund) rendert den Lesemodus nicht: `visibilityState` hidden, 0 Bilder je Sekunde. `requireVisible` (Stufe 1b) meldete „genügte“, und das Fenster fiel danach auf hidden zurück. Der Treiber prüft deshalb vor jeder Block-Notiz neu und holt das Fenster im Zweifel mit show/moveTop/focus.
+- Ein Blatt, das vorher im Quellmodus stand, rendert den Lesemodus danach in der Zweitinstanz gelegentlich gar nicht (gemessen auch mit dem Build `52d8134`); ein frisches Blatt renderte jedes Mal. Der Treiber öffnet Block-Notizen deshalb in einem neuen Tab und schließt die alten Blätter.
+- Das Blatt trägt zwei Block-Bäume (Lesemodus und Editor), einer davon mit Canvas und Knöpfen der Breite 0: Treiber wählen den sichtbaren (Breite > 0).
+- Cursor im Live Preview in die Zeile NACH dem Block setzen: ein Cursor im Block zeigt den Quelltext statt des Widgets, der Canvas verschwindet.
+- Ein Ersatz-Endpunkt bedient nur die Pfade, die ein echter Server kennt (`/v1/models`, `/v1/chat/completions`); ein großzügiger Ersatz verdeckte den Kit-Fehler „Probe fragt `/models`“ (PP10).
+
+**Gegenprobe:** die `.bin` nach dem Schreiben gelöscht → **nur B18 rot**
 > („nichts gezeichnet — die .bin wurde nicht gefunden oder nicht geladen"). Danach
 > zurückgebaut, voller Lauf **65/65**.
 >

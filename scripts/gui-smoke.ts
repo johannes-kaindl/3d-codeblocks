@@ -72,6 +72,7 @@ import {
   openNote as openNoteViaBridge,
   pollUntil,
   reopenNote,
+  requireVisible,
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 
@@ -4545,6 +4546,16 @@ const ppReadNote = (cdp: Cdp, path: string): Promise<string> =>
     return file ? await app.vault.read(file) : "";
   `);
 
+/** Das Fenster muss JETZT sichtbar sein (Lesemodus rendert in einem verdeckten Fenster nichts, 0 Bilder je Sekunde): nach
+ *  der Brücke fiel es gemessen 2026-10-04 mitten im Lauf wieder auf hidden. Hidden → show/moveTop/focus, danach pollen. */
+async function ppEnsureVisible(cdp: Cdp): Promise<string> {
+  const now = await cdp.evaluate<string>(`return document.visibilityState;`);
+  if (now === "visible") return "sichtbar";
+  await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); if (w.isMinimized()) w.restore(); w.show(); w.moveTop(); w.focus(); return true;`).catch(() => undefined);
+  const later = await pollUntil(cdp, `return document.visibilityState === "visible" ? true : null;`, 5000, 300);
+  return later ? "war hidden, geholt" : "bleibt hidden";
+}
+
 /** Eine Notiz mit Tisch-Block im Lesemodus öffnen und warten, bis der Block samt Aktionsleiste steht.
  *  `null` = der Block rendert nicht (Umgebung, nicht Befund).
  *
@@ -4557,6 +4568,8 @@ async function ppOpenBlockNote(
   body: string,
 ): Promise<{ buttons: { label: string; svg: boolean; children: number }[] } | null> {
   createdNotes.add(path);
+  const visibility = await ppEnsureVisible(cdp);
+  if (visibility !== "sichtbar") console.log(`  (Fenster vor ${path}: ${visibility})`);
   const open = async (): Promise<void> => {
     const diag = await cdp.evaluate<string>(`
       try {
@@ -4566,8 +4579,13 @@ async function ppOpenBlockNote(
         if (existing) await app.vault.modify(existing, body);
         else await app.vault.create(path, body);
         const file = app.vault.getAbstractFileByPath(path);
-        const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit) ?? app.workspace.getLeaf(true);
+        // Ein NEUES Blatt statt des zuletzt benutzten: ein Blatt, das vorher im Quellmodus stand (PP4), rendert den
+        // Lesemodus danach in der Zweitinstanz gelegentlich gar nicht (gemessen 2026-10-04, auch mit Build 52d8134;
+        // ein frisches Blatt renderte in jedem Versuch). Die alten Markdown-Blätter danach schließen.
+        const old = app.workspace.getLeavesOfType("markdown");
+        const leaf = app.workspace.getLeaf("tab");
         await leaf.openFile(file, { state: { mode: "preview" } });
+        for (const l of old) l.detach();
         app.workspace.setActiveLeaf(leaf, { focus: true });
         await new Promise((r) => setTimeout(r, 200));
         return "ok";
@@ -4578,9 +4596,12 @@ async function ppOpenBlockNote(
   const anyBlock = `const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); return { n: root ? root.querySelectorAll(".tdcb-block, .tdcb-play").length : 0 };`;
   let rendered = false;
   for (let attempt = 0; attempt < 2 && !rendered; attempt++) {
+    await ppEnsureVisible(cdp);
     await open();
     rendered = (await pollState<{ n: number }>(cdp, anyBlock, (s) => s.n > 0, 6_000, 300)).reached;
     if (!rendered) {
+      const vis = await ppEnsureVisible(cdp);
+      if (vis !== "sichtbar") console.log(`  (Fenster beim Rendern von ${path}: ${vis})`);
       await cdp.evaluate(`app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view?.previewMode?.rerender?.(true); return true;`);
       rendered = (await pollState<{ n: number }>(cdp, anyBlock, (s) => s.n > 0, 5_000, 300)).reached;
     }
@@ -4647,6 +4668,8 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
       300,
     );
     if (!barBack.reached) {
+      const vis = await ppEnsureVisible(cdp);
+      if (vis !== "sichtbar") console.log(`  (Fenster vor dem Klick in ${path}: ${vis})`);
       await activateBlock(cdp, 0);
       await sleepMs(500);
     }
@@ -5137,6 +5160,22 @@ async function main(): Promise<void> {
   console.log(`GUI-Smoke — Obsidian auf Port ${port}`);
   assertDeployedBuildMatches(vault);
   const cdp = await Cdp.attach(port, vault);
+  // Ein verdecktes Fenster (anderer Space, Fokus bei einer anderen App) rendert nichts: Lesemodus leer, 0 Bilder je Sekunde,
+  // `visibilityState` hidden (gemessen 2026-10-04: PP5/7/8/9 und SH15 rot oder nicht gemessen, ohne Codeaenderung). Erst sichtbar
+  // machen, sonst misst der Lauf nur die Umgebung (CORE-TEST-22). Die Brücke legt das Fenster zuerst nur daneben (setBounds),
+  // statt den Vordergrund zu nehmen.
+  await requireVisible(cdp).catch((e: unknown) => console.error(`requireVisible: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`));
+  // Stufe 1b meldet „genuegte“, solange `visibilityState` im Moment der Verschiebung sichtbar war; gemessen 2026-10-04
+  // fiel das Fenster danach zurück auf hidden (0 Bilder je Sekunde, Lesemodus leer). Deshalb NACH der Brücke noch einmal
+  // prüfen und im Space-Fall (Stufe 2 der Brücke) das Fenster wirklich holen: show/moveTop/focus. Nimmt den Vordergrund
+  // — der Lock (`--exclusive focus`) ist dafür da.
+  const stillVisible = await pollUntil(cdp, `return document.visibilityState === "visible" ? true : null;`, 2500, 300);
+  if (!stillVisible) {
+    console.error("requireVisible: Fenster nach der Brücke wieder hidden — hole es nach vorn (show/moveTop/focus)");
+    await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); if (w.isMinimized()) w.restore(); w.show(); w.moveTop(); w.focus(); return true;`).catch(() => undefined);
+    const later = await pollUntil(cdp, `return document.visibilityState === "visible" ? true : null;`, 5000, 300);
+    if (!later) throw new Error("Obsidian-Fenster bleibt hidden (anderer Space, Bildschirm gesperrt?) — der DOM misst dann nichts; Fenster von Hand nach vorn holen und den Lauf wiederholen.");
+  }
   // Ausserhalb des try, damit das `finally` ihn auch nach einem Abbruch mitten im Lauf
   // zurueckschreiben kann — sonst bliebe der Vault im Smoke-Zustand stehen.
   // Ein Schnappschuss der GANZEN Einstellungen, nicht nur des einen Feldes: die
