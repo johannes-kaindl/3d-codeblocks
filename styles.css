@@ -381,8 +381,9 @@
 /* Fehlerzeilen: Farbe ist nur ein Kanal. Zweiter Kanal = Linienform (durchgezogen 2 px gegen
    gepunktet 1 px) unter der Zeile und ein linker Balken (durchgezogen gegen gepunktet); die Meldung steht
    zusaetzlich als Text in der Zusammenfassung der Pillen-Leiste (Tastatur/Touch).
-   Die Linie ist ein `border-bottom`, kein `text-decoration: underline wavy|dotted`: der Store-Lint meldet die
-   mehrwertige Form als „only partially supported“ (Eigenschaft tauschen, nicht Schreibweise zerlegen). */
+   Die Linie ist ein `border-bottom`, keine Unterstreichung per `text-decoration` mit Linienform und Farbe: der
+   Store-Lint meldet die mehrwertige Form als „only partially supported“ (Eigenschaft tauschen, nicht Schreibweise
+   zerlegen). */
 .tdcb-issue-line {
   border-left: var(--size-4-1) solid transparent;
 }
