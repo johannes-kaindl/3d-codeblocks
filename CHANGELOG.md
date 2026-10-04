@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-04
+
 ### Added
 
 - **shapes models** (hand-written, no LLM): describe a model as one part per line (`box`, `cylinder`, `sphere`, `cone` with `size`, `at`, `rot`, `color`) in a ``shapes`` code block or a `.shapes` file. A broken line only drops that part and is reported with its line number. Files work in the 3D view, as `![[…]]` embeds and via the ``3d`` block's `file:` key.
