@@ -66,7 +66,7 @@ describe("text and split view have a visible end", () => {
   it("the editor is as tall as its text, capped by the pane (it scrolls inside), with a three-line minimum", () => {
     expect(has(".tdcb-shapes-text .cm-editor", /height:\s*auto/)).toBe(true);
     expect(has(".tdcb-shapes-text .cm-editor", /max-height:\s*100%/)).toBe(true);
-    expect(has(".tdcb-shapes-text .cm-content", /min-height:\s*3lh/)).toBe(true);
+    expect(has(".tdcb-shapes-text .cm-content", /min-height:\s*calc\(3 \* 1\.4em\)/)).toBe(true);
     // Der alte Zwang auf volle Hoehe darf nicht zurueckkommen.
     expect(declarations(".tdcb-shapes-text .cm-editor")).not.toMatch(/(^|;)\s*height:\s*100%/);
   });
@@ -78,5 +78,23 @@ describe("text and split view have a visible end", () => {
     expect(has(".tdcb-shapes-body.is-split .tdcb-shapes-text", /border-right:\s*var\(--divider-width\)\s+solid\s+var\(--divider-color\)/)).toBe(true);
     expect(has(".tdcb-shapes-body.is-split .tdcb-shapes-text", /max-height:\s*100%/)).toBe(true);
     expect(has(".tdcb-shapes-body.is-split .tdcb-shapes-model", /max-height:\s*100%/)).toBe(true);
+  });
+});
+
+describe("store CSS lint (Review 0.6.1: Satisfactory, two medium findings)", () => {
+  it("no rule declares the same property twice (\"Unexpected duplicate\")", () => {
+    const duplicates: string[] = [];
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const props = m[2].split(";").filter((d) => d.includes(":")).map((d) => d.split(":")[0].trim());
+      for (const p of new Set(props)) if (props.filter((x) => x === p).length > 1) duplicates.push(`${m[1].trim()} → ${p}`);
+    }
+    expect(duplicates).toEqual([]);
+  });
+  it("text-decoration stays single-valued (the multi-valued form is flagged as partially supported)", () => {
+    expect(css).not.toMatch(/text-decoration:\s*[^;\s]+\s+[^;\s]+/);
+  });
+  it("issue lines mark error and warning by the bottom line (solid vs dotted), not by text-decoration", () => {
+    expect(has(".tdcb-issue-line.is-error", /border-bottom:\s*2px solid var\(--color-red\)/)).toBe(true);
+    expect(has(".tdcb-issue-line.is-warning", /border-bottom:\s*1px dotted var\(--color-yellow\)/)).toBe(true);
   });
 });

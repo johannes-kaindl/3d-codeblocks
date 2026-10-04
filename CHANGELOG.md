@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Store CSS lint (review of 0.6.1: Satisfactory, two medium findings):** the error and warning markers of the `.shapes` text editor no longer use the multi-valued `text-decoration: underline wavy|dotted` (flagged as only partially supported by Obsidian 1.11.4); the line under a marked line is now a `border-bottom` (solid 2 px for errors, dotted 1 px for warnings), so the shape still tells the two apart without colour. A duplicate `min-height` declaration in the editor's minimum-height rule is removed.
+
 ## [0.6.1] — 2026-10-04
 
 ### Fixed

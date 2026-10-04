@@ -3586,14 +3586,14 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       typeAtEnd(leaf, "\\nbox Kaputt size 1 2");
       return true;
     `);
-    const eight = await pollState<{ lines: { text: string; title: string }[]; summary: string; total: number }>(
+    const eight = await pollState<{ lines: { text: string; title: string; bb: string; td: string }[]; summary: string; total: number }>(
       cdp,
       `
         ${SHAPES_LEAF}
         const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
         if (!root) return null;
         return {
-          lines: [...root.querySelectorAll(".tdcb-issue-line.is-error")].map((l) => ({ text: l.textContent ?? "", title: l.getAttribute("title") ?? "" })),
+          lines: [...root.querySelectorAll(".tdcb-issue-line.is-error")].map((l) => { const cs = getComputedStyle(l); return { text: l.textContent ?? "", title: l.getAttribute("title") ?? "", bb: cs.borderBottomStyle + " " + cs.borderBottomWidth, td: cs.textDecorationLine }; }),
           summary: root.querySelector(".tdcb-shapes-summary")?.textContent ?? "",
           total: root.querySelectorAll(".tdcb-shapes-text .cm-line").length,
         };
@@ -3608,10 +3608,13 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
         e8.lines.length === 1 &&
         e8.lines[0]?.title.includes("needs 1 or 3 numbers") === true &&
         e8.lines[0]?.text.includes("box Kaputt") === true &&
+        // Zweiter Kanal sichtbar: Linie unter der Zeile als border-bottom (solid 2px), kein text-decoration (Store-Lint 0.6.1).
+        e8.lines[0]?.bb === "solid 2px" &&
+        e8.lines[0]?.td === "none" &&
         e8.summary.startsWith("1 error") &&
         e8.summary.includes(`Line ${e8.total}:`),
       e8
-        ? `${e8.lines.length} Fehlerzeile(n) (erwartet genau 1) · Zeile: ${JSON.stringify(e8.lines[0]?.text ?? "")} · title: ${JSON.stringify(e8.lines[0]?.title ?? "")} · Zusammenfassung: ${JSON.stringify(e8.summary)} (letzte Zeile ${e8.total})`
+        ? `${e8.lines.length} Fehlerzeile(n) (erwartet genau 1) · Linie unter der Zeile: ${e8.lines[0]?.bb ?? "?"} (erwartet solid 2px), text-decoration: ${e8.lines[0]?.td ?? "?"} (erwartet none) · Zeile: ${JSON.stringify(e8.lines[0]?.text ?? "")} · title: ${JSON.stringify(e8.lines[0]?.title ?? "")} · Zusammenfassung: ${JSON.stringify(e8.summary)} (letzte Zeile ${e8.total})`
         : "keine Ansicht",
     );
 

@@ -353,11 +353,11 @@
   border-radius: var(--radius-s);
   background: var(--background-primary);
 }
-/* Mindesthoehe etwa drei Zeilen, damit eine leere Datei nicht zu einer Linie wird. `lh` ist die Zeilenhoehe des
-   Elements selbst (hier die der Editorzeilen), also folgt die Mindesthoehe der Schrift ohne feste Pixel. */
+/* Mindesthoehe etwa drei Zeilen, damit eine leere Datei nicht zu einer Linie wird. 1.4em ist die Zeilenhoehe der
+   Editorzeilen, die Mindesthoehe folgt also der Schrift ohne feste Pixel. Nur EINE Deklaration: der Store-Lint meldet
+   eine doppelte Eigenschaft im selben Block („Unexpected duplicate min-height“), auch als Rueckfall vor `3lh`. */
 .tdcb-shapes-text .cm-content {
   min-height: calc(3 * 1.4em);
-  min-height: 3lh;
 }
 /* Der Editor der Dateiansicht hat einen durchgezogenen 1-px-Rand. CodeMirrors Basisthema setzt auf einen fokussierten
    Editor `outline: 1px dotted #212121` (node_modules/@codemirror/view, buildTheme "&.cm-focused"): das sah wie ein
@@ -378,9 +378,11 @@
 .tdcb-shapes-model.is-hidden {
   display: none;
 }
-/* Fehlerzeilen: Farbe ist nur ein Kanal. Zweiter Kanal = Linienform (gewellt gegen
-   gepunktet) und ein linker Balken (durchgezogen gegen gepunktet); die Meldung steht
-   zusaetzlich als Text in der Zusammenfassung der Pillen-Leiste (Tastatur/Touch). */
+/* Fehlerzeilen: Farbe ist nur ein Kanal. Zweiter Kanal = Linienform (durchgezogen 2 px gegen
+   gepunktet 1 px) unter der Zeile und ein linker Balken (durchgezogen gegen gepunktet); die Meldung steht
+   zusaetzlich als Text in der Zusammenfassung der Pillen-Leiste (Tastatur/Touch).
+   Die Linie ist ein `border-bottom`, kein `text-decoration: underline wavy|dotted`: der Store-Lint meldet die
+   mehrwertige Form als „only partially supported“ (Eigenschaft tauschen, nicht Schreibweise zerlegen). */
 .tdcb-issue-line {
   border-left: var(--size-4-1) solid transparent;
 }
@@ -388,13 +390,13 @@
   background: rgba(var(--color-red-rgb), 0.15);
   border-left-style: solid;
   border-left-color: var(--color-red);
-  text-decoration: underline wavy var(--color-red);
+  border-bottom: 2px solid var(--color-red);
 }
 .tdcb-issue-line.is-warning {
   background: rgba(var(--color-yellow-rgb), 0.15);
   border-left-style: dotted;
   border-left-color: var(--color-yellow);
-  text-decoration: underline dotted var(--color-yellow);
+  border-bottom: 1px dotted var(--color-yellow);
 }
 
 /* HUB_CSS (obsidian-kit hub.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
