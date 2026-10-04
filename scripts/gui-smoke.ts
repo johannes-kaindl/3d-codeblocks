@@ -472,11 +472,35 @@ const SAMPLER = `
     }
     const n = data.length / 4;
     const background = Math.max(...counts.values());
+    // Huellbox der Pixel, die NICHT der Hintergrundton sind (haeufigster quantisierter Ton), als Anteile der
+    // Canvasgroesse: Mitte (cx, cy) und Ausdehnung (w, h), je 0..1; null, wenn nichts ausser Hintergrund da ist.
+    // Additiv: die uebrigen Felder und der Hash bleiben unveraendert.
+    let bgKey = -1;
+    for (const [k, c] of counts) if (c === background) { bgKey = k; break; }
+    let x0 = off.width, y0 = off.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < off.height; y++) {
+      for (let x = 0; x < off.width; x++) {
+        const i = (y * off.width + x) * 4;
+        const q = ((data[i] >> 3) << 10) | ((data[i + 1] >> 3) << 5) | (data[i + 2] >> 3);
+        if (q === bgKey) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    const box = x1 < 0 ? null : {
+      cx: (x0 + x1 + 1) / 2 / off.width,
+      cy: (y0 + y1 + 1) / 2 / off.height,
+      w: (x1 - x0 + 1) / off.width,
+      h: (y1 - y0 + 1) / off.height,
+    };
     return {
       colors: seen.size,
       coverage: Math.round(((n - background) / n) * 100),
       avg: [Math.round(r / n), Math.round(g / n), Math.round(b / n)],
       hash: hash >>> 0,
+      box,
     };
   };
 `;
@@ -3432,7 +3456,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
   for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
   const remaining = reset.remaining;
   if (remaining.length > 0) {
-    for (const name of ["SH6", "SH7", "SH8", "SH9", "SH10", "SH11", "SH12"]) {
+    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH9", "SH10", "SH11", "SH12"]) {
       skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
     }
     return;
@@ -3576,6 +3600,143 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
         ? `${e8.lines.length} Fehlerzeile(n) (erwartet genau 1) · Zeile: ${JSON.stringify(e8.lines[0]?.text ?? "")} · title: ${JSON.stringify(e8.lines[0]?.title ?? "")} · Zusammenfassung: ${JSON.stringify(e8.summary)} (letzte Zeile ${e8.total})`
         : "keine Ansicht",
     );
+
+    // --- SH13. Das Modell sitzt in der Mitte der Flaeche, auch nach einer Groessenaenderung --------
+    // Ursache des Befunds (Blocker 0.6.0): ohne Begrenzung ragte die Flaeche unten ueber das Pane hinaus und die
+    // Kamera rahmte nur bei der ersten Groesse. Gemessen wird die Mitte der Nicht-Hintergrund-Pixel gegen die
+    // Canvasmitte (Toleranz 10 % der Breite/Hoehe) UND ob der Canvas nicht groesser ist als die sichtbare Flaeche.
+    const centreExpr = `
+      ${SAMPLER}
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      const canvas = root?.querySelector(".tdcb-shapes-model canvas");
+      const model = root?.querySelector(".tdcb-shapes-model");
+      if (!canvas || !model || model.classList.contains("is-hidden")) return null;
+      const s = sample(canvas);
+      const c = canvas.getBoundingClientRect();
+      const m = model.getBoundingClientRect();
+      const b = root.querySelector(".tdcb-shapes-body").getBoundingClientRect();
+      return {
+        box: s?.box ?? null,
+        canvas: [Math.round(c.width), Math.round(c.height)],
+        pane: [Math.round(m.width), Math.round(m.height)],
+        body: [Math.round(b.width), Math.round(b.height)],
+      };
+    `;
+    interface CentreState {
+      box: { cx: number; cy: number; w: number; h: number } | null;
+      canvas: number[];
+      pane: number[];
+      body: number[];
+    }
+    const centred = (s: CentreState): boolean =>
+      s.box !== null && Math.abs(s.box.cx - 0.5) < 0.1 && Math.abs(s.box.cy - 0.5) < 0.1 && (s.canvas[1] ?? 0) <= (s.body[1] ?? 0) + 2;
+    const describeCentre = (s: CentreState | null): string =>
+      s === null
+        ? "keine Modell-Spalte"
+        : `Hüllbox-Mitte ${s.box ? `${(s.box.cx * 100).toFixed(0)} %/${(s.box.cy * 100).toFixed(0)} %` : "keine Pixel"} (erwartet 50 % ± 10) · Ausdehnung ${s.box ? `${(s.box.w * 100).toFixed(0)} %×${(s.box.h * 100).toFixed(0)} %` : "-"} · Canvas ${s.canvas.join("×")} · Modell-Spalte ${s.pane.join("×")} · Fläche ${s.body.join("×")} px`;
+    await cdp.evaluate(`
+      ${SHAPES_LEAF}
+      leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="model"]')?.click();
+      await new Promise((r) => setTimeout(r, 600));
+      return true;
+    `);
+    const open13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    // Groessenaenderung: linke Seitenleiste ein, dann wieder aus (Zustand am Abschnittsende stellt `finally` her).
+    await cdp.evaluate(`
+      app.workspace.leftSplit.expand();
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    `);
+    const wide13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    await cdp.evaluate(`
+      app.workspace.leftSplit.collapse();
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    `);
+    const back13 = await pollState<CentreState>(cdp, centreExpr, centred, 10_000);
+    record(
+      "SH13. Das Modell der Dateiansicht sitzt in der Mitte, beim Öffnen und nach Größenänderung der Fläche",
+      open13.reached && wide13.reached && back13.reached,
+      `Öffnen: ${describeCentre(open13.state)} | Seitenleiste ein: ${describeCentre(wide13.state)} | wieder aus: ${describeCentre(back13.state)}`,
+    );
+
+    // --- SH14. Text- und Split-Ansicht haben ein sichtbares Ende --------------------------------
+    // Rand/Hintergrund des Editors (Computed Style), Abschluss der Flaeche und im Split eine Trennlinie; die
+    // Hoehe von Editor und Modell-Spalte ueberschreitet die der Flaeche nicht.
+    const endsExpr = `
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      const editor = root?.querySelector(".tdcb-shapes-text .cm-editor");
+      const text = root?.querySelector(".tdcb-shapes-text");
+      const model = root?.querySelector(".tdcb-shapes-model");
+      const body = root?.querySelector(".tdcb-shapes-body");
+      if (!editor || !text || !body || text.classList.contains("is-hidden")) return null;
+      const px = (v) => parseFloat(v) || 0;
+      const e = getComputedStyle(editor);
+      const t = getComputedStyle(text);
+      const bd = getComputedStyle(body);
+      const modelShown = !!model && !model.classList.contains("is-hidden");
+      return {
+        editorBorder: Math.max(px(e.borderTopWidth), px(e.borderBottomWidth), px(e.borderLeftWidth), px(e.borderRightWidth)),
+        editorBg: e.backgroundColor,
+        paneBg: t.backgroundColor,
+        bodyBottom: px(bd.borderBottomWidth),
+        splitDivider: px(t.borderRightWidth),
+        editorH: Math.round(editor.getBoundingClientRect().height),
+        modelH: modelShown ? Math.round(model.getBoundingClientRect().height) : null,
+        bodyH: Math.round(body.getBoundingClientRect().height),
+        split: body.classList.contains("is-split"),
+      };
+    `;
+    interface EndsState {
+      editorBorder: number;
+      editorBg: string;
+      paneBg: string;
+      bodyBottom: number;
+      splitDivider: number;
+      editorH: number;
+      modelH: number | null;
+      bodyH: number;
+      split: boolean;
+    }
+    const clickPill = async (mode: string): Promise<void> => {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="${mode}"]')?.click();
+        await new Promise((r) => setTimeout(r, 500));
+        return true;
+      `);
+    };
+    const hasEnd = (s: EndsState): boolean =>
+      (s.editorBorder > 0 || s.editorBg !== s.paneBg) && s.bodyBottom > 0 && s.editorH <= s.bodyH + 2;
+    await clickPill("text");
+    const textEnds = await pollState<EndsState>(cdp, endsExpr, hasEnd, 8_000);
+    const wideNow = await cdp.evaluate<boolean>(`
+      ${SHAPES_LEAF}
+      return !!leafFor(${JSON.stringify(SMOKE_VIEW_SHAPES)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="split"]:not([hidden])');
+    `);
+    let splitEnds: { state: EndsState | null; reached: boolean } | null = null;
+    if (wideNow) {
+      await clickPill("split");
+      splitEnds = await pollState<EndsState>(
+        cdp,
+        endsExpr,
+        (s) => hasEnd(s) && s.split && s.splitDivider > 0 && (s.modelH ?? 0) <= s.bodyH + 2,
+        8_000,
+      );
+    }
+    const t14 = textEnds.state;
+    const s14 = splitEnds?.state ?? null;
+    record(
+      "SH14. Text- und Split-Ansicht haben ein sichtbares Ende: Rahmen, Abschlusslinie, im Split eine Trennlinie, Höhen innerhalb der Fläche",
+      textEnds.reached && (!wideNow || splitEnds?.reached === true),
+      `Text: Rand ${t14?.editorBorder ?? "?"} px, Editor-Hintergrund ${t14?.editorBg ?? "?"} gegen Pane ${t14?.paneBg ?? "?"}, Abschlusslinie ${t14?.bodyBottom ?? "?"} px, Editor ${t14?.editorH ?? "?"} px ≤ Fläche ${t14?.bodyH ?? "?"} px` +
+        (wideNow
+          ? ` | Split: Trennlinie ${s14?.splitDivider ?? "?"} px, Editor ${s14?.editorH ?? "?"} px, Modell ${s14?.modelH ?? "?"} px ≤ Fläche ${s14?.bodyH ?? "?"} px, is-split ${s14?.split ?? "?"}`
+          : " | Split nicht angeboten (Breite < 700 px) — Split-Teil nicht gemessen"),
+    );
+    if (!wideNow) skipped("SH14b. Trennlinie im Split", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
 
     // --- SH9. Block -> Datei -------------------------------------------------
     const movedBody = [`title: ${MOVED_TITLE}`, "box A size 1", "box B size 0.5 at 1 0 0 color #ff0000"].join("\n");

@@ -17,10 +17,16 @@ All notable changes to this project are documented here. The format follows
 - **Model by prompt:** a prompt panel (command **Open prompt panel**, or the sparkles button **Edit in prompt panel** on a shapes model) creates a shapes model from a description or changes an existing one (move, resize, rotate, recolour, switch shape, add, remove). It streams the answer, shows a preview and the list of changes, keeps every request as a round you can select back, and applies the selected round to a code block, a `.shapes` file or a new model. A quality line says whether the chosen model was measured. Stop works at any moment.
 - Setting **Apply new models as** (code block at the cursor, file in the attachment folder, or ask each time).
 - Section **Language model** in the settings: your endpoints (OpenAI-compatible, keys in Obsidian's secret storage) and the request parameters; the optional LLM Endpoint Manager plugin can supply them instead.
+- Panning without a right mouse button: arrow keys pan the view after you click the model (right-drag and Shift-drag work as before).
 
 ### Changed
 
 - **The minimum Obsidian version is now 1.11.4** (was 1.6.6). The prompt panel stores API keys in Obsidian's secret storage, which Obsidian introduced in 1.11.4.
+
+### Fixed
+
+- **`.shapes` file view: the model sat too low and was cut off at the bottom.** The drawing surface could grow beyond the visible pane, so the model was centred in an area that extended below the window. The surface is now bounded by the pane, and the camera frames the model (middle of the box in the middle of the pane) when the file opens and again on every size change as long as you have not moved the view yourself, for example when a sidebar opens or you switch between Split and Model. This applies to code blocks as well.
+- **`.shapes` file view: the text and split views had no visible end.** The editor is now a framed field, the area ends in a line, and Split has a divider line between text and model; neither half grows past the area.
 
 ## [0.5.0] — 2026-09-26
 

@@ -82,6 +82,23 @@
   border: none;
   border-radius: 0;
 }
+/* Die Flaeche darf nie GROESSER werden als der Platz, den ihr das Pane gibt. Flex-Items haben `min-height:
+   auto`; die Zeichenflaeche (Canvas) traegt ihre Puffergroesse (CSS-Groesse x Pixeldichte) als Eigengroesse
+   und wuerde Viewport und Buehne darueber hinaus aufblaehen — das Modell sass dann in der Mitte einer
+   Flaeche, die unten ueber das sichtbare Pane hinausragt. Deshalb: Kette mit `min-height: 0`, und der Canvas
+   liegt absolut in der Buehne und liefert ihr keine Groesse. Der Block-Pfad (feste Pixelhoehe) braucht das nicht. */
+.tdcb-block.tdcb-fill .tdcb-viewport {
+  min-height: 0;
+}
+.tdcb-block.tdcb-fill .tdcb-stage {
+  min-height: 0;
+  position: relative;
+}
+.tdcb-block.tdcb-fill .tdcb-stage canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
 
 .tdcb-poster {
   width: 100%;
@@ -299,6 +316,9 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* Sichtbarer unterer Abschluss der ganzen Flaeche (Text, Modell, Split). */
+  overflow: hidden;
+  border-bottom: var(--divider-width) solid var(--divider-color);
 }
 .tdcb-shapes-body.is-split {
   flex-direction: row;
@@ -310,11 +330,30 @@
   min-height: 0;
   overflow: auto;
 }
+/* Der Editor ist ein umrahmtes Feld mit eigenem Hintergrund: Rand und Flaeche sagen, wo er endet (UI-STANDARD
+   §8, nur Theme-Variablen). Das Pane drumherum hat etwas Luft, damit der Rahmen nie am Rand klebt.
+   Offen (b): den Editor an die Zeilenzahl binden. Die Grenzen stehen als Variablen bereit, sind aber noch
+   NICHT verdrahtet: --tdcb-editor-min-lines / --tdcb-editor-max-lines (z. B. `max-height: calc(var(--tdcb-
+   editor-max-lines) * 1lh)` am .cm-editor). */
+.tdcb-shapes-text {
+  --tdcb-editor-min-lines: 6;
+  --tdcb-editor-max-lines: none;
+  padding: var(--size-4-2);
+  box-sizing: border-box;
+}
 .tdcb-shapes-text .cm-editor {
   height: 100%;
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
 }
+/* Split: eine deutliche Trennlinie zwischen Editor und Modell; beide Haelften enden an der Hoehe der Flaeche. */
 .tdcb-shapes-body.is-split .tdcb-shapes-text {
-  border-right: 1px solid var(--background-modifier-border);
+  border-right: var(--divider-width) solid var(--divider-color);
+  max-height: 100%;
+}
+.tdcb-shapes-body.is-split .tdcb-shapes-model {
+  max-height: 100%;
 }
 .tdcb-shapes-text.is-hidden,
 .tdcb-shapes-model.is-hidden {

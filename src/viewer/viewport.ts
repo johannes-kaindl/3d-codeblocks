@@ -23,6 +23,8 @@ import {
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { fitCamera, type CameraFit } from "../core/camera-fit";
+import { needsRefit } from "../core/refit-policy";
+import { configurePan } from "./orbit-config";
 import { cameraToView, viewToCamera, type ViewSpec } from "../core/view-spec";
 import { EditRig, type EditRigCallbacks } from "./edit-controls";
 import { fileCameraFit } from "./file-camera";
@@ -59,17 +61,8 @@ export class Viewport {
   private needsRender = true;
   private frame: number | null = null;
   private disposed = false;
-  /** Solange das Layout nach einem `setModel()` noch nicht STEHT, bindet `resize()` den
-      Fit an die jeweils AKTUELLE Groesse nach (s. `layoutSettleSize`) — statt ihn wie
-      frueher einmalig bei der ersten (moeglicherweise noch nicht endgueltigen) Groesse
-      einzufrieren. Sobald zwei aufeinanderfolgende `resize()`-Aufrufe dieselbe Groesse
-      melden, gilt das Layout als fertig und `resize()` faellt auf reines
-      Aspect-Update zurueck (Bug B5, Task "GUI-Smoke B5 rot — Doppelklick-Reset landet
-      auf distance 1": ein Block wurde bei 614px eingepasst und danach auf 314px
-      verschmaelert, ohne dass die Kamera nachgezogen wurde — `getView()` maass die
-      Abweichung dann faelschlich gegen die NEUE Breite). */
-  private layoutSettled = false;
-  private layoutSettleSize: { width: number; height: number } | null = null;
+  /** Containergroesse beim letzten Einpassen (s. `needsRefit` in core/refit-policy.ts). */
+  private lastFitSize: { width: number; height: number } | null = null;
   /** Hat der Nutzer die Kamera SELBST bewegt (echter Orbit/Pan/Zoom)? Dann darf
       `resize()` den Fit nicht mehr nachziehen, egal wie instabil das Layout noch ist —
       sonst risse ein Sidebar-Wechsel eine laufende Interaktion weg. Erkannt wird das
@@ -126,6 +119,10 @@ export class Viewport {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    configurePan(this.controls);
+    // Pfeiltasten schieben die Ansicht, sobald die Flaeche den Fokus hat (Klick darauf).
+    this.renderer.domElement.tabIndex = 0;
+    this.controls.listenToKeyEvents(this.renderer.domElement);
     this.controls.autoRotate = options.autoRotate;
     this.controls.addEventListener("change", () => {
       // s. Feldkommentar an `userMoved`: jede Aenderung ausserhalb eines eigenen Fits
@@ -216,11 +213,8 @@ export class Viewport {
     const box = new Box3().setFromObject(object);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
     this.updateGrid();
-    // Neues Modell, neue Settle-Beobachtung: der Container kann sich seit dem letzten
-    // Fit weiterentwickelt haben (Sidebar, Split) — `resize()` prueft ab jetzt wieder
-    // von vorn, ob die aktuelle Groesse die endgueltige ist (s. Feldkommentar oben).
-    this.layoutSettled = false;
-    this.layoutSettleSize = { width: this.options.container.clientWidth, height: this.options.container.clientHeight };
+    // Neues Modell: frisch einpassen (Groesse und „Nutzer hat bewegt“ beginnen von vorn).
+    this.lastFitSize = null;
     this.userMoved = false;
     if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
     else this.setView(this.pendingView);
@@ -264,18 +258,19 @@ export class Viewport {
     this.camera.aspect = this.aspect();
     this.camera.updateProjectionMatrix();
 
-    if (!this.layoutSettled && !this.userMoved && this.bounds) {
-      const stable =
-        this.layoutSettleSize?.width === clientWidth && this.layoutSettleSize?.height === clientHeight;
-      if (stable) {
-        this.layoutSettled = true;
-      } else {
-        this.layoutSettleSize = { width: clientWidth, height: clientHeight };
-        // Denselben Fit, den `setModel()` schon einmal versucht hat, an der JETZT
-        // aktuellen Groesse wiederholen — kein neuer Fit-Typ, nur eine neue Aspect-Basis.
-        if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
-        else this.setView(this.pendingView);
-      }
+    // Ein nicht bewegter Blick wird bei JEDER Groessenaenderung neu eingepasst (Mitte der Box im Zentrum des
+    // Panes), ein bewegter bleibt. Synchron statt entprellt: die Rechnung ist billig, und ein verzoegerter Fit
+    // liesse zwischendurch ein falsch gerahmtes Bild stehen.
+    if (
+      needsRefit({
+        userMoved: this.userMoved,
+        hasBounds: this.bounds !== null,
+        lastFit: this.lastFitSize,
+        now: { width: clientWidth, height: clientHeight },
+      })
+    ) {
+      if (this.pendingFileCamera) this.setFileCamera(this.pendingFileCamera);
+      else this.setView(this.pendingView);
     }
 
     this.requestRender();
@@ -333,6 +328,7 @@ export class Viewport {
     this.controls.target.set(fit.target.x, fit.target.y, fit.target.z);
     this.controls.update();
     this.applyingFit = false;
+    this.lastFitSize = { width: this.options.container.clientWidth, height: this.options.container.clientHeight };
     this.requestRender();
   }
 

@@ -569,7 +569,7 @@ Die Textsprache `shapes` (Teile aus Quader, Zylinder, Kugel, Kegel) wird als ```
 
 ### shapes-Dateiansicht und Umwandeln (Plan 2)
 
-> [!info] Automatisiert — `npm run smoke:gui -- --section shapesfile` (Punkte SH6–SH12, eigener Abschnitt)
+> [!info] Automatisiert — `npm run smoke:gui -- --section shapesfile` (Punkte SH6–SH14, eigener Abschnitt)
 
 Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakten `_tdcb-…`-Namen seiner Konstanten plus den nummerierten Umzugsnamen `_tdcb-smoke-moved( N).shapes`, wo auch immer im Vault; der Umzug Block → Datei legt seine Datei in den Attachment-Ordner), druckt jede Löschung als Infozeile und misst nur, wenn danach nichts mehr da ist. Der Besitznachweis ist die Treiber-Konvention, dass dieser Namensraum dem Treiber gehört. Dieselbe Weißliste gilt am Abschnittsende und im Aufräumen, auch bei Abbruch. Er klappt die Seitenleisten ein, damit die Ansicht breit genug ist, und stellt sie danach zurück.
 
@@ -582,6 +582,8 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 | SH10 | Bei zwei Verweisen lehnt „Move .shapes file into a code block" ab („is used in 2 places"): Datei bleibt, beide Notizen unverändert. Nach dem Löschen der zweiten Notiz läuft der Umzug: die Notiz trägt wieder den ```shapes-Block mit dem Originaltext, die Datei ist weg |
 | SH11 | Datei → Block bei offener Ansicht mit Tippen, das noch nicht gespeichert ist (der Befehl läuft im selben Aufruf, weit innerhalb der 2 s Speicherverzögerung; steht die Zeile schon auf der Platte, wird einmal neu getippt; gelingt es auch dann nicht, ist der Punkt rot, wenn die Eingabe über die CM-View lief, und übersprungen nur beim Rückfall auf `execCommand`): die Notiz trägt den Block samt frischer Zeile, die Datei ist weg (Index UND Dateisystem), keine offene Ansicht bleibt, und binnen 3,5 s taucht die Datei weder im Index noch im Dateisystem wieder auf |
 | SH12 | Beide Befehle sind registriert; je Cursor-Ort (Überschrift, im Block, auf einer Embed-Zeile) stimmt, ob sie verfügbar sind, und das echte Kontextmenü (`contextmenu`-Ereignis, gelesen aus dem DOM) trägt den Eintrag genau einmal und nur am richtigen Ort, mit `<svg>`-Icon. Geht das Menü nicht auf, wird das als übersprungen gemeldet (SH12b), nicht als grün |
+| SH13 | Die Mitte der Nicht-Hintergrund-Pixel des Modell-Canvas der Dateiansicht (Pille Model, Tisch) weicht um weniger als 10 % der Canvas-Breite/-Höhe von der Canvasmitte ab, beim Öffnen, nach „linke Seitenleiste ein" und nach „wieder aus"; der Canvas ist dabei nicht höher als die Fläche. Gegenprobe: vor dem Blocker-Fix saß der Tisch im unteren Viertel und war unten abgeschnitten |
+| SH14 | Text-Pille: der Editor hat Rand (Breite > 0) oder einen vom Pane abweichenden Hintergrund, die Fläche endet in einer Linie (`border-bottom` > 0) und der Editor ist nicht höher als die Fläche. Split (nur ab 700 px, sonst SH14b übersprungen): zusätzlich Trennlinie zwischen Editor und Modell (`border-right` > 0) und Modell-Spalte nicht höher als die Fläche |
 
 **Ergebnis Plan 2 (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess, Vault aus dem Fixture):** vorher (nach Plan 1) 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 83 grün · 0 rot · 8 übersprungen · 0 nichts gemessen (+7 grün = SH6–SH12; der achte Skip ist SH12b, die Icon-Existenzprüfung — `require("obsidian")` ist im Renderer nicht erreichbar, die Icons stehen nur als Menü-Eintrags-Attribut fest, ihre Darstellung ist nicht gemessen).
 
@@ -1068,7 +1070,7 @@ Die Textsprache `shapes` (Teile aus Quader, Zylinder, Kugel, Kegel) wird als ```
 
 ### shapes-Dateiansicht und Umwandeln (Plan 2)
 
-> [!info] Automatisiert — `npm run smoke:gui -- --section shapesfile` (Punkte SH6–SH12, eigener Abschnitt)
+> [!info] Automatisiert — `npm run smoke:gui -- --section shapesfile` (Punkte SH6–SH14, eigener Abschnitt)
 
 Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakten `_tdcb-…`-Namen seiner Konstanten plus den nummerierten Umzugsnamen `_tdcb-smoke-moved( N).shapes`, wo auch immer im Vault; der Umzug Block → Datei legt seine Datei in den Attachment-Ordner), druckt jede Löschung als Infozeile und misst nur, wenn danach nichts mehr da ist. Der Besitznachweis ist die Treiber-Konvention, dass dieser Namensraum dem Treiber gehört. Dieselbe Weißliste gilt am Abschnittsende und im Aufräumen, auch bei Abbruch. Er klappt die Seitenleisten ein, damit die Ansicht breit genug ist, und stellt sie danach zurück.
 
@@ -1081,6 +1083,8 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 | SH10 | Bei zwei Verweisen lehnt „Move .shapes file into a code block" ab („is used in 2 places"): Datei bleibt, beide Notizen unverändert. Nach dem Löschen der zweiten Notiz läuft der Umzug: die Notiz trägt wieder den ```shapes-Block mit dem Originaltext, die Datei ist weg |
 | SH11 | Datei → Block bei offener Ansicht mit Tippen, das noch nicht gespeichert ist (der Befehl läuft im selben Aufruf, weit innerhalb der 2 s Speicherverzögerung; steht die Zeile schon auf der Platte, wird einmal neu getippt; gelingt es auch dann nicht, ist der Punkt rot, wenn die Eingabe über die CM-View lief, und übersprungen nur beim Rückfall auf `execCommand`): die Notiz trägt den Block samt frischer Zeile, die Datei ist weg (Index UND Dateisystem), keine offene Ansicht bleibt, und binnen 3,5 s taucht die Datei weder im Index noch im Dateisystem wieder auf |
 | SH12 | Beide Befehle sind registriert; je Cursor-Ort (Überschrift, im Block, auf einer Embed-Zeile) stimmt, ob sie verfügbar sind, und das echte Kontextmenü (`contextmenu`-Ereignis, gelesen aus dem DOM) trägt den Eintrag genau einmal und nur am richtigen Ort, mit `<svg>`-Icon. Geht das Menü nicht auf, wird das als übersprungen gemeldet (SH12b), nicht als grün |
+| SH13 | Die Mitte der Nicht-Hintergrund-Pixel des Modell-Canvas der Dateiansicht (Pille Model, Tisch) weicht um weniger als 10 % der Canvas-Breite/-Höhe von der Canvasmitte ab, beim Öffnen, nach „linke Seitenleiste ein" und nach „wieder aus"; der Canvas ist dabei nicht höher als die Fläche. Gegenprobe: vor dem Blocker-Fix saß der Tisch im unteren Viertel und war unten abgeschnitten |
+| SH14 | Text-Pille: der Editor hat Rand (Breite > 0) oder einen vom Pane abweichenden Hintergrund, die Fläche endet in einer Linie (`border-bottom` > 0) und der Editor ist nicht höher als die Fläche. Split (nur ab 700 px, sonst SH14b übersprungen): zusätzlich Trennlinie zwischen Editor und Modell (`border-right` > 0) und Modell-Spalte nicht höher als die Fläche |
 
 **Ergebnis Plan 2 (2026-10-03, Obsidian 1.14.4, Zweitinstanz, frischer Prozess, Vault aus dem Fixture):** vorher (nach Plan 1) 76 grün · 0 rot · 7 übersprungen · 0 nichts gemessen; danach 83 grün · 0 rot · 8 übersprungen · 0 nichts gemessen (+7 grün = SH6–SH12; der achte Skip ist SH12b, die Icon-Existenzprüfung — `require("obsidian")` ist im Renderer nicht erreichbar, die Icons stehen nur als Menü-Eintrags-Attribut fest, ihre Darstellung ist nicht gemessen).
 
