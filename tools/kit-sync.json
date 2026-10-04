@@ -23,7 +23,7 @@
       "modules": ["confirm", "folder-suggest", "settings_walker", { "name": "help-setting", "ref": "0.43.0" }]
     },
     {
-      "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "ref": "0.49.1", "from": "src/obsidian",
+      "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "ref": "0.49.2", "from": "src/obsidian",
       "modules": [
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",

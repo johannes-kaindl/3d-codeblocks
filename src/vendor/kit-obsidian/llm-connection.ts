@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.49.1, src/obsidian/llm-connection.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.49.2, src/obsidian/llm-connection.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Die LLM-Anbindung eines Fachplugins als EINE Komposition: Endpunkt-Quelle (Manager oder lokale
  *  Liste mit Schlüsselbund), gemerkte Auflösung, Modellliste, Anfrage-Parameter je Modus, Client mit
  *  Transport und Fristen, Prüfung der Antwort und beide Settings-Abschnitte.
@@ -96,9 +96,9 @@ export interface LlmConnectionOptions {
   capability: Capability;
   getSettings(): LlmConnectionSettings;
   persist(patch: Partial<LlmConnectionSettings>): Promise<void>;
-  /** Erreichbarkeit einer lokalen Zeile (Default: `GET /models`, 5 s). Wird nur ohne Manager gerufen. */
+  /** Erreichbarkeit einer lokalen Zeile (Default: `GET /v1/models`, 5 s). Wird nur ohne Manager gerufen. */
   probe?: (cfg: EndpointConfig) => Promise<boolean>;
-  /** Modell-Ids einer lokalen Zeile (Default: `GET /models`). */
+  /** Modell-Ids einer lokalen Zeile (Default: `GET /v1/models`). */
   listModels?: (cfg: EndpointConfig) => Promise<string[]>;
   /** Backend des Endpunkts, wenn der Manager es nicht nennt. Default: `createObsidianBackendProbe()`
    *  (je Verbindung ein eigener 30-s-Zwischenspeicher); überschreibbar. */
@@ -218,7 +218,10 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
 
   // ── lokale Endpunkt-Zeile: Erreichbarkeit und Modellliste ──────────────────────────────────
   async function fetchStatus(cfg: EndpointConfig): Promise<{ status: EndpointStatus; ids: string[] }> {
-    const request = requestUrl({ url: `${normalizeEndpoint(cfg.url)}/models`, headers: authHeaders(cfg.apiKey), throw: false });
+    // `normalizeEndpoint` streicht ein `/v1` am Ende — die OpenAI-kompatible Liste liegt aber unter `/v1/models`.
+    // Ohne das Präfix antwortet LM Studio mit 200 und einem Fehlerkörper, Ollama mit 404; beides las
+    // `classifyEndpointStatus` als „not-an-llm-api“ und jede lokale Zeile galt als unerreichbar (3d-codeblocks, 2026-10-04).
+    const request = requestUrl({ url: `${normalizeEndpoint(cfg.url)}/v1/models`, headers: authHeaders(cfg.apiKey), throw: false });
     const timeout = new Promise<"timeout">((resolve) => { clock.setTimeout(() => resolve("timeout"), PROBE_TIMEOUT_MS); });
     try {
       const res = await Promise.race([request, timeout]);
