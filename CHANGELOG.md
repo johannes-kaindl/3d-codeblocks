@@ -27,6 +27,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **`.shapes` file view: the model sat too low and was cut off at the bottom.** The drawing surface could grow beyond the visible pane, so the model was centred in an area that extended below the window. The surface is now bounded by the pane, and the camera frames the model (middle of the box in the middle of the pane) when the file opens and again on every size change as long as you have not moved the view yourself, for example when a sidebar opens or you switch between Split and Model. This applies to code blocks as well. With auto-rotate switched on, the view is not framed again on every size change.
+- **`.shapes` file view: the editor is as tall as its text.** At least about three lines, at most the height of the pane (then it scrolls inside); in Split the text column follows the same rule and the model stays as tall as the pane.
 - **`.shapes` file view: the text and split views had no visible end.** The editor is now a framed field, the area ends in a line, and Split has a divider line between text and model; neither half grows past the area.
 
 ## [0.5.0] — 2026-09-26

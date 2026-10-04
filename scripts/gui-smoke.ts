@@ -3334,6 +3334,9 @@ const SMOKE_NOTE_MENU = "_tdcb-gui-smoke-move-menu.md";
 const SMOKE_LIVE_SHAPES = "_tdcb-smoke-live.shapes";
 const SMOKE_NOTE_LIVE = "_tdcb-gui-smoke-live.md";
 const SMOKE_NOTE_KEYS = "_tdcb-gui-smoke-keys.md";
+const SMOKE_LINES_5 = "_tdcb-smoke-lines5.shapes";
+const SMOKE_LINES_200 = "_tdcb-smoke-lines200.shapes";
+const SMOKE_LINES_0 = "_tdcb-smoke-lines0.shapes";
 /** `title:` bestimmt den Dateinamen beim Umzug Block -> Datei (exportBaseName). */
 const MOVED_TITLE = "_tdcb-smoke-moved";
 const CMD_BLOCK_TO_FILE = `${PLUGIN_ID}:convert-shapes-block-to-file`;
@@ -3350,6 +3353,9 @@ const SHAPES_WHITELIST = `
     SMOKE_LIVE_SHAPES,
     SMOKE_NOTE_LIVE,
     SMOKE_NOTE_KEYS,
+    SMOKE_LINES_5,
+    SMOKE_LINES_200,
+    SMOKE_LINES_0,
   ])};
   const movedRe = new RegExp(${JSON.stringify(`^${MOVED_TITLE}( \\d+)?\\.shapes$`)});
   const mine = (f) => !!f && (exactNames.includes(f.name) || movedRe.test(f.name));
@@ -3464,7 +3470,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
   for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
   const remaining = reset.remaining;
   if (remaining.length > 0) {
-    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH9", "SH10", "SH11", "SH12"]) {
+    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH16", "SH9", "SH10", "SH11", "SH12"]) {
       skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
     }
     return;
@@ -3871,6 +3877,114 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       await cdp.evaluate(`app.vault.setConfig("livePreview", ${JSON.stringify(previousLive15)}); return true;`);
       await closeExtraLeaves(cdp);
     }
+
+    // --- SH16. Die Hoehe des Editors folgt dem Text ------------------------------------------------
+    // Regel (Johannes 2026-10-04): so hoch wie der Text (Zeilen x Zeilenhoehe + Rahmen/Padding), nach oben durch
+    // die Flaeche begrenzt (dann scrollt er innen), Mindesthoehe drei Zeilen; im Split gilt dasselbe fuer die
+    // Textspalte, das Modell bleibt so hoch wie die Flaeche. „Flaeche“ = der Inhaltsbereich der Textspalte
+    // (`.tdcb-shapes-text` ohne Padding), das ist die Obergrenze des Editors. Die Zeilenhoehe wird an `.cm-line`
+    // gemessen. Die drei Dateien legt der Punkt selbst an (Whitelist), das Aufraeumen loescht sie.
+    const lineFile = (n: number): string => ["title: Zeilen", ...Array.from({ length: Math.max(n - 1, 0) }, (_, i) => `box T${i} size 0.2 at ${i} 0 0`)].join("\n");
+    const heightExpr = (path: string): string => `
+      ${SHAPES_LEAF}
+      const root = leafFor(${JSON.stringify(path)})?.view.containerEl.querySelector(".tdcb-shapes-view");
+      const editor = root?.querySelector(".tdcb-shapes-text .cm-editor");
+      const text = root?.querySelector(".tdcb-shapes-text");
+      const model = root?.querySelector(".tdcb-shapes-model");
+      const scroller = root?.querySelector(".tdcb-shapes-text .cm-scroller");
+      const content = root?.querySelector(".tdcb-shapes-text .cm-content");
+      const line = root?.querySelector(".tdcb-shapes-text .cm-line");
+      if (!editor || !text || !scroller || !content || !line || text.classList.contains("is-hidden")) return null;
+      const px = (v) => parseFloat(v) || 0;
+      const e = getComputedStyle(editor);
+      const c = getComputedStyle(content);
+      const t = getComputedStyle(text);
+      const modelShown = !!model && !model.classList.contains("is-hidden");
+      return {
+        lh: line.getBoundingClientRect().height,
+        lines: root.querySelectorAll(".tdcb-shapes-text .cm-line").length,
+        editorH: editor.getBoundingClientRect().height,
+        extras: px(e.borderTopWidth) + px(e.borderBottomWidth) + px(c.paddingTop) + px(c.paddingBottom),
+        paneInner: text.getBoundingClientRect().height - px(t.paddingTop) - px(t.paddingBottom),
+        bodyH: root.querySelector(".tdcb-shapes-body").getBoundingClientRect().height,
+        scrolls: scroller.scrollHeight > scroller.clientHeight + 1,
+        modelH: modelShown ? model.getBoundingClientRect().height : null,
+        split: root.querySelector(".tdcb-shapes-body").classList.contains("is-split"),
+      };
+    `;
+    interface HeightState {
+      lh: number;
+      lines: number;
+      editorH: number;
+      extras: number;
+      paneInner: number;
+      bodyH: number;
+      scrolls: boolean;
+      modelH: number | null;
+      split: boolean;
+    }
+    const f1 = (v: number | null | undefined): string => (v === null || v === undefined ? "?" : v.toFixed(1));
+    const describeHeight = (s: HeightState | null): string =>
+      s === null
+        ? "keine Textspalte"
+        : `${s.lines} Zeilen à ${f1(s.lh)} px (+ ${f1(s.extras)} px Rahmen/Padding) → Editor ${f1(s.editorH)} px · Textspalte innen ${f1(s.paneInner)} px · Fläche ${f1(s.bodyH)} px · scrollt innen: ${s.scrolls}` +
+          (s.modelH !== null ? ` · Modell ${f1(s.modelH)} px` : "");
+    const openLines = async (path: string, text: string, mode: string): Promise<void> => {
+      await cdp.evaluate(`
+        const path = ${JSON.stringify(path)};
+        if (!app.vault.getAbstractFileByPath(path)) await app.vault.create(path, ${JSON.stringify(text)});
+        return true;
+      `);
+      createdNotes.add(path);
+      await openFileInLeaf(cdp, path);
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        await new Promise((r) => setTimeout(r, 500));
+        leafFor(${JSON.stringify(path)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="${mode}"]')?.click();
+        await new Promise((r) => setTimeout(r, 700));
+        return true;
+      `);
+    };
+    // (1) fuenf Zeilen: etwa fuenf Zeilenhoehen, deutlich kleiner als die Flaeche
+    await openLines(SMOKE_LINES_5, lineFile(5), "text");
+    const five = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_5), (s) => s.lines === 5, 10_000);
+    const f5 = five.state;
+    const five_ok = f5 !== null && Math.abs(f5.editorH - (5 * f5.lh + f5.extras)) <= f5.lh && f5.editorH < f5.bodyH * 0.5;
+    // (2) 200 Zeilen: Editor = Textspalte innen (±2 px), scrollt innen
+    await openLines(SMOKE_LINES_200, lineFile(200), "text");
+    const many = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_200), (s) => s.scrolls, 10_000);
+    const f200 = many.state;
+    const many_ok = f200 !== null && Math.abs(f200.editorH - f200.paneInner) <= 2 && f200.scrolls;
+    // (3) eine leere Zeile: mindestens drei Zeilenhoehen
+    await openLines(SMOKE_LINES_0, "", "text");
+    const empty = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_0), (s) => s.lh > 0, 10_000);
+    const f0 = empty.state;
+    const empty_ok = f0 !== null && f0.editorH >= 3 * f0.lh - 1;
+    // (4) Split mit fuenf Zeilen: dieselbe Regel in der Textspalte, das Modell fuellt die Flaeche
+    await openFileInLeaf(cdp, SMOKE_LINES_5);
+    const wide16 = await cdp.evaluate<boolean>(`
+      ${SHAPES_LEAF}
+      return !!leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="split"]:not([hidden])');
+    `);
+    let f4: HeightState | null = null;
+    let split_ok = true;
+    if (wide16) {
+      await cdp.evaluate(`
+        ${SHAPES_LEAF}
+        leafFor(${JSON.stringify(SMOKE_LINES_5)})?.view.containerEl.querySelector('.tdcb-shapes-pill[data-mode="split"]')?.click();
+        await new Promise((r) => setTimeout(r, 800));
+        return true;
+      `);
+      const sp = await pollState<HeightState>(cdp, heightExpr(SMOKE_LINES_5), (s) => s.split && s.lines === 5, 10_000);
+      f4 = sp.state;
+      split_ok = f4 !== null && Math.abs(f4.editorH - (5 * f4.lh + f4.extras)) <= f4.lh && f4.editorH < f4.bodyH * 0.5 && (f4.modelH ?? 0) >= f4.bodyH - 2;
+    }
+    record(
+      "SH16. Die Höhe des Editors folgt dem Text: 5 Zeilen ≈ 5 Zeilenhöhen, 200 Zeilen = Textspalte und scrollen innen, leere Datei ≥ 3 Zeilenhöhen, Split dieselbe Regel",
+      five_ok && many_ok && empty_ok && split_ok,
+      `5 Zeilen (erwartet Editor = 5×Zeile + Rahmen/Padding ± 1 Zeile, < 50 % der Fläche): ${describeHeight(f5)} | 200 Zeilen (erwartet Editor = Textspalte innen ± 2 px, scrollt innen): ${describeHeight(f200)} | leer (erwartet ≥ 3 Zeilenhöhen): ${describeHeight(f0)} | Split, 5 Zeilen (erwartet wie die erste, Modell ≥ Fläche − 2 px): ${wide16 ? describeHeight(f4) : "Split nicht angeboten (Breite < 700 px) — nicht gemessen"}`,
+    );
+    if (!wide16) skipped("SH16b. Split-Teil der Editor-Höhe", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
 
     // --- SH9. Block -> Datei -------------------------------------------------
     const movedBody = [`title: ${MOVED_TITLE}`, "box A size 1", "box B size 0.5 at 1 0 0 color #ff0000"].join("\n");

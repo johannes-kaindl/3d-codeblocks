@@ -43,6 +43,13 @@ describe("text and split view have a visible end", () => {
   it("the editor's border is inside its height (border-box), so it never exceeds the area", () => {
     expect(has(".tdcb-shapes-text .cm-editor", /box-sizing:\s*border-box/)).toBe(true);
   });
+  it("the editor is as tall as its text, capped by the pane (it scrolls inside), with a three-line minimum", () => {
+    expect(has(".tdcb-shapes-text .cm-editor", /height:\s*auto/)).toBe(true);
+    expect(has(".tdcb-shapes-text .cm-editor", /max-height:\s*100%/)).toBe(true);
+    expect(has(".tdcb-shapes-text .cm-content", /min-height:\s*3lh/)).toBe(true);
+    // Der alte Zwang auf volle Hoehe darf nicht zurueckkommen.
+    expect(declarations(".tdcb-shapes-text .cm-editor")).not.toMatch(/(^|;)\s*height:\s*100%/);
+  });
   it("the whole body ends in a line and clips its children", () => {
     expect(has(".tdcb-shapes-body", /border-bottom:\s*var\(--divider-width\)/)).toBe(true);
     expect(has(".tdcb-shapes-body", /overflow:\s*hidden/)).toBe(true);

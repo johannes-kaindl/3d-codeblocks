@@ -343,11 +343,21 @@
   box-sizing: border-box;
 }
 .tdcb-shapes-text .cm-editor {
-  height: 100%;
+  /* So hoch wie der Text (Zeilen x Zeilenhoehe + Padding + Rahmen), nach oben von der Hoehe des Panes begrenzt;
+     darueber scrollt der Editor INNEN (.cm-scroller). Das Pane selbst bleibt voll hoch (Split: das Modell
+     daneben bleibt so hoch wie die Flaeche), der Editor sitzt oben darin. */
+  height: auto;
+  max-height: 100%;
   box-sizing: border-box;
   border: var(--border-width) solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   background: var(--background-primary);
+}
+/* Mindesthoehe etwa drei Zeilen, damit eine leere Datei nicht zu einer Linie wird. `lh` ist die Zeilenhoehe des
+   Elements selbst (hier die der Editorzeilen), also folgt die Mindesthoehe der Schrift ohne feste Pixel. */
+.tdcb-shapes-text .cm-content {
+  min-height: calc(3 * 1.4em);
+  min-height: 3lh;
 }
 /* Split: eine deutliche Trennlinie zwischen Editor und Modell; beide Haelften enden an der Hoehe der Flaeche. */
 .tdcb-shapes-body.is-split .tdcb-shapes-text {
