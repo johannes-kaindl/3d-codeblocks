@@ -3944,7 +3944,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10"] as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
 const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
@@ -3968,7 +3968,7 @@ interface Substitute {
   url: string;
   /** Wahr: nach dem ersten Stück schweigen (PP6) — die Verbindung bleibt offen, bis der Client sie schliesst. */
   hang: boolean;
-  requests: { kind: "create" | "refine" | "models"; stream: boolean }[];
+  requests: { kind: "create" | "refine" | "models" | "unknown"; stream: boolean }[];
   /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
   clientClosed: number;
   close(): Promise<void>;
@@ -4048,20 +4048,25 @@ function startSubstitute(answers: { create: string; refine: string }): Promise<S
       res.end();
       return;
     }
-    if (req.method === "GET" && path.endsWith("/models")) {
+    // Nur die Pfade, die ein echter Server kennt: LM Studio antwortet auf `GET /models` (ohne /v1) mit
+    // `{"error":"Unexpected endpoint…"}`, Ollama mit 404. Ein Ersatz, der auch `/models` bediente, verdeckte am
+    // 2026-10-04 den Kit-Fehler „Probe fragt /models statt /v1/models“ (CORE-TEST-08: der Prüfling bekam eine
+    // Antwort, die ein echter Server nie gibt).
+    if (req.method === "GET" && path.endsWith("/v1/models")) {
       sub.requests.push({ kind: "models", stream: false });
       res.writeHead(200, { ...cors, "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: [{ id: PP_MODEL }] }));
       return;
     }
-    if (req.method === "POST" && path.endsWith("/chat/completions")) {
+    if (req.method === "POST" && path.endsWith("/v1/chat/completions")) {
       const parts: Buffer[] = [];
       req.on("data", (c: Buffer) => parts.push(c));
       req.on("end", () => chat(res, Buffer.concat(parts).toString("utf8")));
       return;
     }
-    res.writeHead(404, cors);
-    res.end();
+    sub.requests.push({ kind: "unknown", stream: false });
+    res.writeHead(404, { ...cors, "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: `Unexpected endpoint or method. (${req.method} ${path})` }));
   });
 
   return new Promise((resolve, reject) => {
@@ -4236,7 +4241,7 @@ const ppClick = (cdp: Cdp, selector: string): Promise<boolean> =>
 const ppClickActionButton = (cdp: Cdp, label: string): Promise<boolean> =>
   clickReal(
     cdp,
-    `([...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(label)}))`,
+    `([...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(label)} && b.getBoundingClientRect().width > 0))`,
   );
 
 /** Notiztext von der Platte lesen. */
@@ -4342,7 +4347,7 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     // (Standbild → Aktivierung) — erst warten, bis der Knopf wieder eine Größe hat.
     const barBack = await pollState<{ w: number; poster: number }>(
       cdp,
-      `const b = [...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].find((x) => x.getAttribute("aria-label") === ${JSON.stringify(PP_EDIT_LABEL)}); return { w: b ? b.getBoundingClientRect().width : 0, poster: document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-play").length };`,
+      `const b = [...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].filter((x) => x.getAttribute("aria-label") === ${JSON.stringify(PP_EDIT_LABEL)}).find((x) => x.getBoundingClientRect().width > 0); return { w: b ? b.getBoundingClientRect().width : 0, poster: document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-play").length };`,
       (s) => s.w > 0,
       6_000,
       300,
@@ -4351,7 +4356,10 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
       await activateBlock(cdp, 0);
       await sleepMs(500);
     }
-    if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"})`, round: null, buttons };
+    if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) {
+      const where = await cdp.evaluate<string>(`const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); const bs = [...(root?.querySelectorAll(".tdcb-toolbar-button") ?? [])].map((b) => (b.getAttribute("aria-label") ?? "?") + ":" + Math.round(b.getBoundingClientRect().width)); const bar = root?.querySelector(".tdcb-toolbar"); const r = root?.getBoundingClientRect(); return JSON.stringify({ win: [innerWidth, innerHeight], leaf: r ? [Math.round(r.width), Math.round(r.height)] : null, left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed, poster: root?.querySelectorAll(".tdcb-play").length, live: root?.querySelectorAll(".tdcb-block canvas").length, buttons: bs, barDisplay: bar ? getComputedStyle(bar).display + "/" + getComputedStyle(bar).opacity : null });`);
+      return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · ${where}`, round: null, buttons };
+    }
     step = "Panel mit Ziel abwarten";
     const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
     if (!up.reached) return { ready: false, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons };
@@ -4380,6 +4388,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     PP7: "Aktionsleiste: jeder Knopf trägt ein Icon, „Edit in prompt panel“ öffnet das Panel",
     PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
     PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
+    PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
   } as const;
   const nothingFor = (reason: string): void => {
     for (const id of PP_IDS) if (!ppDone.has(id)) ppNothing(id, T[id], reason);
@@ -4420,7 +4429,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     // Erster GUI-Beleg für `renderSettings`. Der Anfrage-Titel stammt aus dem vendorten Kit-Modul, nicht aus dem Gedächtnis.
     const requestTitle = LLM_CONNECTION_STRINGS_EN.request.title;
     ppSettingsOpened = true;
-    const settings = await cdp.evaluate<{ rows: number; endpointRow: boolean; endpointValues: string[]; titles: string[]; group: boolean }>(`
+    const settings = await cdp.evaluate<{ rows: number; endpointRow: boolean; endpointValues: string[]; titles: string[]; group: boolean; statusOk: boolean; statusError: boolean }>(`
       app.setting.open();
       app.setting.openTabById(${JSON.stringify(PLUGIN_ID)});
       const read = () => {
@@ -4432,11 +4441,14 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           endpointValues: inputs,
           titles: [...(container?.querySelectorAll(".okit-collapsible-title") ?? [])].map((t) => t.textContent ?? ""),
           group: [...(container?.querySelectorAll(".setting-item-heading, .setting-item-name") ?? [])].some((h) => (h.textContent ?? "").includes("Model by prompt")),
+          statusOk: !!container?.querySelector(".okit-ep-row .okit-ep-status.is-ok"),
+          statusError: !!container?.querySelector(".okit-ep-row .okit-ep-status.is-error"),
         };
       };
       const deadline = Date.now() + 12000;
       let state = read();
-      while (Date.now() < deadline && !(state.endpointRow && state.titles.length > 0)) {
+      // Auch auf das Ergebnis der Erreichbarkeits-Probe warten (Symbol is-ok oder is-error), nicht nur auf die Zeile.
+      while (Date.now() < deadline && !(state.endpointRow && state.titles.length > 0 && (state.statusOk || state.statusError))) {
         await new Promise((r) => setTimeout(r, 300));
         state = read();
       }
@@ -4453,6 +4465,35 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         T.PP1,
         settings.endpointRow && settings.titles.includes(requestTitle),
         `Zeile mit Ersatz-URL: ${settings.endpointRow ? "ja" : `nein (Felder: ${settings.endpointValues.join(" | ") || "keine"})`} · Abschnitt „${requestTitle}“: ${settings.titles.includes(requestTitle) ? "ja" : `nein (Titel: ${settings.titles.join(" | ") || "keine"})`} · Gruppe „Model by prompt“: ${settings.group ? "ja" : "nein"} · ${settings.rows} Zeilen`,
+      );
+    }
+
+    // --- PP10. Die Ersatz-Zeile ist ERREICHBAR ----------------------------------
+    // „Vorhanden“ (PP1) ist nicht „erreichbar“: am 2026-10-04 fragte die Kit-Probe `/models` statt `/v1/models`, und jede
+    // echte lokale Zeile (LM Studio, Ollama) stand als „not reachable — skipped“ da, während der damalige Ersatz (der auch
+    // `/models` bediente) grün blieb. Der Ersatz bedient jetzt nur noch `/v1/…`; dieser Punkt misst die Wirkung: Symbol der
+    // Zeile is-ok, die Auflösung wählt die Ersatz-Zeile, und das Modell steht in der Modell-Liste.
+    if (settings.rows === 0) {
+      ppNothing("PP10", T.PP10, "der Settings-Tab lieferte keine Zeilen (Einstellungen-Fenster nicht lesbar)");
+    } else {
+      const reach = await cdp.evaluate<{ resolvedUrl: string | null; resolvedModel: string; listed: boolean; listDetail: string }>(`
+        const llm = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].llm;
+        const source = await llm.resolve({ force: true });
+        const list = await llm.models({ force: true });
+        const text = JSON.stringify(list);
+        return {
+          resolvedUrl: source?.config?.url ?? null,
+          resolvedModel: source?.model ?? "",
+          listed: text.includes(${JSON.stringify(PP_MODEL)}),
+          listDetail: text.slice(0, 160),
+        };
+      `);
+      const unknownHits = sub.requests.filter((r) => r.kind === "unknown").length;
+      ppRecord(
+        "PP10",
+        T.PP10,
+        settings.statusOk && !settings.statusError && reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") && reach.listed,
+        `Symbol der Zeile: ${settings.statusOk ? "is-ok" : settings.statusError ? "is-error" : "ohne Ergebnis"} · Auflösung: ${reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") ? "Ersatz-Zeile" : `${reach.resolvedUrl ?? "keine Zeile"} (erwartet ${sub.url.replace(/\/v1$/, "")})`}, Modell „${reach.resolvedModel}“ · Modell „${PP_MODEL}“ in der Liste: ${reach.listed ? "ja" : `nein (${reach.listDetail})`} · Anfragen an unbekannte Pfade: ${unknownHits}`,
       );
     }
 
