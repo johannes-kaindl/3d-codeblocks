@@ -79,6 +79,9 @@ export class PromptPanelView extends ItemView {
   private noEndpoint = false;
   private controller: AbortController | null = null;
   private pending: Promise<void> = Promise.resolve();
+  /** Waehrend „Apply“ laeuft sind Apply, Discard, New und Send gesperrt (ein Doppelklick schriebe doppelt). */
+  private applying = false;
+  private newBtn!: HTMLButtonElement;
   private hub: HubController<"prompt" | "versions"> | null = null;
 
   private targetEl!: HTMLElement;
@@ -194,8 +197,8 @@ export class PromptPanelView extends ItemView {
   private mountPrompt(c: HTMLElement): void {
     const top = c.createDiv({ cls: "tdcb-prompt-top" });
     this.targetEl = top.createDiv({ cls: "tdcb-prompt-target" });
-    const newBtn = top.createEl("button", { cls: "tdcb-prompt-new", text: PANEL_TEXTS.newButton, attr: { type: "button" } });
-    newBtn.addEventListener("click", () => void this.startNew());
+    this.newBtn = top.createEl("button", { cls: "tdcb-prompt-new", text: PANEL_TEXTS.newButton, attr: { type: "button" } });
+    this.newBtn.addEventListener("click", () => void this.startNew());
     this.hintEl = c.createDiv({ cls: "tdcb-prompt-hint" });
 
     // Modellzeile: Beschriftung, Auswahl, Aktualisieren.
@@ -275,7 +278,7 @@ export class PromptPanelView extends ItemView {
   private canSend(): boolean {
     // `noEndpoint` sperrt NICHT: der Zustand wird vor jedem Senden neu bewertet, sonst waere der Empty-State
     // eine Sackgasse (nach „Open settings“ und Konfiguration muss Senden wieder gehen).
-    return this.controller === null && this.panel.target.kind !== "other";
+    return this.controller === null && !this.applying && this.panel.target.kind !== "other";
   }
 
   /** Ein Lauf: Senden → Anfrage → Ergebnis. Muster aus lingotuner `run`: Vergleich `controller !== ctrl`
@@ -329,7 +332,7 @@ export class PromptPanelView extends ItemView {
       base = baseTextForRefine(this.panel, await this.deps.readTargetText(target));
       if (this.controller !== ctrl) return;
       if (base === null) {
-        this.setStatus("error", PANEL_TEXTS.modelGone);
+        this.setStatus("error", target.kind === "shapes-block" ? PANEL_TEXTS.blockGone : PANEL_TEXTS.modelGone);
         return;
       }
       messages = buildRefineMessages(base, instruction);
@@ -426,22 +429,32 @@ export class PromptPanelView extends ItemView {
   }
 
   private async apply(): Promise<void> {
-    if (this.panel.rounds.rounds.length === 0) return;
+    if (this.panel.rounds.rounds.length === 0 || this.applying || this.controller !== null) return;
+    this.applying = true;
+    this.renderControls();
     this.pending = (async () => {
-      let r: { ok: boolean; message: string };
+      let r: { ok: boolean; message: string; retarget?: PanelTarget };
+      const started = this.panel.target;
       try {
         r = await this.deps.accept(this.panel);
       } catch (e) {
         r = { ok: false, message: e instanceof Error ? e.message : String(e) };
       }
-      if (r.ok) {
-        this.panel = { ...this.panel, rounds: clearRounds() };
-        this.kept = false;
-        this.offered = null;
-        this.setStatus("ok", r.message);
+      try {
+        if (r.ok) {
+          // Das geschriebene Ziel traegt den neuen Blocktext: ohne das waere der Fingerabdruck veraltet und das
+          // naechste Aendern/Uebernehmen verweigert. Nur, wenn das Panel-Ziel seit dem Start unveraendert ist.
+          const target = r.retarget && sameTarget(this.panel.target, started) ? r.retarget : this.panel.target;
+          this.panel = { target, rounds: clearRounds() };
+          this.kept = false;
+          this.offered = null;
+          this.setStatus("ok", r.message);
+        } else {
+          this.setStatus("error", r.message);
+        }
+      } finally {
+        this.applying = false;
         this.renderAll();
-      } else {
-        this.setStatus("error", r.message);
       }
     })();
     await this.pending;
@@ -454,7 +467,7 @@ export class PromptPanelView extends ItemView {
 
   /** Verwerfen: Runden weg; ein angebotenes (verweigertes) Ziel wird jetzt übernommen — „discard to switch“. */
   private async discard(): Promise<void> {
-    if (this.controller !== null) return;
+    if (this.controller !== null || this.applying) return;
     if (!(await this.confirmDiscard())) return;
     const next = this.offered ?? this.panel.target;
     this.panel = { target: next, rounds: clearRounds() };
@@ -465,7 +478,7 @@ export class PromptPanelView extends ItemView {
   }
 
   private async startNew(): Promise<void> {
-    if (this.controller !== null) return;
+    if (this.controller !== null || this.applying) return;
     if (!(await this.confirmDiscard())) return;
     this.panel = { target: { kind: "new" }, rounds: clearRounds() };
     this.kept = false;
@@ -537,8 +550,9 @@ export class PromptPanelView extends ItemView {
     this.sendBtn.disabled = !this.canSend();
     this.stopBtn.toggleClass("is-hidden", !running);
     const n = this.panel.rounds.rounds.length;
-    this.applyBtn.disabled = n === 0 || running;
-    this.discardBtn.disabled = n === 0 || running;
+    this.applyBtn.disabled = n === 0 || running || this.applying;
+    this.discardBtn.disabled = n === 0 || running || this.applying;
+    this.newBtn.disabled = this.applying;
     this.emptyEl.toggleClass("is-hidden", !this.noEndpoint);
     // Zwei getrennte Elemente; trifft beides zu, gewinnt "no endpoint".
     this.examplesEl.toggleClass("is-hidden", this.noEndpoint || running || n > 0 || this.panel.target.kind !== "new");

@@ -34,6 +34,9 @@ interface Opts {
   /** Offene ShapesFileView von Anhänge/Tisch.shapes: `data` ist ihr ungespeicherter Puffer. */
   shapesView?: { data: string };
   previewMode?: boolean;
+  /** Auswahl im Editor: Ende (`to`) der Auswahl. */
+  selection?: { to: { line: number; ch: number } };
+  cursorLine?: number;
 }
 
 function setup(files: Record<string, string>, opts: Opts = {}) {
@@ -44,7 +47,9 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
   const replaceCalls: string[] = [];
   const editor = {
     getValue: () => store["n.md"],
-    replaceRange: (text: string, from: { line: number; ch: number }, to: { line: number; ch: number }) => {
+    somethingSelected: () => opts.selection !== undefined,
+    getCursor: (which?: string) => (which === "to" && opts.selection ? opts.selection.to : { line: opts.cursorLine ?? 0, ch: 0 }),
+    replaceRange: (text: string, from: { line: number; ch: number }, to: { line: number; ch: number } = from) => {
       replaceCalls.push(text);
       const lines = store["n.md"].split("\n");
       const head = [...lines.slice(0, from.line), lines[from.line].slice(0, from.ch)].join("\n");
@@ -156,7 +161,7 @@ describe("acceptPanel — target shapes-block", () => {
   it("applies to a block whose text still matches the clicked block", async () => {
     const { env, store } = setup({ "n.md": NOTE });
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
-    expect(r).toEqual({ ok: true, message: "Applied to Tisch." });
+    expect(r).toMatchObject({ ok: true, message: "Applied to Tisch." });
     expect(store["n.md"]).toBe(NOTE.replace("at 0 0.725 0", "at 0 0.925 0"));
   });
   it("tolerates CRLF notes and a trailing newline in the clicked body", async () => {
@@ -201,6 +206,30 @@ describe("acceptPanel — target shapes-block", () => {
       expect(r.ok).toBe(false);
       expect(store["n.md"]).toBe(afterDelete);
     });
+  });
+  it("returns a retarget with the written body and the recomputed closing line; a second apply on it works", async () => {
+    const { env, store } = setup({ "n.md": NOTE });
+    const first = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
+    expect(first.ok).toBe(true);
+    const lines = store["n.md"].split("\n");
+    expect(first.retarget).toMatchObject({ kind: "shapes-block", path: "n.md", lineStart: 1, label: "Tisch" });
+    const rt = first.retarget as Extract<PanelTarget, { kind: "shapes-block" }>;
+    expect(lines[rt.lineEnd]).toBe("```");
+    expect(rt.body).toBe(lines.slice(rt.lineStart + 1, rt.lineEnd).join("\n"));
+    // Zweites Aendern auf dem frischen Ziel, auch mit einem Block, der durch Add laenger wird.
+    const add = [{ op: "add" as const, part: { op: "add", name: "Fuss", shape: "box", size: [1, 1, 1] } }];
+    const second = await acceptPanel(env, stateOf(rt, refine(add)));
+    expect(second.ok).toBe(true);
+    expect(store["n.md"]).toContain("Fuss");
+    const rt2 = second.retarget as Extract<PanelTarget, { kind: "shapes-block" }>;
+    expect(store["n.md"].split("\n")[rt2.lineEnd]).toBe("```");
+    expect(store["n.md"].endsWith("```\noutro")).toBe(true);
+    // Mit dem ALTEN Ziel waere der zweite Apply verweigert worden.
+    expect((await acceptPanel(env, stateOf(BLOCK, refine(add)))).ok).toBe(false);
+  });
+  it("failures carry no retarget", async () => {
+    const { env } = setup({ "n.md": NOTE });
+    expect((await acceptPanel(env, stateOf({ ...BLOCK, body: "other" }, refine(UP)))).retarget).toBeUndefined();
   });
   it("also works through the open editor", async () => {
     const { env, store } = setup({ "n.md": NOTE }, { editorOpen: true });
@@ -348,6 +377,33 @@ describe("acceptPanel — target new", () => {
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
     expect(r.ok).toBe(true);
     expect(selections).toEqual([`\n\`\`\`shapes\n${MODEL}\n\`\`\`\n`]);
+  });
+  it("as block with a selection: the selection stays, the block goes after it", async () => {
+    const { env, store, selections } = setup({ "n.md": "intro text\nnext" }, { settings: { acceptAs: "block" }, selection: { to: { line: 0, ch: 5 } }, editorOpen: true });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r).toEqual({ ok: true, message: "Applied to the open note as a code block after the selection." });
+    expect(selections).toEqual([]);
+    expect(store["n.md"]).toBe(`intro\n\`\`\`shapes\n${MODEL}\n\`\`\`\n text\nnext`);
+  });
+  it("as block with the cursor INSIDE a fence: inserted after that fence, not into it", async () => {
+    const note = ["a", "```js", "x()", "```", "b"].join("\n");
+    const { env, store, selections } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.message).toBe("Applied to the open note as a code block after the code block at the cursor.");
+    expect(selections).toEqual([]);
+    expect(store["n.md"]).toBe(["a", "```js", "x()", "```", "", "```shapes", MODEL, "```", "", "b"].join("\n"));
+  });
+  it("the file way inserts its reference with the same rules", async () => {
+    const note = ["a", "```js", "x()", "```", "b"].join("\n");
+    const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "file" }, cursorLine: 1 });
+    expect((await acceptPanel(env, stateOf(NEW, create(MODEL)))).ok).toBe(true);
+    expect(store["n.md"]).toBe(["a", "```js", "x()", "```", "", "```3d", "file: Tisch.shapes", "```", "", "b"].join("\n"));
+  });
+  it("file way with a note in reading view says so", async () => {
+    const { env } = setup({ "n.md": "intro" }, { settings: { acceptAs: "file" }, previewMode: true });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain("reading view");
   });
   it("as block without an open note: noNoteOpen, nothing written", async () => {
     const { env, selections, store } = setup({}, { settings: { acceptAs: "block" }, noEditorView: true });

@@ -182,7 +182,7 @@ describe("PromptPanelView", () => {
   it("shows the real acceptPanel messages unchanged in the status line (no doubled prefix)", async () => {
     const { acceptPanel } = await import("../../src/obsidian/panel-accept");
     const inserted: string[] = [];
-    const view0 = { file: { path: "n.md" }, getMode: () => "source", editor: { replaceSelection: (t: string) => { inserted.push(t); } } };
+    const view0 = { file: { path: "n.md" }, getMode: () => "source", editor: { somethingSelected: () => false, getCursor: () => ({ line: 0, ch: 0 }), getValue: () => "", replaceSelection: (t: string) => { inserted.push(t); } } };
     const env = {
       app: {} as never,
       ports: { editorFor: () => null, vault: { read: async () => "", process: async () => {} } },
@@ -202,6 +202,121 @@ describe("PromptPanelView", () => {
     one(view, "tdcb-prompt-apply").click();
     await view.settled();
     expect(statusText(view)).toBe("The open note is in reading view — switch to editing view to insert a code block.");
+  });
+
+  describe("block target lifecycle (fingerprint)", () => {
+    const CHANGE = '{"changes":[{"op":"change","name":"Platte","position":[0,0.925,0]}]}';
+    const B0: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 3, lineEnd: 5, label: "Table", body: TABLE };
+    it("a fresh fingerprint offered while rounds are open is kept; Discard adopts it and the next change builds on the fresh text", async () => {
+      const fresh = { ...B0, body: `${TABLE}\nbox X size 1 at 0 0 0` };
+      const read = vi.fn(async (t: PanelTarget) => (t === fresh ? fresh.body : TABLE));
+      const { view } = makeView(answer(CHANGE), { readTargetText: read });
+      await view.onOpen();
+      view.setTarget(B0);
+      await send(view, "raise");
+      expect(view.state().rounds.rounds).toHaveLength(1);
+      view.setTarget(fresh);
+      expect(one(view, "tdcb-prompt-target").textContent).toContain("Target kept");
+      expect(view.state().target).toBe(B0);
+      one(view, "tdcb-prompt-discard").click();
+      await vi.waitFor(() => expect(view.state().rounds.rounds).toHaveLength(0));
+      expect(view.state().target).toBe(fresh);
+      await send(view, "raise again");
+      expect(read).toHaveBeenLastCalledWith(fresh);
+      expect((view.state().rounds.rounds[0] as { text: string }).text).toContain("box X");
+    });
+    it("Apply of a block adopts the retarget, so a second change and a second apply work", async () => {
+      const retarget = { ...B0, body: "box Platte size 1 at 0 0.925 0", lineEnd: 4 };
+      const accept = vi.fn(async () => ({ ok: true, message: "Applied to Table.", retarget }));
+      const read = vi.fn(async () => TABLE);
+      const { view } = makeView(answer(CHANGE), { accept, readTargetText: read });
+      await view.onOpen();
+      view.setTarget(B0);
+      await send(view, "raise");
+      one(view, "tdcb-prompt-apply").click();
+      await view.settled();
+      expect(view.state().target).toBe(retarget);
+      expect(view.state().rounds.rounds).toHaveLength(0);
+      await send(view, "again");
+      expect(read).toHaveBeenLastCalledWith(retarget);
+      one(view, "tdcb-prompt-apply").click();
+      await view.settled();
+      expect(accept).toHaveBeenCalledTimes(2);
+      expect((accept.mock.calls[1] as unknown as [{ target: PanelTarget }])[0].target).toBe(retarget);
+    });
+    it("a failed apply keeps target and rounds (no retarget)", async () => {
+      const accept = vi.fn(async () => ({ ok: false, message: "The block changed — nothing was applied." }));
+      const { view } = makeView(answer(CHANGE), { accept, readTargetText: vi.fn(async () => TABLE) });
+      await view.onOpen();
+      view.setTarget(B0);
+      await send(view, "raise");
+      one(view, "tdcb-prompt-apply").click();
+      await view.settled();
+      expect(view.state().target).toBe(B0);
+      expect(view.state().rounds.rounds).toHaveLength(1);
+      expect(statusText(view)).toBe("The block changed — nothing was applied.");
+    });
+    it("tells a block target to click the block again when its text is gone", async () => {
+      const { view } = makeView(answer(CHANGE), { readTargetText: vi.fn(async () => null) });
+      await view.onOpen();
+      view.setTarget(B0);
+      await send(view, "raise");
+      expect(statusText(view)).toBe("The block changed or moved — click it again (toolbar button).");
+    });
+    it("other targets keep the old wording", async () => {
+      const { view } = makeView(answer(CHANGE), { readTargetText: vi.fn(async () => null) });
+      await view.onOpen();
+      view.setTarget({ kind: "shapes-file", path: "x.shapes", label: "x" });
+      await send(view, "raise");
+      expect(statusText(view)).toBe("The model to change is gone.");
+    });
+    it("a target offered during a run that produced no round is adopted afterwards", async () => {
+      const h = held("Sorry, I cannot");
+      const { view } = makeView(h.complete);
+      await view.onOpen();
+      one(view, "tdcb-prompt-input").value = "a box";
+      one(view, "tdcb-prompt-send").click();
+      await vi.waitFor(() => expect(view.running()).toBe(true));
+      view.setTarget(B0);
+      expect(view.state().target).toEqual({ kind: "new" });
+      h.release();
+      await view.settled();
+      expect(view.state().rounds.rounds).toHaveLength(0);
+      expect(view.state().target).toBe(B0);
+    });
+  });
+
+  describe("double apply", () => {
+    it("blocks a second Apply, Discard, New and Send while the first apply runs: exactly one accept call", async () => {
+      let release: (v: { ok: boolean; message: string }) => void = () => {};
+      const accept = vi.fn(() => new Promise<{ ok: boolean; message: string }>((res) => { release = res; }));
+      const { view } = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'), { accept });
+      await view.onOpen();
+      await send(view, "a box");
+      const apply = one(view, "tdcb-prompt-apply");
+      apply.click();
+      apply.click();
+      expect(accept).toHaveBeenCalledTimes(1);
+      expect(apply.disabled).toBe(true);
+      expect(one(view, "tdcb-prompt-discard").disabled).toBe(true);
+      expect(one(view, "tdcb-prompt-new").disabled).toBe(true);
+      expect(one(view, "tdcb-prompt-send").disabled).toBe(true);
+      release({ ok: true, message: "Applied to x." });
+      await view.settled();
+      expect(accept).toHaveBeenCalledTimes(1);
+      expect(one(view, "tdcb-prompt-new").disabled).toBe(false);
+      expect(one(view, "tdcb-prompt-send").disabled).toBe(false);
+    });
+    it("releases the lock after a rejected accept", async () => {
+      const accept = vi.fn(async () => { throw new Error("boom"); });
+      const { view } = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'), { accept });
+      await view.onOpen();
+      await send(view, "a box");
+      one(view, "tdcb-prompt-apply").click();
+      await view.settled();
+      expect(statusText(view)).toBe("boom");
+      expect(one(view, "tdcb-prompt-apply").disabled).toBe(false);
+    });
   });
 
   describe("example empty state (.tdcb-prompt-examples)", () => {

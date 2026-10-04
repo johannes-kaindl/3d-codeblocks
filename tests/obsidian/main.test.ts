@@ -301,6 +301,26 @@ describe("lastEditor prefers the most recent main-area leaf (view instance repla
   });
 });
 
+describe("prompt panel follows the active viewport", () => {
+  it("follows a shapes controller but keeps its target when the active controller goes away", async () => {
+    const app = makeFakeApp();
+    const view = new PromptPanelView({ app: undefined } as never, {} as never);
+    const setTarget = vi.spyOn(view, "setTarget").mockImplementation(() => {});
+    app.workspace.getLeavesOfType = vi.fn((t: string) => (t === VIEW_TYPE_PROMPT ? [{ view }] : []));
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    await plugin.onload();
+    const t = { kind: "shapes-file", path: "a.shapes", label: "a" } as const;
+    plugin.active.set({ shapesTarget: () => t, label: () => "a" } as never);
+    expect(setTarget).toHaveBeenLastCalledWith(t);
+    setTarget.mockClear();
+    plugin.active.set(null);
+    expect(setTarget).not.toHaveBeenCalled();
+    // Ein Controller ohne shapesTarget bleibt „other“.
+    plugin.active.set({ label: () => "glTF" } as never);
+    expect(setTarget).toHaveBeenLastCalledWith({ kind: "other", label: "glTF" });
+  });
+});
+
 describe("openPromptPanel", () => {
   /** Echte View (der Opener prueft per instanceof), setTarget als Spion. */
   const spiedView = () => {
@@ -358,12 +378,12 @@ describe("openPromptPanel", () => {
     spy.mockRestore();
   });
 
-  it("does not create a leaf when the registry is absent (registration not provable)", async () => {
+  it("still opens when the internal registry is absent (registerView runs unconditionally)", async () => {
     const { plugin, app, leaf } = setup();
     delete app.viewRegistry;
     await plugin.openPromptPanel(target);
-    expect(leaf.setViewState).not.toHaveBeenCalled();
-    expect(app.workspace.getRightLeaf).not.toHaveBeenCalled();
+    expect(leaf.setViewState).toHaveBeenCalledWith({ type: VIEW_TYPE_PROMPT, active: true });
+    expect(app.workspace.getRightLeaf).toHaveBeenCalled();
   });
 
   it("reports a failing setViewState as 'not available' instead of throwing", async () => {

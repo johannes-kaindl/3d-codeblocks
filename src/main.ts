@@ -242,7 +242,12 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
           readTargetText: (t) => readTargetText(this.acceptEnv(), t),
           accept: (state) => acceptPanel(this.acceptEnv(), state),
           openSettings: () => {
-            const setting = (this.app as unknown as { setting: { open(): void; openTabById(id: string): void } }).setting;
+            // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
+            const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+            if (!setting) {
+              new Notice("Open Settings → Community plugins → 3D Codeblocks.");
+              return;
+            }
             setting.open();
             setting.openTabById(this.manifest.id);
           },
@@ -269,7 +274,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // Das Panel folgt dem zuletzt bedienten Modell (Spec § 2 Nr. 5).
     this.register(
       this.active.subscribe((controller) => {
-        const t: PanelTarget = controller ? (controller.shapesTarget?.() ?? { kind: "other", label: controller.label() }) : { kind: "new" };
+        // Ohne Controller (nichts bedient) bleibt das Ziel, wie es ist: ein frisches Panel hat ohnehin „neu“.
+        if (!controller) return;
+        const t: PanelTarget = controller.shapesTarget?.() ?? { kind: "other", label: controller.label() };
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
           if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(t);
         }
@@ -493,8 +500,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     const unavailable = () => new Notice("The prompt panel is not available");
     // Intern, aber lesbar: ohne registrierten Typ legt setViewState ein leeres Blatt an, statt zu werfen.
     const registry = (this.app as unknown as { viewRegistry?: { viewByType?: Record<string, unknown> } }).viewRegistry?.viewByType;
-    // Nicht nachweisbar registriert (auch: Registry fehlt) heisst nicht weitermachen — setViewState legte sonst ein leeres Blatt an.
-    if (!registry || !(VIEW_TYPE_PROMPT in registry)) {
+    // registerView laeuft unbedingt in onload; nur verweigern, wenn die Registry lesbar ist und den Typ NICHT kennt
+    // (setViewState legte sonst ein leeres Blatt an). Eine fehlende interne Registry ist kein Grund zu verweigern.
+    if (registry && !(VIEW_TYPE_PROMPT in registry)) {
       unavailable();
       return;
     }

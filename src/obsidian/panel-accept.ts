@@ -6,9 +6,9 @@
 // DATEI hat eine Identitaet (den Pfad): dort wird die Kette auf den aktuellen Text angewendet, Handaenderungen
 // bleiben erhalten. Alles oder nichts (`acceptText`).
 import { Modal, TFile, type App, type MarkdownView } from "obsidian";
-import type { Fence } from "../core/shapes/fence";
+import { findFenceAt, type Fence } from "../core/shapes/fence";
 import { exportBaseName } from "../core/shapes/export";
-import { acceptText, chainOf, type PanelState, type PanelTarget } from "../core/shapes/panel-state";
+import { acceptText, chainOf, normBody, type PanelState, type PanelTarget } from "../core/shapes/panel-state";
 import { parseShapes } from "../core/shapes/parse";
 import { referenceBlock, shapesBlock } from "../core/shapes/references";
 import type { PluginSettings } from "../core/settings-types";
@@ -25,7 +25,9 @@ export interface AcceptEnv {
   choose?: () => Promise<"block" | "file" | null>;
 }
 
-export type AcceptOutcome = { ok: boolean; message: string };
+/** `retarget`: nach einem erfolgreichen Block-Apply das neue Ziel (geschriebener Rumpf, neue Schlusszeile), damit das
+ *  Panel weiterarbeiten kann, ohne den Block neu anzuklicken. */
+export type AcceptOutcome = { ok: boolean; message: string; retarget?: PanelTarget };
 
 type BlockTarget = Extract<PanelTarget, { kind: "shapes-block" }>;
 
@@ -53,10 +55,6 @@ function openShapesViews(app: App, path: string): OpenShapesView[] {
     .filter((v) => v.file?.path === path);
 }
 
-/** Vergleichsform fuer den Fingerabdruck: CRLF -> LF, ein abschliessendes Zeilenende zaehlt nicht
- *  (`source` aus dem Nachbearbeiter kann eines tragen, siehe `convertBlockAt`, Commit 7b2e418). */
-const norm = (t: string): string => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
-
 type Located = { fence: Fence; text: string } | { problem: "moved" | "changed" };
 
 /** Zaun des Blocks finden UND pruefen, dass es noch der Block ist, den der Nutzer angeklickt hat. Zeilennummern
@@ -65,7 +63,7 @@ async function locateBlock(env: AcceptEnv, t: BlockTarget): Promise<Located> {
   const text = await readNoteText(env.ports, t.path);
   const fence = locateShapesFence(text, t.lineStart, t.lineEnd);
   if (!fence) return { problem: "moved" };
-  if (norm(fence.body) !== norm(t.body)) return { problem: "changed" };
+  if (normBody(fence.body) !== normBody(t.body)) return { problem: "changed" };
   return { fence, text };
 }
 
@@ -135,12 +133,14 @@ async function acceptIntoBlock(env: AcceptEnv, state: PanelState, t: BlockTarget
     if (error instanceof BlockChangedError) return { ok: false, message: "The note changed — nothing was applied." };
     throw error;
   }
-  return { ok: true, message: `Applied to ${t.label}.` };
+  // Zeilen des geschriebenen Rumpfs: Schlusszeile = Oeffnungszeile + Rumpfzeilen + 1 (wie beim Lesen: Zeilen dazwischen).
+  const lineEnd = fence.openLine + result.text.split("\n").length + 1;
+  return { ok: true, message: `Applied to ${t.label}.`, retarget: { ...t, lineStart: fence.openLine, lineEnd, body: result.text } };
 }
 
 async function acceptIntoFile(env: AcceptEnv, state: PanelState, t: Extract<PanelTarget, { kind: "shapes-file" }>): Promise<AcceptOutcome> {
   const file = env.app.vault.getAbstractFileByPath(t.path);
-  if (!(file instanceof TFile)) return { ok: false, message: `${t.path} is gone — nothing was applied.` };
+  if (!(file instanceof TFile)) return { ok: false, message: `${t.path} is gone or was renamed — nothing was applied.` };
   let problems: string[] | null = null;
   let unchanged = false;
   try {
@@ -164,10 +164,28 @@ async function acceptIntoFile(env: AcceptEnv, state: PanelState, t: Extract<Pane
 }
 
 /** Die zuletzt bediente Notiz im Quellmodus; sonst der Grund (keine Notiz / Lesemodus) als Meldung. */
-function sourceView(env: AcceptEnv): { view: MarkdownView } | { message: string } {
+function sourceView(env: AcceptEnv): { view: MarkdownView } | { message: string; reading: boolean } {
   const view = env.lastEditor();
-  if (!view?.file) return { message: PANEL_TEXTS.noNoteOpen };
-  return view.getMode() === "source" ? { view } : { message: PANEL_TEXTS.noteInReadingView };
+  if (!view?.file) return { message: PANEL_TEXTS.noNoteOpen, reading: false };
+  return view.getMode() === "source" ? { view } : { message: PANEL_TEXTS.noteInReadingView, reading: true };
+}
+
+/** Einfuegen ohne Nutzerinhalt zu zerstoeren: eine Auswahl bleibt (Einfuegung an ihrem Ende), ein Cursor INNERHALB
+ *  eines Zauns fuegt hinter dem Zaun ein (sonst entstuende ein Block im Block). Der Standardfall ist unveraendert. */
+function insertText(view: MarkdownView, text: string): string {
+  const editor = view.editor;
+  if (editor.somethingSelected()) {
+    editor.replaceRange(text, editor.getCursor("to"));
+    return "after the selection";
+  }
+  const lines = editor.getValue().split(/\r?\n/);
+  const fence = findFenceAt(editor.getValue(), editor.getCursor().line);
+  if (fence) {
+    editor.replaceRange(`\n${text}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
+    return "after the code block at the cursor";
+  }
+  editor.replaceSelection(text);
+  return "at the cursor";
 }
 
 async function acceptAsNew(env: AcceptEnv, state: PanelState): Promise<AcceptOutcome> {
@@ -185,8 +203,8 @@ async function acceptAsNew(env: AcceptEnv, state: PanelState): Promise<AcceptOut
 function insertAsBlock(env: AcceptEnv, text: string): AcceptOutcome {
   const src = sourceView(env);
   if ("message" in src) return { ok: false, message: src.message };
-  src.view.editor.replaceSelection(`\n${shapesBlock(text)}\n`);
-  return { ok: true, message: "Applied to the open note as a code block at the cursor." };
+  const where = insertText(src.view, `\n${shapesBlock(text)}\n`);
+  return { ok: true, message: `Applied to the open note as a code block ${where}.` };
 }
 
 async function createAsFile(env: AcceptEnv, text: string): Promise<AcceptOutcome> {
@@ -208,9 +226,9 @@ async function createAsFile(env: AcceptEnv, text: string): Promise<AcceptOutcome
   } catch (error) {
     return { ok: false, message: `Could not create the file${path ? ` ${path}` : ""}: ${errorText(error)} — nothing was written.` };
   }
-  if (!view) return { ok: true, message: `Saved ${path}. No reference was inserted because no note is open for editing.` };
+  if (!view) return { ok: true, message: `Saved ${path}. No reference was inserted because ${"reading" in src && src.reading ? "the open note is in reading view" : "no note is open for editing"}.` };
   try {
-    view.editor.replaceSelection(`\n${referenceBlock(app.metadataCache.fileToLinktext(created, notePath, false))}\n`);
+    insertText(view, `\n${referenceBlock(app.metadataCache.fileToLinktext(created, notePath, false))}\n`);
   } catch (error) {
     return { ok: true, message: `Saved ${path}, but the reference could not be inserted (${errorText(error)}). The file exists.` };
   }

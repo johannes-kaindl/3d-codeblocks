@@ -44,6 +44,7 @@ export const PANEL_TEXTS = {
   previewOf: (n: number) => `Preview of round ${n}`,
   diffHeading: "Changes in this round",
   modelGone: "The model to change is gone.",
+  blockGone: "The block changed or moved — click it again (toolbar button).",
   answerChangesNothing: "The answer changes nothing.",
   cutOff: "The answer was cut off (length limit).",
   targetChanged: "The target changed while the model was answering — nothing was added.",

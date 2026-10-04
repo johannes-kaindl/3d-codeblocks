@@ -24,8 +24,12 @@ export interface PanelState {
 
 export const INITIAL_PANEL: PanelState = { target: { kind: "new" }, rounds: EMPTY_ROUNDS };
 
+/** Vergleichsform fuer Blocktexte (Fingerabdruck): CRLF -> LF, ein abschliessendes Zeilenende zaehlt nicht
+ *  (`source` aus dem Nachbearbeiter kann eines tragen, siehe `convertBlockAt`, Commit 7b2e418). */
+export const normBody = (t: string): string => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
+
 /** (`body` = Quelltext des Blocks beim Klick: der Fingerabdruck, gegen den der Schreiber prueft; er zaehlt nicht fuer die Gleichheit.)
- *  Strukturell gleich? Block: Pfad + Zeilen (die Beschriftung zählt nicht). Ein Block, dessen Zeilen
+ *  Strukturell gleich? Block: Pfad + Zeilen + Blocktext (die Beschriftung zählt nicht; ein anderer Text ist ein frischer Fingerabdruck, also ein ANDERES Ziel). Ein Block, dessen Zeilen
  *  sich verschoben haben, ist bei offenen Runden ein ANDERES Ziel: das Panel bekommt bei jedem Klick ein
  *  frisches Ziel, und der Schreiber (Task 7) findet den Zaun über die Zeilennummer wieder und verweigert,
  *  wenn der Block gewandert ist. */
@@ -36,7 +40,7 @@ export function sameTarget(a: PanelTarget, b: PanelTarget): boolean {
       return true;
     case "shapes-block": {
       const o = b as typeof a;
-      return a.path === o.path && a.lineStart === o.lineStart && a.lineEnd === o.lineEnd;
+      return a.path === o.path && a.lineStart === o.lineStart && a.lineEnd === o.lineEnd && normBody(a.body) === normBody(o.body);
     }
     case "shapes-file":
       return a.path === (b as typeof a).path;
