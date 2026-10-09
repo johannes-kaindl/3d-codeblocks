@@ -63,6 +63,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       caller: "3d-codeblocks",
       capability: "chat",
       mode: "structured",
+      // Die Antwort traegt JSON in `content` (partsFromLlm): ein geschwaerzter, mehrzeiliger Wert muss
+      // JSON-escapt zurueckkommen, sonst bricht der Parser (MIGRATION 0.51.2).
+      restoreContent: "json",
       getSettings: () => ({
         endpoints: this.settings.endpoints,
         choice: this.settings.endpointChoice,

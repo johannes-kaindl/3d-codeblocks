@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Secrets are masked before a prompt leaves the plugin (kit 0.51.2).** Private-key blocks, bearer tokens and similar secrets in the text you send from the prompt panel go to the model as placeholders; the answer comes back with the originals restored (the model's JSON stays valid, also for multi-line values). Nothing to configure.
+- **A deviation notice now appears by default** when the model server answers differently from what the plugin asked for (once per kind and session, English text).
+- **Request section:** a failed save of the request settings is now shown in the section (red status line).
+- Updated the vendored kit modules to obsidian-kit 0.51.2 / code-kit 0.15.0 (one version for all modules).
+
 ## [0.6.2] — 2026-10-04
 
 ### Fixed
