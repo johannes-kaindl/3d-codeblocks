@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-09
+
 ### Changed
 
 - **Secrets are masked before a prompt leaves the plugin (kit 0.51.2).** Private-key blocks, bearer tokens and similar secrets in the text you send from the prompt panel go to the model as placeholders; the answer comes back with the originals restored (the model's JSON stays valid, also for multi-line values). Nothing to configure.
