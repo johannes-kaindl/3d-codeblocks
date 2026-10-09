@@ -1,13 +1,13 @@
 {
   "source": "code-kit",
-  "version": "0.15.0",
-  "sha": "561a184",
+  "version": "0.15.4",
+  "sha": "6180b47",
   "vendored": "num.ts, settings_schema.ts, secrets.ts, redact.ts, safe-markdown.ts, rounds.ts, sampling-profiles.ts, backend-probe.ts, model-list-cache.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, sse.ts, reasoning.ts, capabilities.ts, think-splitter.ts, think-toggle.ts, timeout.ts, model-choice.ts, stream-blocks.ts, i18n.ts, clipboard.ts",
   "note": "Verbatim snapshot aus der Git-Ref 0.27.0 (CORE-META-22: feste Ref, nicht Arbeitsstand). Never hand-edit. Re-vendor via tools/sync-kit.sh. num.ts kommt nur als Abhaengigkeit mit: settings_schema.ts importiert clampInt daraus. ACHTUNG: ab Kit 0.28.0 liegen diese beiden Module nicht mehr im Kit, sondern in code-kit — ein Anheben der Ref erfordert vorher einen Quellenwechsel. kit-obsidian/ siehe dortige VENDOR.json.",
   "code_kit_version": "0.13.0",
   "code_kit_sha": "d3a29d3",
   "code_kit_vendored": "rounds.ts, sampling-profiles.ts, backend-probe.ts, model-list-cache.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, sse.ts, reasoning.ts, capabilities.ts, think-splitter.ts, think-toggle.ts, timeout.ts, model-choice.ts, stream-blocks.ts, i18n.ts, clipboard.ts",
-  "obsidian_kit_version": "0.51.2",
-  "obsidian_kit_sha": "7699e21",
-  "obsidian_kit_vendored": "endpoint-source.ts"
+  "obsidian_kit_version": "0.51.3",
+  "obsidian_kit_sha": "656ab02",
+  "obsidian_kit_vendored": "endpoint-source.ts, endpoint-secret-hook.ts"
 }
