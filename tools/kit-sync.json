@@ -1,13 +1,13 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.27.0" },
-    "code-kit": { "ref": "0.13.0" }
+    "obsidian-kit": { "ref": "0.51.2" },
+    "code-kit": { "ref": "0.15.0" }
   },
   "targets": [
-    { "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["num", "settings_schema"] },
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
       "modules": [
+        "num", "settings_schema", "secrets", "redact", "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
         "think-toggle", "timeout", "model-choice", "stream-blocks", "i18n"
@@ -15,21 +15,19 @@
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "ref": "0.49.1", "from": "src/pure", "modules": ["endpoint-source", "secrets"],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source"],
       "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {
       "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
-      "modules": ["confirm", "folder-suggest", "settings_walker", { "name": "help-setting", "ref": "0.43.0" }]
-    },
-    {
-      "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "ref": "0.49.2", "from": "src/obsidian",
       "modules": [
+        "confirm", "folder-suggest", "settings_walker", "help-setting",
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
         "clock", "stream-area", "hub", "version-list"
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
-    }
+    },
+    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": ["kit-css"] }
   ]
 }

@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.49.2, src/obsidian/llm-connection.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.51.2, src/obsidian/llm-connection.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Die LLM-Anbindung eines Fachplugins als EINE Komposition: Endpunkt-Quelle (Manager oder lokale
  *  Liste mit Schlüsselbund), gemerkte Auflösung, Modellliste, Anfrage-Parameter je Modus, Client mit
  *  Transport und Fristen, Prüfung der Antwort und beide Settings-Abschnitte.
@@ -32,17 +32,18 @@
  *
  *  Vertrag an `persist`: es übernimmt den Patch in die Settings des Plugins SYNCHRON (bevor es
  *  speichert) — die Endpunkt-Liste liest ihre Zeilen danach über `getSettings()` zurück. */
-import { requestUrl, type App } from "obsidian";
+import { requestUrl, Setting, type App } from "obsidian";
 import { normalizeEndpoint } from "../kit/endpoint";
+import type { RedactRules } from "../kit/redact";
 import { authHeaders, type EndpointConfig } from "../kit/endpoint_config";
 import { classifyEndpointStatus, extractModelIds, type EndpointStatus } from "../kit/endpoint_diagnostics";
 import { createModelListCache, type ModelListClient, type ModelListResult } from "../kit/model-list-cache";
 import {
   checkResponse, mapTruncated, resolveRequestParams, responseFactsOf, thinkingFor, DEFAULT_REQUEST_SETTINGS,
-  type BackendId, type Deviation, type FamilyKey, type ModeId, type RequestSettings, type ResponseFacts, type TruncatedPolicy,
+  type BackendId, type Deviation, type FamilyKey, type ModeId, type RequestSettings, type ResponseFacts, type ThinkingLevel, type TruncatedPolicy,
 } from "../kit/sampling-profiles";
 import {
-  resolveEndpointSource,
+  resolveEndpointSource, describeModel,
   type Capability, type EndpointChoice, type EndpointSourceResult, type LlmEndpointManagerApi, type ShortcutTransportConfig,
 } from "../kit/endpoint-source";
 import {
@@ -112,8 +113,30 @@ export interface LlmConnectionOptions {
   maxTokens?: number | ((mode: ModeId) => number | undefined);
   /** Default `"result"`. */
   truncated?: TruncatedPolicy;
-  /** Text einer Abweichung für die Notice (Das Kit formuliert nicht); ohne ihn keine Notice. */
-  deviationMessage?: (d: Deviation) => string;
+  /** Text einer Abweichung für die Notice. Default (seit 0.50.0): `deviationNotice` der Kit-Texte in
+   *  der Sprache `lang`; `null` schaltet die Notice ab. Bis 0.49.x gab es ohne ihn keine Notice. */
+  deviationMessage?: ((d: Deviation) => string) | null;
+  /** Sprache des Default-Notice-Texts; eine Funktion wird je Notice gefragt. Default `"en"`. */
+  lang?: "en" | "de" | (() => "en" | "de");
+  /** Zeigt im Anfrage-Abschnitt den Schalter „Stufenwahl im Chat“ (`levelPickerInChat`). Default `false`:
+   *  `true` nur, wenn das Plugin den Wert an `buildThinkingControl` (`levelPicker`) reicht, sonst wirkt der
+   *  Schalter nicht. Ist die Einstellung schon `true`, bleibt er sichtbar (sonst unabschaltbar). */
+  levelPicker?: boolean;
+  /** Antwort als Stream (Default `true`). `false` fragt eine volle Completion ab (`stream: false`), mit
+   *  `timeouts.nonStreamMs` als Frist; je Aufruf überschreibbar (`CompleteHandlers.stream`). Für Plugins,
+   *  die bisher ohne Stream fragten (transmute, lingotuner): ohne die Option liefen sie still auf dem
+   *  XHR-Stream, `requestUrl` wäre nur der Rückfall. */
+  stream?: boolean;
+  /** Wie `content` im Ergebnis restauriert wird (`chat-client` `restoreContent`): `"text"` (Default) oder `"json"` für
+   *  Konsumenten, die JSON aus `content` parsen (ein mehrzeiliger PEM bliebe sonst ein ungültiger JSON-String). Je Aufruf überschreibbar. */
+  restoreContent?: "text" | "json";
+  /** Modi, die der Anfrage-Abschnitt in `renderSettings` zeigt (Default `[mode]`). */
+  modes?: ModeId[];
+  /** Schwärzung der gesendeten Nachrichten (Default an, nur Geheimnisse; `chat-client` Kopfkommentar):
+   *  `{ rules }` ersetzt den Regelsatz, `false` schaltet sie ab. Das Ergebnis meldet `redactions`;
+   *  `redactMessages(messages, rules)` liefert dieselbe Schwärzung für eine Vorschau, und
+   *  `strings.redactedNote(n)` die Hinweiszeile dazu („N Stellen geschwärzt“). */
+  redact?: false | { rules?: RedactRules };
   /** Notice-Ausgabe der Sitzung (Default: Obsidian `Notice`). */
   notice?: (text: string) => void;
   clock?: ClockPort;
@@ -125,6 +148,12 @@ export interface LlmConnectionStrings {
   listLabel: string;
   listDesc: string;
   listPlaceholder: string;
+  /** Notice-Text einer Abweichung, die das Ergebnis ändert (Satz plus Verweis auf den Abschnitt). */
+  deviationNotice: (d: Deviation) => string;
+  /** Hinweiszeile unter einer Vorschau des GESENDETEN Textes: „N Stellen geschwärzt“ (`redactions`). */
+  redactedNote: (n: number) => string;
+  /** Hinweis in den Einstellungen mit `managerOnly`, wenn der Manager fehlt. */
+  noManager: string;
   request: RequestSectionStrings;
 }
 
@@ -136,6 +165,8 @@ export interface NoEndpointResult {
   partial: string;
   reasoning: string;
   timing: ChatTiming;
+  /** Immer 0: vor dem Senden gab es nichts zu schwärzen. */
+  redactions?: number;
 }
 export type LlmResult = (ChatResult | NoEndpointResult) & {
   /** Tatsachen für `checkResponse`; `null`, wenn keine Server-Antwort vorlag. */
@@ -154,6 +185,15 @@ export interface CompleteHandlers {
   onToken?: (text: string) => void;
   onReasoning?: (text: string) => void;
   signal?: AbortSignal;
+  /** Überschreibt `createLlmConnection({ stream })` für diesen Aufruf. */
+  stream?: boolean;
+  /** Überschreibt `createLlmConnection({ restoreContent })` für diesen Aufruf. */
+  restoreContent?: "text" | "json";
+  /** Sendet für diesen Aufruf ein anderes Modell als das aufgelöste. Alias (`aliasOf`), Familie, Profil und `facts`
+   *  werden für dieses Modell bestimmt (Manager-Tabelle, sonst Namensrater); `result.source` nennt es. */
+  model?: string;
+  /** Überschreibt die Denkstufe aus den Settings für diesen Aufruf. */
+  thinking?: ThinkingLevel;
   mode?: ModeId;
   /** Felder, die über die Profil-Parameter gemischt werden (z. B. `stop`). */
   overrides?: Record<string, unknown>;
@@ -207,9 +247,12 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
   }
   const policy: TruncatedPolicy = o.truncated ?? "result";
   const fallback = o.transports?.fallback ?? "auto";
+  const langNow = (): "en" | "de" => (typeof o.lang === "function" ? o.lang() : o.lang) ?? "en";
+  const message = o.deviationMessage === null ? null
+    : (o.deviationMessage ?? ((d: Deviation) => resolveLlmConnectionStrings({ lang: langNow() }).deviationNotice(d)));
   const session = createRequestSession({
-    message: o.deviationMessage ?? (() => ""),
-    ...(o.deviationMessage ? (o.notice ? { notice: o.notice } : {}) : { notice: () => {} }),
+    message: message ?? (() => ""),
+    ...(message ? (o.notice ? { notice: o.notice } : {}) : { notice: () => {} }),
   });
   const backendProbe = createObsidianBackendProbe();
   const backendOf = o.backendOf ?? ((cfg: EndpointConfig) => backendProbe(cfg.url, cfg.model ?? o.getSettings().model ?? ""));
@@ -342,6 +385,7 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
       transport: choice.primary,
       ...(choice.fallback ? { fallbackTransport: choice.fallback } : {}),
       clock,
+      ...(o.redact !== undefined ? { redact: o.redact } : {}),
       idleTimeoutMs: to.idleMs ?? DEFAULT_IDLE_TIMEOUT_MS,
       firstChunkTimeoutMs: Math.max(to.firstChunkMs ?? JIT_FIRST_CHUNK_TIMEOUT_MS, floor),
       ...(to.toolIdleMs !== undefined ? { toolCallIdleTimeoutMs: to.toolIdleMs } : {}),
@@ -356,10 +400,17 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
   }
 
   async function complete(req: CompleteRequest, h: CompleteHandlers = {}): Promise<LlmResult> {
-    const src = await resolve();
+    const resolved0 = await resolve();
+    // Anderes Modell je Aufruf: Alias und Familie für DIESES Modell (Manager-Tabelle, sonst Name).
+    let src = resolved0;
+    if (h.model !== undefined && h.model !== "") {
+      const d = describeModel(h.model, resolved0.models);
+      const { displayFamily: _drop, ...rest } = resolved0;
+      src = { ...rest, model: h.model, family: d.family, familySource: d.familySource, sentModel: d.sentModel, ...(d.displayFamily ? { displayFamily: d.displayFamily } : {}) };
+    }
     const fail = (kind: "no-endpoint", detail: string): LlmResult => {
       const now = clock.now();
-      return { ok: false, kind, detail, partial: "", reasoning: "", timing: { startedAt: now, endedAt: now }, facts: null, deviations: [], source: src };
+      return { ok: false, kind, detail, partial: "", reasoning: "", timing: { startedAt: now, endedAt: now }, redactions: 0, facts: null, deviations: [], source: src };
     };
     if (!src.config) return fail("no-endpoint", src.reason ?? "no-endpoint");
 
@@ -369,7 +420,7 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
 
     const mode = h.mode ?? o.mode;
     const settings = o.getSettings().request ?? DEFAULT_REQUEST_SETTINGS;
-    const thinking = thinkingFor(settings, mode);
+    const thinking = h.thinking ?? thinkingFor(settings, mode);
     const famKey: FamilyKey = src.family ?? "unknown";
     const budget = maxTokensFor(mode);
     const resolved = resolveRequestParams({
@@ -381,8 +432,11 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
     session.recordRequest(params);
 
     const messages = req.messages ?? req.buildMessages?.(src) ?? [];
+    const wantStream = h.stream ?? o.stream;
     const raw = await chat.complete({
       endpoint: src.config, model: src.sentModel || src.model, messages, params,
+      ...(wantStream !== undefined ? { stream: wantStream } : {}),
+      ...((h.restoreContent ?? o.restoreContent) !== undefined ? { restoreContent: h.restoreContent ?? o.restoreContent } : {}),
       ...(h.signal ? { signal: h.signal } : {}),
       ...(h.onToken ? { onToken: h.onToken } : {}),
       ...(h.onReasoning ? { onReasoning: h.onReasoning } : {}),
@@ -396,6 +450,7 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
     const result: ChatResult = mapped === raw ? raw : {
       ok: true, content: mapped.ok ? mapped.content : "", reasoning: mapped.reasoning, toolCalls: [],
       finishReason: "length", truncated: true, streamed: true, timing: raw.timing,
+      ...(raw.redactions !== undefined ? { redactions: raw.redactions } : {}),
     };
     return { ...result, facts, deviations, source: src };
   }
@@ -412,9 +467,11 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
       ...(o.transports?.shortcuts ? { transports: ["http", "shortcuts"] as ("http" | "shortcuts")[] } : {}),
       choice: () => o.getSettings().choice ?? {},
       setChoice: async (c) => { await persist({ choice: c }); invalidate(); },
-      local: () => o.getSettings().endpoints,
+      local: () => (o.managerOnly ? [] : o.getSettings().endpoints),
       strings: strings.endpointSource,
       renderLocalList: () => {
+        // Manager-only: es gibt keine lokale Liste, nur den Hinweis; `endpoints` wird nie geschrieben.
+        if (o.managerOnly) { new Setting(containerEl).setDesc(strings.noManager); return; }
         buildEndpointList({
           containerEl, label: strings.listLabel, desc: strings.listDesc, placeholder: strings.listPlaceholder,
           strings: strings.endpointList, cache: settingsCache,
@@ -431,12 +488,13 @@ export function createLlmConnection(o: LlmConnectionOptions): LlmConnection {
       rerender,
     });
     buildRequestSection({
-      containerEl, modes: [o.mode],
+      containerEl, modes: o.modes ?? [o.mode],
       state: source,
       settings: () => o.getSettings().request ?? DEFAULT_REQUEST_SETTINGS,
       save: (s) => persist({ request: s }),
       maxTokens: maxTokensFor,
       session, strings: strings.request, rerender,
+      ...(o.levelPicker !== undefined ? { levelPicker: o.levelPicker } : {}),
     });
   }
 

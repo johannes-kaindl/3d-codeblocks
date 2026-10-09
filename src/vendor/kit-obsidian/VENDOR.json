@@ -1,8 +1,8 @@
 {
   "source": "obsidian-kit",
-  "version": "0.27.0",
-  "sha": "548041b",
-  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts, help-setting.ts (obsidian-kit@0.43.0, bcd1805), llm-connection.ts (obsidian-kit@0.49.2, 34ec6df), llm-connection-strings.ts (obsidian-kit@0.49.2, 34ec6df), backend-probe.ts (obsidian-kit@0.49.2, 34ec6df), chat-client.ts (obsidian-kit@0.49.2, 34ec6df), chat-transport.ts (obsidian-kit@0.49.2, 34ec6df), endpoint-source.ts (obsidian-kit@0.49.2, 34ec6df), endpoint-list.ts (obsidian-kit@0.49.2, 34ec6df), endpoint-secrets.ts (obsidian-kit@0.49.2, 34ec6df), secrets.ts (obsidian-kit@0.49.2, 34ec6df), shortcuts-bridge.ts (obsidian-kit@0.49.2, 34ec6df), request-section.ts (obsidian-kit@0.49.2, 34ec6df), request-session.ts (obsidian-kit@0.49.2, 34ec6df), model-picker.ts (obsidian-kit@0.49.2, 34ec6df), collapsible.ts (obsidian-kit@0.49.2, 34ec6df), clipboard.ts (obsidian-kit@0.49.2, 34ec6df), clock.ts (obsidian-kit@0.49.2, 34ec6df), stream-area.ts (obsidian-kit@0.49.2, 34ec6df), hub.ts (obsidian-kit@0.49.2, 34ec6df), version-list.ts (obsidian-kit@0.49.2, 34ec6df)",
+  "version": "0.51.2",
+  "sha": "7699e21",
+  "vendored": "confirm.ts, folder-suggest.ts, settings_walker.ts, help-setting.ts, llm-connection.ts, llm-connection-strings.ts, backend-probe.ts, chat-client.ts, chat-transport.ts, endpoint-source.ts, endpoint-list.ts, endpoint-secrets.ts, secrets.ts, shortcuts-bridge.ts, request-section.ts, request-session.ts, model-picker.ts, collapsible.ts, clipboard.ts, clock.ts, stream-area.ts, hub.ts, version-list.ts",
   "perFile": {
     "help-setting.ts": {
       "version": "0.43.0",

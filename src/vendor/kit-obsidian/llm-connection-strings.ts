@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.49.2, src/obsidian/llm-connection-strings.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.51.2, src/obsidian/llm-connection-strings.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Default-Texte (EN/DE) für `LlmConnection.renderSettings` — nach dem Muster von
  *  `HELP_SETTING_TEXTS_EN/DE`. Ohne sie formulierte jeder Konsument rund 60 Texte selbst, obwohl
  *  „Reset“ oder „Open manager settings“ je Plugin nichts anderes heißen soll.
@@ -14,9 +14,13 @@
  *  hängen an Plugin-Eigenheiten und bleiben beim Konsumenten. Familie und Backend in der Kopfzeile des
  *  Anfrage-Abschnitts tragen die Labels der Kit-Tabellen (`FAMILIES`/`BACKENDS`).
  *
+ *  Seit 0.50.0 trägt das Bündel auch den Notice-Text einer Abweichung (`deviationNotice`), den
+ *  `createLlmConnection` als Default nimmt. Er stand bis dahin in elf Plugins als Kopie
+ *  (`deviationNotice` in `request-text.ts`, Herkunft lingotuner), die Satzteile lagen hier schon.
+ *
  *  Überschreiben: `renderSettings(el, { lang: "de", request: { title: "…" } })` — ein Teil-Merge
  *  über dem Default, je Abschnitt ein Feld genau. */
-import { BACKENDS, FAMILIES, type FamilyId, type BackendId } from "../kit/sampling-profiles";
+import { BACKENDS, FAMILIES, type FamilyId, type BackendId, type Deviation } from "../kit/sampling-profiles";
 import type { LlmConnectionStrings } from "./llm-connection";
 
 /** `{0}`, `{1}` … ersetzen. */
@@ -50,9 +54,15 @@ interface Texts {
   notes: Record<"raised-to-reserve" | "raised-to-thinking-floor" | "below-thinking-floor" | "off-not-possible", string>;
   topPHint: string;
   reset: string; thinkingLevel: string; levels: Record<"off" | "low" | "medium" | "high", string>;
-  levelPicker: string; levelPickerDesc: string; dormant: string; deleteDormant: string;
+  levelPicker: string; levelPickerDesc: string; requestSaveFailed: string; dormant: string; deleteDormant: string;
   lastRequest: string; lastRequestNone: string; copy: string; copied: string; deviationsOk: string; deviationsWarn: string;
   deviations: Record<"thinking-despite-off" | "empty-by-budget" | "family-mismatch" | "family-detected" | "rejected", string>;
+  /** Zweiter Satz der Abweichungs-Notice; `{0}` = Titel des Abschnitts „Anfrage“. */
+  seeSettings: string;
+  /** Hinweiszeile unter einer Vorschau des gesendeten Textes; `{0}` = Zahl der geschwärzten Werte. */
+  redactedOne: string; redactedMany: string;
+  /** Hinweis in den Einstellungen eines Manager-only-Plugins, wenn der Manager fehlt. */
+  noManager: string;
 }
 
 const familyLabel = (f: string): string => (f === "—" ? "—" : (FAMILIES[f as FamilyId]?.label ?? f));
@@ -66,6 +76,9 @@ function build(x: Texts): LlmConnectionStrings {
   const hint = (key: string): string => (key === "unreachable" ? x.hintUnreachable : key === "no-list" ? x.hintNoList : "");
   return {
     listLabel: x.listLabel, listDesc: x.listDesc, listPlaceholder: x.listPlaceholder,
+    deviationNotice: (d) => `${fmt(pick(x.deviations, d.kind), d.detail ?? "")} ${fmt(x.seeSettings, x.requestTitle)}`,
+    redactedNote: (n) => fmt(n === 1 ? x.redactedOne : x.redactedMany, String(n)),
+    noManager: x.noManager,
     endpointSource: {
       managed: x.managed, managedDesc: x.managedDesc, openManager: x.openManager, pickEndpoint: x.pickEndpoint,
       automatic: x.automatic, model: x.model, importLocal: x.importLocal,
@@ -118,7 +131,7 @@ function build(x: Texts): LlmConnectionStrings {
         return s;
       },
       reset: x.reset, thinkingLevel: x.thinkingLevel, level: (l) => x.levels[l],
-      levelPicker: x.levelPicker, levelPickerDesc: x.levelPickerDesc,
+      levelPicker: x.levelPicker, levelPickerDesc: x.levelPickerDesc, saveFailed: x.requestSaveFailed,
       dormant: (fam) => fmt(x.dormant, fam === "unknown" ? x.familyNone : (FAMILIES[fam]?.label ?? fam)),
       deleteDormant: x.deleteDormant, lastRequest: x.lastRequest, lastRequestNone: x.lastRequestNone,
       copy: x.copy, copied: x.copied, deviationsOk: x.deviationsOk,
@@ -187,6 +200,7 @@ const EN: Texts = {
   reset: "Reset", thinkingLevel: "Thinking level", levels: { off: "off", low: "low", medium: "medium", high: "high" },
   levelPicker: "Level picker in chat",
   levelPickerDesc: "Shows a dropdown with all four levels in the panel instead of the two-state button.",
+  requestSaveFailed: "Could not save the request settings.",
   dormant: "Own values for {0}, not active right now", deleteDormant: "Delete",
   lastRequest: "Last request", lastRequestNone: "No request sent yet this session.", copy: "Copy", copied: "Copied",
   deviationsOk: "No deviations this session.", deviationsWarn: "{0} deviation(s) this session.",
@@ -197,6 +211,9 @@ const EN: Texts = {
     "family-detected": "Model family detected: {0}. Set it in the LLM Endpoint Manager.",
     "rejected": "The server rejected the request: {0}",
   },
+  seeSettings: "Details in the settings under “{0}”.",
+  redactedOne: "{0} passage redacted", redactedMany: "{0} passages redacted",
+  noManager: "No LLM Endpoint Manager found. Install and enable it to choose an endpoint.",
 };
 
 const DE: Texts = {
@@ -260,6 +277,7 @@ const DE: Texts = {
   reset: "Zurücksetzen", thinkingLevel: "Denkstufe", levels: { off: "aus", low: "niedrig", medium: "mittel", high: "hoch" },
   levelPicker: "Stufenwahl im Chat",
   levelPickerDesc: "Zeigt im Panel ein Dropdown mit allen vier Stufen statt des Zwei-Zustands-Knopfs.",
+  requestSaveFailed: "Die Anfrage-Einstellungen konnten nicht gespeichert werden.",
   dormant: "Eigene Werte für {0}, gerade nicht aktiv", deleteDormant: "Löschen",
   lastRequest: "Letzte Anfrage", lastRequestNone: "In dieser Sitzung noch keine Anfrage gesendet.", copy: "Kopieren", copied: "Kopiert",
   deviationsOk: "Keine Abweichungen in dieser Sitzung.", deviationsWarn: "{0} Abweichung(en) in dieser Sitzung.",
@@ -270,6 +288,9 @@ const DE: Texts = {
     "family-detected": "Modellfamilie erkannt: {0}. Im LLM Endpoint Manager setzen.",
     "rejected": "Der Server hat die Anfrage abgelehnt: {0}",
   },
+  seeSettings: "Details in den Einstellungen unter „{0}“.",
+  redactedOne: "{0} Stelle geschwärzt", redactedMany: "{0} Stellen geschwärzt",
+  noManager: "Kein LLM Endpoint Manager gefunden. Installiere und aktiviere ihn, um einen Endpunkt zu wählen.",
 };
 
 export const LLM_CONNECTION_STRINGS_EN: LlmConnectionStrings = build(EN);
@@ -281,6 +302,9 @@ export interface LlmConnectionStringsOverride {
   listLabel?: string;
   listDesc?: string;
   listPlaceholder?: string;
+  deviationNotice?: (d: Deviation) => string;
+  redactedNote?: (n: number) => string;
+  noManager?: string;
   endpointSource?: Partial<LlmConnectionStrings["endpointSource"]>;
   endpointList?: Partial<LlmConnectionStrings["endpointList"]>;
   request?: Partial<LlmConnectionStrings["request"]>;
@@ -294,6 +318,9 @@ export function resolveLlmConnectionStrings(override?: LlmConnectionStringsOverr
     listLabel: override.listLabel ?? base.listLabel,
     listDesc: override.listDesc ?? base.listDesc,
     listPlaceholder: override.listPlaceholder ?? base.listPlaceholder,
+    deviationNotice: override.deviationNotice ?? base.deviationNotice,
+    redactedNote: override.redactedNote ?? base.redactedNote,
+    noManager: override.noManager ?? base.noManager,
     endpointSource: { ...base.endpointSource, ...override.endpointSource },
     endpointList: { ...base.endpointList, ...override.endpointList },
     request: { ...base.request, ...override.request },
