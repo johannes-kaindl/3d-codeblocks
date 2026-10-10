@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The settings screenshot in the README now shows the whole Settings page, including the Help row and the "Model by prompt" section.
+
 ## [0.7.0] — 2026-10-09
 
 ### Changed

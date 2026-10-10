@@ -612,9 +612,33 @@ async function settingsBild(cdp: Cdp, port: number, opts: ShotOptions): Promise<
     // schneidet die unteren Felder (Controls placement, Locked node prefixes) einfach
     // ab, ohne Fehler. Grosszuegige feste Fenstergroesse statt Scroll-Handling.
     await setWindowSize(fenster, 1100, 1500);
+    // Der Bildschirm begrenzt die Fenstergroesse (gemessen 1100x949 statt 1500): der Tab
+    // wuerde unten abgeschnitten, sobald er laenger ist als das Fenster (mit 0.7.0 kam der
+    // Abschnitt „Model by prompt" dazu). Nur fuer dieses eine Fenster bekommt die Seite
+    // deshalb einen hoeheren virtuellen Viewport (Dichte 2 wie die uebrigen Aufnahmen); die
+    // Hoehe des Ausschnitts folgt unten dem letzten Inhalt, nicht dem Viewport. Das Fenster wird danach
+    // geschlossen, die Emulation verschwindet mit ihm.
+    await fenster.send("Emulation.setDeviceMetricsOverride", {
+      width: 1100,
+      height: 2200,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
     await new Promise((r) => setTimeout(r, 600));
-    const box = await boxOf(fenster, ".vertical-tab-content", 0)
+    const rahmen = await boxOf(fenster, ".vertical-tab-content", 0)
       ?? await boxOf(fenster, ".modal-content", 0);
+    // Unterkante des letzten Inhalts statt des Containers: der hohe Viewport macht den
+    // Container so hoch wie die Simulation, darunter waere nur Weissraum.
+    const unten = await fenster.evaluate<number>(`
+      const c = document.querySelector(".vertical-tab-content") ?? document.querySelector(".modal-content");
+      let max = 0;
+      for (const el of c.querySelectorAll("*")) {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.width > 0) max = Math.max(max, r.bottom);
+      }
+      return max;
+    `);
+    const box = rahmen ? { ...rahmen, height: Math.max(1, Math.min(rahmen.height, unten - rahmen.y + 16)) } : null;
     if (!box) return "settings.png — kein Inhaltsbereich im Einstellungen-Fenster";
     const png = await capture(fenster, box);
     return await writeShot(fenster, "settings.png", png, { ...opts, thumb: true });
