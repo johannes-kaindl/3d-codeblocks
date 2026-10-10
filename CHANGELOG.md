@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-10
+
 ### Changed
 
 - The settings screenshot in the README now shows the whole Settings page, including the Help row and the "Model by prompt" section.
