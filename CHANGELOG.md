@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-11
+
 ### Fixed
 
 - Reading the JSON out of a model answer no longer slows down quadratically on an answer with very many unclosed brackets or unclosed `<think>` tags (50,000 opening brackets took about 12 seconds, now a few milliseconds).
