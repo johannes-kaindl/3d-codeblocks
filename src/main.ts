@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import type { PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
+import { fillMissingRowModels } from "./vendor/kit/endpoint_config";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
 import { findEndpointManager } from "./vendor/kit-obsidian/endpoint-source";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
@@ -56,7 +57,14 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   llm!: LlmConnection;
 
   async onload(): Promise<void> {
-    this.settings = validateSettings(await this.loadData());
+    const stored = await this.loadData();
+    this.settings = validateSettings(stored);
+    // Das globale Modell-Feld ist weg, jede Zeile traegt ihr Modell. `validateSettings` verwirft den Altschluessel,
+    // deshalb wird er aus den Rohdaten gelesen; ohne ihn (zweiter Lauf) aendert sich nichts, eine geleerte Zeile bleibt leer.
+    if (typeof stored === "object" && stored !== null && "llmModel" in stored) {
+      this.settings.endpoints = fillMissingRowModels(this.settings.endpoints, (stored as { llmModel?: unknown }).llmModel);
+      await this.saveSettings();
+    }
     this.llm = createLlmConnection({
       app: this.app,
       pluginId: this.manifest.id,
@@ -69,14 +77,12 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       getSettings: () => ({
         endpoints: this.settings.endpoints,
         choice: this.settings.endpointChoice,
-        model: this.settings.llmModel,
         request: this.settings.request,
       }),
       // Patch ZUERST uebernehmen, dann speichern — die Verbindung prueft das (MIGRATION 0.49.0).
       persist: (patch) => {
         if (patch.endpoints !== undefined) this.settings.endpoints = patch.endpoints;
         if (patch.choice !== undefined) this.settings.endpointChoice = patch.choice;
-        if (patch.model !== undefined) this.settings.llmModel = patch.model;
         if (patch.request !== undefined) this.settings.request = patch.request;
         // Unverpackt zurueckgeben: das Kit macht aus einem abgelehnten Speichern eine Notice
         // (MIGRATION 0.49.0 Schritt 2); ein Catch hier liesse einen Schreibfehler wie Erfolg aussehen.
@@ -256,11 +262,6 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
           },
           confirm: (message) => confirmAction(this.app, { message, confirmLabel: "Discard", cancelLabel: "Keep" }),
           managerPresent: () => findEndpointManager(this.app) !== null,
-          persistModel: async (model) => {
-            if (findEndpointManager(this.app)) this.settings.endpointChoice = { ...this.settings.endpointChoice, model };
-            else this.settings.llmModel = model;
-            await this.saveSettings();
-          },
         }),
     );
     this.addCommand({ id: "open-prompt-panel", name: "Open prompt panel", callback: () => void this.openPromptPanel({ kind: "new" }) });

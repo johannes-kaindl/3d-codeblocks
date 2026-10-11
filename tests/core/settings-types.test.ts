@@ -20,7 +20,6 @@ describe("validateSettings", () => {
       lighting: "faithful",
       modelLights: "prefer",
       endpoints: [],
-      llmModel: "",
       request: { overrides: {}, thinking: {}, lastOnLevel: {}, levelPickerInChat: false },
       acceptAs: "block",
     });
@@ -141,7 +140,7 @@ describe("validateSettings: prompt settings", () => {
     const s = validateSettings({});
     expect(s.acceptAs).toBe("block");
     expect(s.endpoints).toEqual([]);
-    expect(s.llmModel).toBe("");
+    expect(s).not.toHaveProperty("llmModel");
     expect(s.endpointChoice).toBeUndefined();
     expect(s.request).toEqual({ overrides: {}, thinking: {}, lastOnLevel: {}, levelPickerInChat: false });
   });
@@ -156,7 +155,6 @@ describe("validateSettings: prompt settings", () => {
     expect(s).toMatchObject(PRE_3B);
     expect(s.acceptAs).toBe("block");
     expect(s.endpoints).toEqual([]);
-    expect(s.llmModel).toBe("");
   });
 
   it("accepts endpoints only as an array", () => {
@@ -172,14 +170,12 @@ describe("validateSettings: prompt settings", () => {
     const stored = validateSettings({
       endpoints: [{ url: "http://localhost:1234/v1", id: UUID, secretId: SECRET, model: "m" }],
       endpointChoice: { endpointId: UUID, model: "m" },
-      llmModel: "m",
     });
     const reloaded = validateSettings(JSON.parse(JSON.stringify(stored)));
     expect(reloaded.endpoints).toEqual([
       { url: "http://localhost:1234/v1", id: UUID, secretId: SECRET, model: "m" },
     ]);
     expect(reloaded.endpointChoice).toEqual({ endpointId: UUID, model: "m" });
-    expect(reloaded.llmModel).toBe("m");
   });
 
   it("lets a legacy plaintext apiKey entry pass so the kit migration can move it", () => {
@@ -192,10 +188,9 @@ describe("validateSettings: prompt settings", () => {
     expect(s.endpoints).toEqual([{ url: "http://a/v1", id: "x" }]);
   });
 
-  it("falls back for a malformed endpointChoice, llmModel and request", () => {
-    const s = validateSettings({ endpointChoice: "x", llmModel: 5, request: { levelPickerInChat: "yes", overrides: 3 } });
+  it("falls back for a malformed endpointChoice and request", () => {
+    const s = validateSettings({ endpointChoice: "x", request: { levelPickerInChat: "yes", overrides: 3 } });
     expect(s.endpointChoice).toBeUndefined();
-    expect(s.llmModel).toBe("");
     expect(s.request).toEqual({ overrides: {}, thinking: {}, lastOnLevel: {}, levelPickerInChat: false });
   });
 

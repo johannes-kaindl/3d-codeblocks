@@ -35,7 +35,7 @@ async function loadedPlugin() {
   plugin.registerExtensions = vi.fn();
   plugin.addCommand = vi.fn();
   vi.spyOn(console, "warn").mockImplementation(() => {});
-  plugin.loadData = vi.fn().mockResolvedValue({ endpoints: [{ url: "http://127.0.0.1:1234/v1", model: "m" }], llmModel: "m" });
+  plugin.loadData = vi.fn().mockResolvedValue({ endpoints: [{ url: "http://127.0.0.1:1234/v1", model: "m" }] });
   await plugin.onload();
   return plugin;
 }

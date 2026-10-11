@@ -27,6 +27,7 @@ function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
     complete: vi.fn(complete),
     models: vi.fn(async () => ({ models: [MODEL], reachable: true })),
     invalidate: vi.fn(),
+    setModel: vi.fn(async (_m: string) => {}),
     source: vi.fn(() => ({ family: null, familySource: "none", backend: "unknown", backendSource: "none", model: MODEL, sentModel: MODEL })),
   };
   const deps = {
@@ -47,7 +48,6 @@ function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
     openSettings: vi.fn(),
     confirm: vi.fn(async () => true),
     managerPresent: () => false,
-    persistModel: vi.fn(async () => {}),
     ...extra,
   };
   const view = new PromptPanelView({ app: undefined } as never, deps as never);
@@ -468,8 +468,18 @@ describe("PromptPanelView", () => {
     expect(view.state().rounds.rounds).toHaveLength(0);
   });
 
-  it("survives a rejecting model list and a rejecting persistModel", async () => {
-    const { view, llm } = makeView(answer("{}"), { persistModel: vi.fn(async () => { throw new Error("save failed"); }) });
+  it("the model choice goes to the connection (setModel), nothing else is stored", async () => {
+    const { view, llm } = makeView(answer("{}"));
+    await view.onOpen();
+    await (view as any).chooseModel("qwen-x");
+    expect(llm.setModel).toHaveBeenCalledWith("qwen-x");
+    await (view as any).chooseModel("");
+    expect(llm.setModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("survives a rejecting model list and a rejecting setModel", async () => {
+    const { view, llm } = makeView(answer("{}"));
+    llm.setModel.mockRejectedValue(new Error("save failed"));
     llm.models.mockRejectedValue(new Error("offline"));
     await view.onOpen();
     await vi.waitFor(() => expect(statusText(view)).toContain("offline"));

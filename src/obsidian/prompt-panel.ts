@@ -37,7 +37,6 @@ export interface PromptPanelDeps extends HostBaseDeps {
   openSettings(): void;
   confirm(message: string): Promise<boolean>;
   managerPresent(): boolean;
-  persistModel(model: string): Promise<void>;
 }
 
 type Phase = "idle" | "checking" | "ok" | "error" | "warning";
@@ -491,8 +490,7 @@ export class PromptPanelView extends ItemView {
   private async chooseModel(value: string): Promise<void> {
     if (value === "") return;
     try {
-      await this.deps.persistModel(value);
-      this.deps.llm.invalidate();
+      await this.deps.llm.setModel(value);
     } catch (e) {
       if (this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e));
     }

@@ -190,7 +190,6 @@ describe("LLM connection wiring", () => {
     expect(o.getSettings()).toEqual({
       endpoints: plugin.settings.endpoints,
       choice: plugin.settings.endpointChoice,
-      model: plugin.settings.llmModel,
       request: plugin.settings.request,
     });
     spy.mockRestore();
@@ -202,13 +201,12 @@ describe("LLM connection wiring", () => {
     const plugin = await load();
     const persist = spy.mock.calls[0]![0].persist;
     let seenAtSave: unknown;
-    plugin.saveData = vi.fn(async (s: any) => { seenAtSave = s.llmModel; });
-    const p = persist({ model: "m1", choice: { endpointId: "e" }, endpoints: [{ url: "http://a/v1", id: "e" }] });
-    expect(plugin.settings.llmModel).toBe("m1");
+    plugin.saveData = vi.fn(async (s: any) => { seenAtSave = s.endpoints; });
+    const p = persist({ choice: { endpointId: "e" }, endpoints: [{ url: "http://a/v1", id: "e" }] });
     expect(plugin.settings.endpointChoice).toEqual({ endpointId: "e" });
     expect(plugin.settings.endpoints).toEqual([{ url: "http://a/v1", id: "e" }]);
     await p;
-    expect(seenAtSave).toBe("m1");
+    expect(seenAtSave).toEqual([{ url: "http://a/v1", id: "e" }]);
     spy.mockRestore();
   });
 
@@ -222,14 +220,59 @@ describe("LLM connection wiring", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     let result: Promise<void> | undefined;
-    expect(() => { result = persist({ model: "m2" }); }).not.toThrow();
+    expect(() => { result = persist({ endpoints: [{ url: "http://b/v1", id: "b" }] }); }).not.toThrow();
     await expect(result).rejects.toThrow("disk full");
-    expect(plugin.settings.llmModel).toBe("m2");
+    expect(plugin.settings.endpoints).toEqual([{ url: "http://b/v1", id: "b" }]);
     // persist selbst schreibt nichts in die Konsole (die Meldung ist Sache des Kit).
     expect(warn).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it("the connection gets no global model any more", async () => {
+    const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
+    const spy = vi.spyOn(mod, "createLlmConnection");
+    const plugin = await load({ endpoints: [{ url: "http://a/v1", model: "x" }] });
+    expect(Object.keys(spy.mock.calls[0]![0].getSettings())).toEqual(["endpoints", "choice", "request"]);
+    expect(plugin.settings).not.toHaveProperty("llmModel");
+    spy.mockRestore();
+  });
+
+  describe("migration of the old global model (llmModel)", () => {
+    const rows = () => [
+      { url: "http://a/v1", id: "a" },
+      { url: "http://b/v1", id: "b", model: "eigen" },
+    ];
+    it("first run moves the value into rows without a model, drops the old key and saves once", async () => {
+      const app = makeFakeApp();
+      const plugin = new ThreeDCodeblocksPlugin(app, { id: "three-d-codeblocks" } as any) as any;
+      plugin.registerView = vi.fn(); plugin.registerExtensions = vi.fn();
+      plugin.registerMarkdownCodeBlockProcessor = vi.fn(); plugin.addCommand = vi.fn();
+      plugin.loadData = vi.fn(async () => ({ endpoints: rows(), llmModel: "alt" }));
+      const saved: any[] = [];
+      plugin.saveData = vi.fn(async (s: any) => { saved.push(structuredClone(s)); });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await plugin.onload();
+      expect(plugin.settings.endpoints).toEqual([
+        { url: "http://a/v1", id: "a", model: "alt" },
+        { url: "http://b/v1", id: "b", model: "eigen" },
+      ]);
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).not.toHaveProperty("llmModel");
+      expect(saved[0].endpoints[0].model).toBe("alt");
+    });
+    it("second run changes nothing: a row the user cleared stays empty", async () => {
+      const plugin = await load({ endpoints: [{ url: "http://a/v1", id: "a", model: "" }] });
+      expect(plugin.settings.endpoints[0].model ?? "").toBe("");
+      expect(plugin.saveData).not.toHaveBeenCalled();
+    });
+    it("an old empty value only drops the key", async () => {
+      const plugin = await load({ endpoints: rows(), llmModel: "" });
+      expect(plugin.settings.endpoints).toEqual(rows());
+      expect(plugin.saveData).toHaveBeenCalledTimes(1);
+      expect((plugin.saveData as any).mock.calls[0][0]).not.toHaveProperty("llmModel");
+    });
   });
 
   it("onunload lets the connection release its model lists", async () => {

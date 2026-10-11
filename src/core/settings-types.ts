@@ -49,8 +49,6 @@ export interface PluginSettings {
   endpoints: EndpointConfig[];
   /** Wahl in der Endpunkt-Quelle (gilt nur mit Endpoint-Manager). */
   endpointChoice?: EndpointChoice | undefined;
-  /** Globales Modell fuer Zeilen ohne eigenes Modell. */
-  llmModel: string;
   /** Sampling-Einstellungen der LLM-Anbindung. */
   request: RequestSettings;
   acceptAs: AcceptAs;
@@ -73,7 +71,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   endpoints: [],
   // Schluessel muss existieren (geschlossene Welt in validateSettings), Wert ist "keine Wahl".
   endpointChoice: undefined,
-  llmModel: "",
   request: DEFAULT_REQUEST_SETTINGS,
   acceptAs: "block",
 };
@@ -151,7 +148,6 @@ const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
     if (typeof raw["model"] === "string") out.model = raw["model"];
     return out;
   },
-  llmModel: check((v) => typeof v === "string"),
   request: (raw) => sanitizeRequestSettings(raw).settings,
 };
 
