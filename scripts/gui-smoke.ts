@@ -4415,7 +4415,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12"] as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
 const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
@@ -4597,7 +4597,6 @@ const PP_RESET = `
     let changed = kept.length !== before.length;
     for (const e of before) if (isSmoke(e)) removed.push(e.url);
     if (changed) plugin.settings.endpoints = kept;
-    if (plugin.settings.llmModel === ${JSON.stringify(PP_MODEL)}) { plugin.settings.llmModel = ""; changed = true; }
     if (changed) { await plugin.saveSettings?.(); plugin.llm?.invalidate?.(); }
   }
   app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)});
@@ -4882,6 +4881,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
     PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
     PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
+    PP12: "Altwert llmModel im data.json: nach dem Laden steht er in der Zeile, der Schlüssel ist weg, keine Zeile „Model“, keine Option „global model“",
     PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
   } as const;
   const nothingFor = (reason: string): void => {
@@ -4912,7 +4912,6 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     await cdp.evaluate(`
       const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
       plugin.settings.endpoints = [{ id: ${JSON.stringify(PP_ENDPOINT_ID)}, url: ${JSON.stringify(sub.url)}, model: ${JSON.stringify(PP_MODEL)} }];
-      plugin.settings.llmModel = "";
       plugin.settings.acceptAs = "block";
       await plugin.saveSettings();
       plugin.llm.invalidate();
@@ -5297,6 +5296,41 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           `Fensterhöhe ${geo.innerH} px · ${geo.buttons.map((b) => `${b.name} ${b.top.toFixed(0)}–${b.bottom.toFixed(0)}`).join(", ")} (Rumpf sichtbar ${geo.panel.top.toFixed(0)}–${geo.panel.bottom.toFixed(0)}; im Fenster: ${inWindow}, im Rumpf: ${inPanel}) · Knopfzeile ${geo.sticky} · Rumpf scrollbar: ${geo.scrollable} · Statuszeile ${[st, sb].map((v) => v.toFixed(0)).join("–")} gegen Beschriftung ${[ct, cb].map((v) => v.toFixed(0)).join("–")}: ${overlap ? "ÜBERLAGERT" : "getrennt"} · Stream ${geo.streamH.toFixed(0)} px (erwartet > 60) · Runden ${second.state?.rounds}, Diff-Zeilen ${second.state?.diff.length}`,
         );
       }
+    }
+
+    // --- PP12. Migration des globalen Modells ------------------------------------
+    // Das Feld `llmModel` gibt es nicht mehr. Ein Altwert im data.json zieht beim Laden einmal in die Zeile ohne Modell,
+    // der Schlüssel verschwindet, und die Einstellungen kennen weder eine eigene Zeile „Model“ noch die Option
+    // „global model (…)“ in der Zeilenauswahl. Das Plugin wird dafür aus- und wieder eingeschaltet (Laden = onload).
+    {
+      const mig = await cdp.evaluate<{ rowModel: string | null; keyGone: boolean; modelRow: boolean; globalOption: boolean; rows: number }>(`
+        const id = ${JSON.stringify(PLUGIN_ID)};
+        const plugin = app.plugins.plugins[id];
+        await plugin.saveData({ ...plugin.settings, endpoints: [{ id: ${JSON.stringify(PP_ENDPOINT_ID)}, url: ${JSON.stringify(sub.url)} }], llmModel: "legacy-smoke-model" });
+        await app.plugins.disablePlugin(id);
+        await app.plugins.enablePlugin(id);
+        const fresh = app.plugins.plugins[id];
+        const stored = (await fresh.loadData()) ?? {};
+        app.setting.open();
+        app.setting.openTabById(id);
+        await new Promise((r) => setTimeout(r, 1500));
+        const c = app.setting.activeTab?.containerEl;
+        const names = [...(c?.querySelectorAll(".setting-item-name") ?? [])].map((n) => (n.textContent ?? "").trim());
+        const options = [...(c?.querySelectorAll("option") ?? [])].map((o) => o.textContent ?? "");
+        return {
+          rowModel: fresh.settings.endpoints?.[0]?.model ?? null,
+          keyGone: !("llmModel" in stored) && !("llmModel" in fresh.settings),
+          modelRow: names.includes("Model"),
+          globalOption: [...options, c?.textContent ?? ""].some((t) => /global model/i.test(t)),
+          rows: c?.querySelectorAll(".setting-item").length ?? 0,
+        };
+      `);
+      ppRecord(
+        "PP12",
+        T.PP12,
+        mig.rows > 0 && mig.rowModel === "legacy-smoke-model" && mig.keyGone && !mig.modelRow && !mig.globalOption,
+        `Modell der Zeile: ${mig.rowModel === null ? "keines" : `„${mig.rowModel}“`} (erwartet „legacy-smoke-model“) · Schlüssel llmModel weg: ${mig.keyGone ? "ja" : "NEIN"} · Zeile „Model“: ${mig.modelRow ? "VORHANDEN" : "keine"} · Option „global model“: ${mig.globalOption ? "VORHANDEN" : "keine"} · ${mig.rows} Zeilen`,
+      );
     }
   } finally {
     await ppCleanup(cdp);
