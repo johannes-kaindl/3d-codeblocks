@@ -57,7 +57,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   llm!: LlmConnection;
 
   async onload(): Promise<void> {
-    const stored = await this.loadData();
+    const stored: unknown = await this.loadData();
     this.settings = validateSettings(stored);
     // Das globale Modell-Feld ist weg, jede Zeile traegt ihr Modell. `validateSettings` verwirft den Altschluessel,
     // deshalb wird er aus den Rohdaten gelesen; ohne ihn (zweiter Lauf) aendert sich nichts, eine geleerte Zeile bleibt leer.

@@ -169,7 +169,7 @@ The first line of the panel shows what a request will work on: `New model`, or `
 
 ### Choose a model and read the quality line
 
-The **Model** drop-down lists the models of your endpoint, and the button next to it reloads the list. Under it, one line says what is known about the chosen model:
+The **Model** drop-down lists the models of your endpoint, and the button next to it reloads the list. Your choice is stored with the endpoint row that is in use (with the LLM Endpoint Manager installed, in its endpoint choice); there is no separate global model setting. Under it, one line says what is known about the chosen model:
 
 - `Measured: N of M test prompts gave a plausible 3D model (…, n=1 per prompt).` For a change it reads `N of M test change requests were applied correctly`. These numbers come from the plugin's own test runs, one attempt per test case, and exist only for the models that were tested.
 - `Not measured for this model — the one small model tested (…) got N of M …` means nobody has measured your model. Take it as a rough reference only: small models manage less, and a larger model may do better.

@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The global model setting is gone; each endpoint row carries its own model.** A model you had set globally moves once, when the plugin loads, into every row that had none; rows with their own model stay as they are, and a row you clear afterwards stays empty. The model drop-down in the prompt panel now sets the model of the endpoint row in use (or the Manager's endpoint choice). The endpoint choice no longer offers a "global model" option.
 - The source editor's cursor-preserving external edit (`diffReplaceSpan`) now comes from the shared kit instead of a local copy. Behaviour is unchanged.
 - The redaction of secrets before a request now masks `Bearer` tokens more broadly (from 8 characters on, in any letter case, `=` allowed inside the token).
 
