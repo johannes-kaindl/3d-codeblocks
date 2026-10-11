@@ -23,6 +23,29 @@ describe("readPartsAnswer", () => {
   });
 });
 
+describe("readPartsAnswer: Laufzeit", () => {
+  const zeit = (text: string) => {
+    const t = performance.now();
+    readPartsAnswer(text);
+    return performance.now() - t;
+  };
+  // Quadratisch waere 5x Eingabe = 25x Zeit; linear 5x. Grosszuegig gegen Rauschen, dazu harte Obergrenze.
+  const linear = (bau: (n: number) => string) => {
+    zeit(bau(1000));
+    const klein = zeit(bau(10_000));
+    const gross = zeit(bau(50_000));
+    expect(gross).toBeLessThan(Math.max(klein, 5) * 15);
+    expect(gross).toBeLessThan(1000);
+  };
+  it("viele offene Klammern bleiben linear", () => linear((n) => "[1,".repeat(n)));
+  it("viele offene geschweifte Klammern bleiben linear", () => linear((n) => '{"a":'.repeat(n)));
+  it("viele nie geschlossene think-Tags bleiben linear", () => linear((n) => "<think>".repeat(n) + '{"parts":[]}'));
+  it("viele Zeichen im String zwischen Klammern bleiben linear", () => linear((n) => '["'.repeat(n)));
+  it("findet die Liste nach vielen offenen Klammern, die später geschlossen werden", () => {
+    expect(readPartsAnswer(`[1,[2,${'{"parts":[{"shape":"box"}]}'}`)).toEqual({ ok: true, parts: [{ shape: "box" }] });
+  });
+});
+
 describe("prompts", () => {
   it("uses the measured system prompt for create", () => {
     const m = buildCreateMessages("Ein Tisch");

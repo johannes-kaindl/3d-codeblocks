@@ -1,6 +1,7 @@
 // Prompts und Antwortleser für shapes. Pure. Der System-Prompt fürs Erzeugen ist WÖRTLICH
 // der aus Spike A (2026-10-01) — er trägt die gemessenen 9/10. Jede Änderung (auch Whitespace)
 // braucht einen neuen Messlauf; der Test pinnt ihn per SHA-256.
+import { stripThinkBlocks } from "../../vendor/kit/think-splitter";
 import { parseShapes } from "./parse";
 
 export interface PromptMessage {
@@ -44,9 +45,14 @@ export function buildRefineMessages(currentText: string, instruction: string): P
   ];
 }
 
-/** Ab dem Zeichen `start` (`[` oder `{`) bis zur passenden Klammer, Strings beachtet; null wenn offen. */
-function balancedEnd(s: string, start: number): number | null {
-  let depth = 0;
+/** Zu jedem `[`/`{` in `s` die passende Klammer (Strings beachtet), null wenn sie offen bleibt.
+ *  Ein Lauf ab `start` füllt die Antwort für ALLE Klammern, die er außerhalb eines Strings passiert
+ *  (dort liest ein frischer Lauf denselben Zustand), `ends` wird über mehrere Aufrufe geteilt. Damit
+ *  ist die Suche linear statt quadratisch bei vielen offenen Klammern (`"[1,".repeat(50000)`). */
+function balancedEnd(s: string, start: number, ends: Map<number, number | null>): number | null {
+  const known = ends.get(start);
+  if (known !== undefined) return known;
+  const open: number[] = [];
   let inString = false;
   for (let i = start; i < s.length; i++) {
     const c = s[i];
@@ -54,37 +60,36 @@ function balancedEnd(s: string, start: number): number | null {
       if (c === "\\") i++;
       else if (c === '"') inString = false;
     } else if (c === '"') inString = true;
-    else if (c === "[" || c === "{") depth++;
+    else if (c === "[" || c === "{") open.push(i);
     else if (c === "]" || c === "}") {
-      depth--;
-      if (depth === 0) return i;
-      if (depth < 0) return null;
+      const opener = open.pop();
+      if (opener === undefined) break;
+      ends.set(opener, i);
+      if (open.length === 0) return i;
     }
   }
-  return null;
+  for (const opener of open) ends.set(opener, null);
+  return ends.get(start) ?? null;
 }
 
 type Extracted = { ok: true; values: unknown[]; truncated: boolean } | { ok: false; reason: string };
 
 /** Alle lesbaren JSON-Kandidaten einer Antwort, in Lesereihenfolge: erst Zaun-Blöcke, dann der ganze Text. */
 function extractJson(text: string): Extracted {
-  let clean = text.replace(/<think>[\s\S]*?<\/think>/g, "");
-  const strayClose = clean.lastIndexOf("</think>");
-  if (strayClose >= 0) clean = clean.slice(strayClose + "</think>".length);
   // Bewusste Verhaltensänderung gegenüber Plan 1: ein nie geschlossenes <think> verwirft den Rest
   // (alte Fassung las `<think>hm [gültige Liste]` noch), weil dort Klammern aus dem Gedankentext stammen.
-  const unterminated = clean.indexOf("<think>");
-  if (unterminated >= 0) clean = clean.slice(0, unterminated);
+  const clean = stripThinkBlocks(text, { dropStrayClose: true, dropUnclosed: true });
 
   const sources = [...[...clean.matchAll(/```[^\n`]*\n([\s\S]*?)```/g)].map((m) => m[1] ?? ""), clean];
   const values: unknown[] = [];
   let sawStart = false;
   let truncated = false; // eine Klammer wurde geöffnet und nie geschlossen: die Antwort ist abgeschnitten
   for (const src of sources) {
+    const ends = new Map<number, number | null>();
     for (let i = 0; i < src.length; i++) {
       if (src[i] !== "[" && src[i] !== "{") continue;
       sawStart = true;
-      const end = balancedEnd(src, i);
+      const end = balancedEnd(src, i, ends);
       if (end === null) {
         truncated = true;
         continue;

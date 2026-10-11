@@ -15,7 +15,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { EditorState, StateEffect, StateField, Transaction, type Range } from "@codemirror/state";
 import { Decoration, EditorView, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
-import { diffReplaceSpan } from "../core/textdiff";
+import { diffReplaceSpan } from "../vendor/kit/replace-span";
 
 export interface IssueLine {
   /** 1-basiert, wie die Meldungen des Parsers. */

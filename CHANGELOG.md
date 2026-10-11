@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Reading the JSON out of a model answer no longer slows down quadratically on an answer with very many unclosed brackets or unclosed `<think>` tags (50,000 opening brackets took about 12 seconds, now a few milliseconds).
+
+### Changed
+
+- The source editor's cursor-preserving external edit (`diffReplaceSpan`) now comes from the shared kit instead of a local copy. Behaviour is unchanged.
+- The redaction of secrets before a request now masks `Bearer` tokens more broadly (from 8 characters on, in any letter case, `=` allowed inside the token).
+
 ## [0.7.1] — 2026-10-10
 
 ### Changed
