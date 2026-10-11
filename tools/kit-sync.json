@@ -1,7 +1,7 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.51.3" },
-    "code-kit": { "ref": "0.15.4" }
+    "obsidian-kit": { "ref": "0.53.0" },
+    "code-kit": { "ref": "0.21.1" }
   },
   "targets": [
     {
@@ -10,7 +10,7 @@
         "num", "settings_schema", "secrets", "redact", "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "stream-blocks", "i18n"
+        "think-toggle", "timeout", "model-choice", "stream-blocks", "i18n", "replace-span"
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
