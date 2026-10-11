@@ -4,7 +4,7 @@ import { SourceEditor, issueField, setIssues } from "../../src/obsidian/source-e
 
 // Kein DOM in der Testumgebung: EditorView wird durch eine Attrappe ersetzt, die die Update-Listener aus dem
 // uebergebenen State liest und ein `dispatch` hat, das auf Wunsch wirft.
-const fake = vi.hoisted(() => ({ throwNext: false, listeners: [] as ((u: unknown) => void)[], focused: false, focusCalls: 0 }));
+const fake = vi.hoisted(() => ({ throwNext: false, listeners: [] as ((u: unknown) => void)[], focused: false, focusCalls: 0, doc: "", dispatched: [] as unknown[] }));
 vi.mock("@codemirror/view", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@codemirror/view")>();
   class FakeView {
@@ -14,9 +14,10 @@ vi.mock("@codemirror/view", async (importOriginal) => {
     state: { doc: { length: number; toString: () => string } };
     constructor(config: { state: import("@codemirror/state").EditorState }) {
       fake.listeners = config.state.facet(actual.EditorView.updateListener) as never;
-      this.state = { doc: { length: 0, toString: () => "" } };
+      this.state = { doc: { length: 0, toString: () => fake.doc } };
     }
-    dispatch() {
+    dispatch(spec?: unknown) {
+      fake.dispatched.push(spec);
       if (fake.throwNext) {
         fake.throwNext = false;
         throw new Error("dispatch failed");
@@ -90,6 +91,19 @@ describe("SourceEditor", () => {
     expect(() => editor.applyExternalEdit("y")).toThrow("dispatch failed");
     typed();
     expect(onChange).toHaveBeenCalledWith("neu");
+  });
+
+  it("applyExternalEdit schreibt nur die geänderte Spanne, ein Cursor davor bleibt stehen", () => {
+    fake.doc = "box A size 1\nbox B size 1";
+    fake.dispatched = [];
+    const editor = new SourceEditor({} as HTMLElement, {});
+    editor.applyExternalEdit("box A size 1\nbox B size 2");
+    const spec = fake.dispatched[0] as { changes: { from: number; to: number; insert: string } };
+    expect(spec.changes).toEqual({ from: 24, to: 25, insert: "2" });
+    // Dieselbe Änderung auf einem echten State: Cursor in "box A" (3) und in der Zeile davor bleiben unverändert.
+    const before = EditorState.create({ doc: fake.doc, selection: { anchor: 3 } });
+    expect(before.update({ changes: spec.changes }).state.selection.main.head).toBe(3);
+    fake.doc = "";
   });
 
   it("still suppresses onChange for its own successful writes", () => {
