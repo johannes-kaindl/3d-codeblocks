@@ -1200,31 +1200,23 @@ Der Fall aus Smoke #4 („Sidebar-Knöpfe erscheinen nicht beim Klick aufs Model
 die Sichtbarkeit des Aktiv-Bezugs. **Automatisiert** — dieser Abschnitt läuft als
 Treiber, nicht von Hand:
 
-⚠️ **Zuerst prüfen, wer sonst an Obsidian hängt.** Obsidian ist Single-Instance — ein
-`quit` trifft die Instanz, an der möglicherweise eine andere Session arbeitet, und zerstört
-deren Zustand. Der eigene Lauf ist danach sauber grün; der Schaden entsteht woanders und
-fällt nicht auf.
+⚠️ **Der Treiber läuft nur gegen eine eigene Zweitinstanz, nie gegen die reguläre.** Eigenes `--user-data-dir`, eigener Port, `--port` ist Pflicht (kein Standardport: 9222 gehört der regulären Instanz). Vorher prüfen, dass der Port frei ist:
 
 ```bash
-lsof -nP -iTCP:9222 -sTCP:LISTEN >/dev/null && echo "läuft bereits — NICHT beenden"
+lsof -nP -iTCP:<port> -sTCP:LISTEN >/dev/null && echo "Port belegt — anderen wählen"
 ```
 
-Hört der Port schon, dann **mitnutzen statt neu starten**: ein eigenes Fenster per
-`vault-open` über IPC öffnen, dann `attachTo("workspace", port, vault)` — der Vault-Name
-wählt, nicht die Reihenfolge. ⚠️ Die Port-Prüfung ersetzt die Frage nicht: sie zeigt aktive
-CDP-Treiber, aber nicht, wer ein Fenster offen hält oder auf den Port wartet.
-
-Erst wenn nichts läuft — oder nach Absprache mit dem, der es benutzt — gilt das Rezept unten.
-
 ```bash
-osascript -e 'quit app "Obsidian"'
-open -a Obsidian --args --remote-debugging-port=9222
+UD=/tmp/obs-test-3d-codeblocks    # .asar der regulären Instanz hineinkopieren, Vault und "language":"en" in $UD/obsidian.json
+/Applications/Obsidian.app/Contents/MacOS/Obsidian --user-data-dir="$UD" --remote-debugging-port=<port> &
 OBSIDIAN_PLUGIN_DIR="<vault>/.obsidian/plugins/three-d-codeblocks" npm run deploy
-npm run smoke:gui -- --vault <vault-name>
+npm run smoke:gui -- --port <port> --vault <vault-name>
 ```
+
+Vertrauensdialog und Restricted Mode erledigt `bereiteInstanzVor` im Treiber, das Fenster macht `requireVisible` der Brücke sichtbar (kein `osascript … activate`: das trifft per App-Name die reguläre Instanz). Je Messlauf ein frischer Prozess.
 
 `--vault` ist bei mehreren offenen Fenstern Pflicht — der Treiber bricht lieber ab, als
-im falschen Vault zu prüfen. Weitere Flags: `--model <pfad>`, `--port`, `--keep`
+im falschen Vault zu prüfen. Weitere Flags: `--model <pfad>`, `--section <key>`, `--keep`
 (Notiz stehen lassen).
 
 > [!check] Durchlauf 2026-08-04 — **8/8 grün** (Obsidian 1.13.4, outpost-worldbuilding)
@@ -1260,7 +1252,7 @@ Unit-Test sichtbar:
    komplett leer (`.tdcb-block` = 0, kein Notiztext), während `app.workspace` die Datei
    korrekt als aktiv meldete — Zustand richtig, Anzeige nicht da. Erst
    `osascript -e 'tell application "Obsidian" to activate'` (die **App** nach vorn, nicht
-   nur das Fenster) rendert. CORE-TEST-02 nennt die Drosselung; der macOS-Zusatz fehlte.
+   nur das Fenster) rendert. CORE-TEST-02 nennt die Drosselung; der macOS-Zusatz fehlte. *(Stand 2026-10-12: der Treiber ruft kein `osascript` mehr; `requireVisible` der Brücke macht das Fenster der Zweitinstanz sichtbar, `Emulation.setFocusEmulationEnabled` hält den Renderer wach.)*
 2. **Ein Prüfpunkt ohne Gegenstand war grün.** Punkt 6 verglich die Farbe des aktiven
    Titels mit der eines inaktiven — ohne aktiven Block verglich er einen leeren String
    mit einer echten Farbe und meldete „unterscheidet sich". Genau im Defektfall, den er
