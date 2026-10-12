@@ -12,9 +12,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Settings, endpoint list:** the "move up" and "remove endpoint" buttons stay together in one row instead of the trash can standing alone on a second line; the key and model fields are a little narrower, the address stays fully visible.
+- **Settings, endpoint list:** the "move up" and "remove endpoint" buttons stay together, the address and the model ID stay fully visible at normal widths; in a narrow window the block of model and buttons moves as a whole to a second row instead of a button standing alone (obsidian-kit 0.59.0 and 0.59.1).
 - **Settings, section "Request":** for an endpoint whose model family is not known yet, it now says "not detected yet" with a note that this is normal for a freshly entered endpoint (and that the LLM Endpoint Manager keeps family and backend), and the fields read "not sent yet — waiting for the model family" instead of "unknown".
-- Behaviour of the shared kit pins taken with the update: obsidian-kit 0.59.0 and code-kit 0.24.0 (from 0.56.0 and 0.23.0). The other changes in 0.56.1–0.58.0 (kit mock additions, `sanitizeChoice`, `pruefeLinearFuzz`, `fetchEndpointContext`, embedding rows without "server picks") touch modules this plugin does not use or tests only.
+- Behaviour of the shared kit pins taken with the update: obsidian-kit 0.59.1 and code-kit 0.24.0 (from 0.56.0 and 0.23.0). The other changes in 0.56.1–0.58.0 (kit mock additions, `sanitizeChoice`, `pruefeLinearFuzz`, `fetchEndpointContext`, embedding rows without "server picks") touch modules this plugin does not use or tests only.
 
 ## [0.9.0] — 2026-10-12
 

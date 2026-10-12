@@ -7,7 +7,7 @@
   "code_kit_version": "0.13.0",
   "code_kit_sha": "d3a29d3",
   "code_kit_vendored": "rounds.ts, sampling-profiles.ts, backend-probe.ts, model-list-cache.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, sse.ts, reasoning.ts, capabilities.ts, think-splitter.ts, think-toggle.ts, timeout.ts, model-choice.ts, stream-blocks.ts, i18n.ts, clipboard.ts",
-  "obsidian_kit_version": "0.59.0",
-  "obsidian_kit_sha": "c64440c",
+  "obsidian_kit_version": "0.59.1",
+  "obsidian_kit_sha": "30c807e",
   "obsidian_kit_vendored": "endpoint-source.ts, endpoint-secret-hook.ts"
 }
