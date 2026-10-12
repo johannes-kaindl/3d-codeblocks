@@ -46,8 +46,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { createServer, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
@@ -67,6 +65,7 @@ import {
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
+import { startLlmStub, type Antwort, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
 
 
 const PLUGIN_ID = "three-d-codeblocks";
@@ -4400,7 +4399,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4413,6 +4412,9 @@ const PP_TITEL = {
   PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
   PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
   PP12: "Altwert llmModel im data.json: nach dem Laden steht er in der Zeile, der Schlüssel ist weg, keine Zeile „Model“, keine Option „global model“",
+  PP13: "Folge-Regel: Hochscrollen mitten im Strom wird respektiert",
+  PP14: "Kontrolle: ohne Störung folgt der Strom bis zum Ende",
+  PP15: "Denkblock live: der Denk-Text ist während des Stroms sichtbar und wächst",
   PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
 } as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
@@ -4441,119 +4443,42 @@ interface Substitute {
   requests: { kind: "create" | "refine" | "models" | "unknown"; stream: boolean }[];
   /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
   clientClosed: number;
+  /** Methode und Pfad jeder Anfrage, die der strenge Stub mit 404 beantwortete (Mitschnitt). */
+  unknownPaths: string[];
+  /** Die nächste Chat-Antwort ist diese (statt der Fixture-Antwort), danach gilt wieder die Fixture. */
+  queue(antwort: Antwort): void;
   close(): Promise<void>;
 }
 
 let ppSubstitute: Substitute | null = null;
 let ppOriginalAcceptAs: unknown = null;
 
-/** Der Ersatz-Endpunkt. `GET …/models` kennt genau ein Modell, `POST …/chat/completions` antwortet je nach
- *  System-Prompt mit der Erzeugen- oder der Verfeinern-Antwort, in drei `data:`-Stücken. CORS-Köpfe, weil der
- *  Renderer (app://obsidian.md) per XHR streamt und der Browser sonst vorab fragt. */
-function startSubstitute(answers: { create: string; refine: string }): Promise<Substitute> {
-  const sub: Substitute = {
-    url: "",
-    hang: false,
-    requests: [],
-    clientClosed: 0,
-    close: async () => undefined,
+/** Der Ersatz-Endpunkt: der zentrale LLM-Stub (`tools/obsidian-cdp/llm-stub.ts`). Strenge Pfade, LM-Studio-404,
+ *  drei Stücke im Takt, `hang` und der Zähler für vom Client geschlossene Verbindungen sind dort Schalter. */
+async function startSubstitute(answers: { create: string; refine: string }): Promise<Substitute> {
+  const kindOf = (a: StubAnfrage): "create" | "refine" | "models" | "unknown" => {
+    if (a.route === "models") return "models";
+    if (a.route !== "chat") return "unknown";
+    const system = (a.json as { messages?: { role?: string; content?: unknown }[] } | null)?.messages?.find((m) => m.role === "system")?.content;
+    return typeof system === "string" && system.includes("Du änderst") ? "refine" : "create";
   };
-  const cors = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Private-Network": "true",
-  };
-  const timers = new Set<NodeJS.Timeout>();
-
-  const chat = (res: ServerResponse, raw: string): void => {
-    let body: { messages?: { role?: string; content?: unknown }[]; stream?: boolean } = {};
-    try {
-      body = JSON.parse(raw) as typeof body;
-    } catch {
-      body = {};
-    }
-    const system = body.messages?.find((m) => m.role === "system")?.content;
-    const kind = typeof system === "string" && system.includes("Du änderst") ? "refine" : "create";
-    const stream = body.stream !== false;
-    sub.requests.push({ kind, stream });
-    const answer = kind === "refine" ? answers.refine : answers.create;
-    const third = Math.ceil(answer.length / 3);
-    const pieces = [answer.slice(0, third), answer.slice(third, 2 * third), answer.slice(2 * third)].filter((p) => p !== "");
-    res.on("close", () => {
-      if (!res.writableEnded) sub.clientClosed++;
-    });
-    if (!stream) {
-      res.writeHead(200, { ...cors, "Content-Type": "application/json" });
-      res.end(JSON.stringify({ model: PP_MODEL, choices: [{ index: 0, message: { role: "assistant", content: answer }, finish_reason: "stop" }] }));
-      return;
-    }
-    res.writeHead(200, { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
-    const send = (delta: Record<string, unknown>, finish: string | null): void => {
-      res.write(`data: ${JSON.stringify({ model: PP_MODEL, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
-    };
-    send({ role: "assistant", content: pieces[0] ?? "" }, null);
-    if (sub.hang) return;
-    pieces.slice(1).forEach((piece, i) => {
-      const timer = setTimeout(() => {
-        timers.delete(timer);
-        if (!res.destroyed) send({ content: piece }, null);
-      }, (i + 1) * PP_CHUNK_DELAY_MS);
-      timers.add(timer);
-    });
-    const endTimer = setTimeout(() => {
-      timers.delete(endTimer);
-      if (res.destroyed) return;
-      send({}, "stop");
-      res.write("data: [DONE]\n\n");
-      res.end();
-    }, pieces.length * PP_CHUNK_DELAY_MS);
-    timers.add(endTimer);
-  };
-
-  const server: Server = createServer((req, res) => {
-    const path = (req.url ?? "").split("?")[0] ?? "";
-    if (req.method === "OPTIONS") {
-      res.writeHead(204, cors);
-      res.end();
-      return;
-    }
-    // Nur die Pfade, die ein echter Server kennt: LM Studio antwortet auf `GET /models` (ohne /v1) mit
-    // `{"error":"Unexpected endpoint…"}`, Ollama mit 404. Ein Ersatz, der auch `/models` bediente, verdeckte am
-    // 2026-10-04 den Kit-Fehler „Probe fragt /models statt /v1/models“ (CORE-TEST-08: der Prüfling bekam eine
-    // Antwort, die ein echter Server nie gibt).
-    if (req.method === "GET" && path.endsWith("/v1/models")) {
-      sub.requests.push({ kind: "models", stream: false });
-      res.writeHead(200, { ...cors, "Content-Type": "application/json" });
-      res.end(JSON.stringify({ data: [{ id: PP_MODEL }] }));
-      return;
-    }
-    if (req.method === "POST" && path.endsWith("/v1/chat/completions")) {
-      const parts: Buffer[] = [];
-      req.on("data", (c: Buffer) => parts.push(c));
-      req.on("end", () => chat(res, Buffer.concat(parts).toString("utf8")));
-      return;
-    }
-    sub.requests.push({ kind: "unknown", stream: false });
-    res.writeHead(404, { ...cors, "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: `Unexpected endpoint or method. (${req.method} ${path})` }));
+  const state = { hang: false };
+  const stub = await startLlmStub({
+    models: [PP_MODEL],
+    takt: PP_CHUNK_DELAY_MS,
+    teile: 3,
+    antwort: (a) => ({ text: kindOf(a) === "refine" ? answers.refine : answers.create, ...(state.hang ? { haengtNach: 1 } : {}) }),
   });
-
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const port = (server.address() as AddressInfo).port;
-      sub.url = `http://127.0.0.1:${port}/v1`;
-      sub.close = () =>
-        new Promise<void>((done) => {
-          for (const t of timers) clearTimeout(t);
-          timers.clear();
-          server.closeAllConnections();
-          server.close(() => done());
-        });
-      resolve(sub);
-    });
-  });
+  return {
+    url: stub.urlV1,
+    get hang() { return state.hang; },
+    set hang(v: boolean) { state.hang = v; },
+    get requests() { return stub.anfragen().map((a) => ({ kind: kindOf(a), stream: a.stream === true })); },
+    get clientClosed() { return stub.zaehler().clientGeschlossen; },
+    get unknownPaths() { return stub.anfragen().filter((a) => kindOf(a) === "unknown").map((a) => `${a.methode} ${a.pfad}`); },
+    queue: (antwort) => stub.antworten([antwort]),
+    close: () => stub.stop(),
+  };
 }
 
 /** Die aufgezeichneten Antworten aus den Fixtures — oder der Grund, warum es sie nicht gibt. */
@@ -4602,6 +4527,73 @@ const PP_RESET = `
   await new Promise((r) => setTimeout(r, 200));
   return removed;
 `;
+
+/** Strom-Probe im Prompt-Panel (PP13–PP15): ein langer Strom aus tokengrossen Stuecken (8 Zeichen, 20 ms), dessen Tail den
+ *  auf `max-height: 14em` begrenzten Rumpf (`.okit-stream-body`, der Scroll-Container) ueberlaufen laesst. Ein MutationObserver
+ *  tastet bei jedem Wachsen von Tail oder Denk-Text ab; `stoere` setzt `scrollTop = 0`, sobald der Ueberlauf >= 80 px ist
+ *  (Folge-Schwelle 40 px, `stream-area.ts`, plus 40 px Spielraum). Nach dem Abschluss-Chunk wird nicht mehr gemessen. */
+const PP_STREAM_UNIT = 8;
+const PP_STREAM_TAKT_MS = 20;
+const PP_STREAM_REASONING = "Ich ueberlege die Teile des Tisches: Platte, vier Beine, Masse, Lage. ".repeat(6);
+const ppStreamAnswer = (): string => {
+  const parts = Array.from({ length: 45 }, (_, i) => ({ name: `Teil-${i + 1}`, shape: "box", size: [0.1, 0.1, 0.1], at: [i * 0.05, 0.5, 0], color: "#8b5a2b" }));
+  return JSON.stringify({ parts });
+};
+interface PpStreamRow { len: number; rl: number; st: number; overflow: number; gap: number; open: boolean; vis: boolean; grew: boolean; disturbed: boolean }
+interface PpStreamRun { rows: PpStreamRow[]; disturbed: { len: number; overflow: number; st0: number } | null; maxOverflow: number; finalPhase: string }
+
+async function ppStreamRun(cdp: Cdp, sub: Substitute, stoere: boolean): Promise<PpStreamRun | null> {
+  if (!(await ppOpenFresh(cdp))) return null;
+  await ppType(cdp, PP_CREATE_PROMPT);
+  sub.queue({
+    text: ppStreamAnswer(),
+    reasoning: PP_STREAM_REASONING,
+    laenge: PP_STREAM_UNIT,
+    takt: PP_STREAM_TAKT_MS,
+    nachlaufMs: 8 * PP_STREAM_TAKT_MS,
+  });
+  const armed = await cdp.evaluate<boolean>(`
+    const area = document.querySelector(".tdcb-prompt .tdcb-prompt-stream");
+    const body = area?.querySelector(".okit-stream-body");
+    const tail = area?.querySelector(".okit-stream-tail");
+    if (!area || !body || !tail) return false;
+    const S = { rows: [], disturbed: null, maxOverflow: 0 };
+    window.__ppStream = S;
+    window.__ppStreamObs?.disconnect();
+    let prevLen = 0;
+    let prevRl = 0;
+    window.__ppStreamObs = new MutationObserver(() => {
+      const len = (tail.textContent ?? "").length;
+      const pre = area.querySelector(".okit-stream-reasoning > pre");
+      const det = area.querySelector(".okit-stream-reasoning");
+      const rl = pre ? (pre.textContent ?? "").length : 0;
+      if (len <= prevLen && rl <= prevRl) return;
+      const grew = len > prevLen;
+      prevLen = Math.max(prevLen, len);
+      prevRl = Math.max(prevRl, rl);
+      const overflow = body.scrollHeight - body.clientHeight;
+      S.maxOverflow = Math.max(S.maxOverflow, overflow);
+      const row = { len, rl, st: body.scrollTop, overflow, gap: body.scrollHeight - body.scrollTop - body.clientHeight,
+        open: det ? det.open : false, vis: pre ? pre.getBoundingClientRect().height > 0 : false, grew, disturbed: false };
+      if (${stoere ? "true" : "false"} && !S.disturbed && grew && overflow >= 80) {
+        body.scrollTop = 0;
+        S.disturbed = { len, overflow, st0: body.scrollTop };
+        row.disturbed = true;
+        row.st = body.scrollTop;
+      }
+      S.rows.push(row);
+    });
+    window.__ppStreamObs.observe(area, { childList: true, characterData: true, subtree: true });
+    return true;
+  `);
+  if (!armed) return null;
+  await ppClick(cdp, ".tdcb-prompt-send");
+  const run = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 60_000, 300);
+  const out = await cdp.evaluate<{ rows: PpStreamRow[]; disturbed: PpStreamRun["disturbed"]; maxOverflow: number }>(
+    `window.__ppStreamObs?.disconnect(); return window.__ppStream ?? { rows: [], disturbed: null, maxOverflow: 0 };`,
+  );
+  return { ...out, finalPhase: run.state?.phase ?? "?" };
+}
 
 /** Wie `cleanupState` und das `finally` des Abschnitts es brauchen: schliesst Server, räumt die Einstellungen,
  *  stellt `acceptAs` zurück. Wirft nie. */
@@ -4972,7 +4964,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         "PP10",
         T.PP10,
         settings.statusOk && !settings.statusError && reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") && reach.listed,
-        `Symbol der Zeile: ${settings.statusOk ? "is-ok" : settings.statusError ? "is-error" : "ohne Ergebnis"} · Auflösung: ${reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") ? "Ersatz-Zeile" : `${reach.resolvedUrl ?? "keine Zeile"} (erwartet ${sub.url.replace(/\/v1$/, "")})`}, Modell „${reach.resolvedModel}“ · Modell „${PP_MODEL}“ in der Liste: ${reach.listed ? "ja" : `nein (${reach.listDetail})`} · Anfragen an unbekannte Pfade: ${unknownHits}`,
+        `Symbol der Zeile: ${settings.statusOk ? "is-ok" : settings.statusError ? "is-error" : "ohne Ergebnis"} · Auflösung: ${reach.resolvedUrl !== null && reach.resolvedUrl === sub.url.replace(/\/v1$/, "") ? "Ersatz-Zeile" : `${reach.resolvedUrl ?? "keine Zeile"} (erwartet ${sub.url.replace(/\/v1$/, "")})`}, Modell „${reach.resolvedModel}“ · Modell „${PP_MODEL}“ in der Liste: ${reach.listed ? "ja" : `nein (${reach.listDetail})`} · Anfragen an unbekannte Pfade: ${unknownHits} (${sub.unknownPaths.join(", ") || "keine"})`,
       );
     }
 
@@ -5281,6 +5273,57 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           inWindow && inPanel && !overlap && geo.streamH > 60,
           `Fensterhöhe ${geo.innerH} px · ${geo.buttons.map((b) => `${b.name} ${b.top.toFixed(0)}–${b.bottom.toFixed(0)}`).join(", ")} (Rumpf sichtbar ${geo.panel.top.toFixed(0)}–${geo.panel.bottom.toFixed(0)}; im Fenster: ${inWindow}, im Rumpf: ${inPanel}) · Knopfzeile ${geo.sticky} · Rumpf scrollbar: ${geo.scrollable} · Statuszeile ${[st, sb].map((v) => v.toFixed(0)).join("–")} gegen Beschriftung ${[ct, cb].map((v) => v.toFixed(0)).join("–")}: ${overlap ? "ÜBERLAGERT" : "getrennt"} · Stream ${geo.streamH.toFixed(0)} px (erwartet > 60) · Runden ${second.state?.rounds}, Diff-Zeilen ${second.state?.diff.length}`,
         );
+      }
+    }
+
+    // --- PP13–PP15. Stream-Bereich im Prompt-Panel: Folge-Regel, Kontrolle, Denkblock live ------------------------------------
+    // Vorlauf-Check: der scrollende Rumpf (`.okit-stream-body`, kein `scrollEl` im Aufruf) ist durch `.tdcb-prompt-stream
+    // { max-height: 14em }` begrenzt. Die Gueltigkeit steht je Punkt: Ueberlauf zum Stoerungszeitpunkt >= 80 px, mindestens zwei
+    // wachsende Staende nach der Stoerung; sonst „nichts gemessen“ (CORE-TEST-22). Zeit zaehlt nur als Untergrenze des Taktes.
+    {
+      const control = await ppStreamRun(cdp, sub, false);
+      const growing = (r: PpStreamRun | null): PpStreamRow[] => (r?.rows ?? []).filter((x) => x.grew && x.overflow >= 80);
+      // PP14: ohne Stoerung folgt der Strom bei jedem Stand mit Ueberlauf (gap < Folge-Schwelle 40) bis zum letzten Stueck.
+      if (control === null) {
+        ppNothing("PP14", T.PP14, "das Panel öffnete nicht");
+        ppNothing("PP15", T.PP15, "das Panel öffnete nicht");
+      } else {
+        const g = growing(control);
+        if (control.finalPhase !== "ok" && control.finalPhase !== "error") {
+          ppNothing("PP14", T.PP14, `der Strom kam nicht zum Ende (Status ${control.finalPhase})`);
+        } else if (g.length < 2) {
+          ppNothing("PP14", T.PP14, `der Überlauf erreichte 80 px nicht oft genug (höchstens ${Math.round(control.maxOverflow)} px, ${g.length} Stände) — Bereich unbegrenzt oder Strom zu kurz`);
+        } else {
+          const worst = Math.max(...g.map((x) => x.gap));
+          const lastGap = g[g.length - 1]?.gap ?? 0;
+          ppRecord("PP14", T.PP14, worst < 40 && lastGap < 40, `${g.length} Stände mit Überlauf ≥ 80 px (höchstens ${Math.round(control.maxOverflow)} px) · größter Abstand zum Ende ${Math.round(worst)} px (erwartet < 40), beim letzten Stück ${Math.round(lastGap)} px`);
+        }
+        // PP15: der Denk-Text steht vor dem Inhalt, ist offen, sichtbar und waechst waehrend des Stroms.
+        const reasoningRows = control.rows.filter((x) => x.rl > 0);
+        const distinct = new Set(reasoningRows.map((x) => x.rl)).size;
+        if (distinct < 2) {
+          ppNothing("PP15", T.PP15, `der Denk-Text wuchs höchstens ${distinct}-mal (Reasoning-Feld kam nicht an oder zu kurz)`);
+        } else {
+          const open = reasoningRows.every((x) => x.open);
+          const visible = reasoningRows.every((x) => x.vis);
+          ppRecord("PP15", T.PP15, open && visible && distinct >= 2, `${distinct} Wachstumsstände (${reasoningRows[0]?.rl}→${reasoningRows[reasoningRows.length - 1]?.rl} Zeichen) · geöffnet: ${open} · sichtbar: ${visible}`);
+        }
+      }
+      // PP13: Stoerung (scrollTop = 0), danach darf der Bereich nicht wieder zum Ende springen.
+      const disturbed = await ppStreamRun(cdp, sub, true);
+      if (disturbed === null) {
+        ppNothing("PP13", T.PP13, "das Panel öffnete nicht");
+      } else if (disturbed.disturbed === null) {
+        ppNothing("PP13", T.PP13, `der Überlauf erreichte zum Störungszeitpunkt nie 80 px (höchstens ${Math.round(disturbed.maxOverflow)} px) — keine Störung ausgelöst`);
+      } else {
+        const after = disturbed.rows.filter((x) => x.grew && !x.disturbed && x.len > disturbed.disturbed!.len);
+        if (after.length < 2) {
+          ppNothing("PP13", T.PP13, `nach der Störung kamen nur ${after.length} wachsende Stände (mindestens 2 nötig)`);
+        } else {
+          const st0 = disturbed.disturbed.st0;
+          const worst = Math.max(...after.map((x) => x.st - st0));
+          ppRecord("PP13", T.PP13, worst <= 4, `Störung bei ${disturbed.disturbed.len} Zeichen, Überlauf ${Math.round(disturbed.disturbed.overflow)} px, scrollTop ${st0} · ${after.length} Stände danach, größte Abweichung des scrollTop ${Math.round(worst)} px (erwartet ≤ 4)`);
+        }
       }
     }
 
