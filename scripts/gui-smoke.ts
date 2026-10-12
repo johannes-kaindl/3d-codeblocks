@@ -12,41 +12,32 @@
  *
  * ## Voraussetzung
  *
- * ⚠️ **Zuerst prüfen, wer sonst an Obsidian hängt.** Obsidian ist Single-Instance — ein
- * `quit` trifft die Instanz, an der möglicherweise eine andere Session arbeitet, und zerstört
- * deren Zustand. Der eigene Lauf ist danach sauber grün; der Schaden entsteht woanders und
- * fällt nicht auf.
+ * ⚠️ **Nur gegen eine eigene Zweitinstanz fahren, nie gegen die reguläre.** Vorher prüfen, dass der Port frei ist:
  *
  * ```bash
- * lsof -nP -iTCP:9222 -sTCP:LISTEN >/dev/null && echo "läuft bereits — NICHT beenden"
+ * lsof -nP -iTCP:<port> -sTCP:LISTEN >/dev/null && echo "Port belegt — anderen wählen"
  * ```
  *
- * Hört der Port schon, dann **mitnutzen statt neu starten**: ein eigenes Fenster per
- * `vault-open` über IPC öffnen, dann `attachTo("workspace", port, vault)` — der Vault-Name
- * wählt, nicht die Reihenfolge. ⚠️ Die Port-Prüfung ersetzt die Frage nicht: sie zeigt aktive
- * CDP-Treiber, aber nicht, wer ein Fenster offen hält oder auf den Port wartet.
- *
- * Erst wenn nichts läuft — oder nach Absprache mit dem, der es benutzt — gilt das Rezept unten.
- *
- * Obsidian muss mit offenem Debug-Port laufen (das ist der einzige Handgriff, der
- * Handarbeit bleibt — die App muss dafür neu gestartet werden):
+ * Obsidian läuft als **Zweitinstanz** mit eigenem Profil und eigenem Debug-Port (die reguläre Instanz
+ * fasst der Treiber nie an; `--port` ist Pflicht):
  *
  * ```bash
- * osascript -e 'quit app "Obsidian"'
- * open -a Obsidian --args --remote-debugging-port=9222
+ * UD=/tmp/obs-test-3d-codeblocks    # Profil je Repo; .asar der regulären Instanz hineinkopieren,
+ *                                   # Vault und "language":"en" in $UD/obsidian.json eintragen
+ * /Applications/Obsidian.app/Contents/MacOS/Obsidian --user-data-dir="$UD" --remote-debugging-port=<port> &
  * ```
+ *
+ * Vertrauensdialog und Restricted Mode erledigt `bereiteInstanzVor` im Treiber.
  *
  * Dann, mit deployter Plugin-Version (`npm run deploy`):
  *
  * ```bash
- * npm run smoke:gui
- * npm run smoke:gui -- --port 9222 --model weltmodell/3d/eg.gltf --keep
+ * npm run smoke:gui -- --port <port> --vault 3d-codeblocks
+ * npm run smoke:gui -- --port <port> --model weltmodell/3d/eg.gltf --keep
  * npm run smoke:gui -- --section basis --vault outpost-worldbuilding
  * ```
  *
- * ⚠️ Zwei Handgriffe, die beim Start regelmaessig Zeit kosten:
- * - `quit` und `open` NICHT in einer Kette absetzen — das Beenden ist noch nicht durch, `open`
- *   trifft die sterbende Instanz, und danach laeuft gar kein Obsidian. Zweiter `open`-Aufruf greift.
+ * ⚠️ Ein Handgriff, der beim Start regelmaessig Zeit kostet:
  * - Bei mehreren offenen Fenstern verlangt der Treiber `--vault <name>` und bricht sonst ab
  *   (mit Ansage — er raet das Fenster nicht).
  *
@@ -54,7 +45,6 @@
  * bleibt die View leer und man debuggt ein Phantom (CORE-TEST-02).
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -66,6 +56,7 @@ import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connec
 import {
   Cdp,
   clearNotices,
+  bereiteInstanzVor,
   clickReal,
   closeExtraLeaves,
   notices,
@@ -5396,7 +5387,10 @@ function assertDeployedBuildMatches(vault: string | undefined): void {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const flag = (name: string): string | undefined => args.value(name);
-  const port = Number(flag("port") ?? 9222);
+  const port = Number(flag("port"));
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error("--port <1024-65535> ist Pflicht (kein Standardport: 9222 gehoert der regulaeren Instanz). Beispiel: npm run smoke:gui -- --port 9390 --vault 3d-codeblocks");
+  }
   const keep = args.has("keep");
   const modelArg = flag("model");
   const vault = flag("vault");
@@ -5511,19 +5505,6 @@ async function main(): Promise<void> {
     // (`.tdcb-block` = 0, kein Notiztext), obwohl `app.workspace` die Datei korrekt als
     // aktiv meldete. Man debuggt dann ein Phantom: Zustand richtig, Anzeige nicht da.
     await cdp.send("Page.bringToFront");
-    if (process.platform === "darwin") {
-      try {
-        execFileSync("osascript", ["-e", 'tell application "Obsidian" to activate']);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      } catch {
-        console.log("  (Hinweis: `osascript activate` schlug fehl — Fenster ggf. von Hand nach vorn holen)");
-      }
-      // NACH dem Aktivieren nochmal: `activate` holt die App nach vorn und darin das
-      // zuletzt benutzte Fenster — bei mehreren offenen Vaults ist das nicht unseres.
-      await cdp.send("Page.bringToFront");
-      await new Promise((resolve) => setTimeout(resolve, 800));
-    }
-
     // Fokus-Emulation: bei mehreren offenen Obsidian-Fenstern bekommt unseres den
     // echten Tastaturfokus oft nicht (die App hat genau ein Key-Window). Chromium
     // kann dem Renderer den Fokus vorspielen — damit entfällt die Hintergrund-
@@ -5555,6 +5536,9 @@ async function main(): Promise<void> {
     // Ohne diesen Schritt misst der Smoke den zuletzt geladenen Stand und meldet ihn als
     // Ergebnis für den gerade gebauten — aufgefallen 2026-08-14 in der Gegenprobe: eine
     // absichtlich kaputte Version lief mit 13/13 grün durch.
+    // Frisches Profil: Vertrauensdialog bestätigen, Restricted Mode aufheben, Plugin laden (Dach-AGENTS § Staging-Vaults).
+    const instanz = await bereiteInstanzVor(cdp, { pluginIds: [PLUGIN_ID], nurVault: "3d-codeblocks", sprache: "en" });
+    if (instanz.plugins[PLUGIN_ID] === "fehlt") console.error(`bereiteInstanzVor: ${instanz.hinweis}`);
     const plugin = await cdp.evaluate<{ ok: boolean; version?: string }>(`
       const id = ${JSON.stringify(PLUGIN_ID)};
       if (app.plugins.plugins[id]) {

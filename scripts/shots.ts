@@ -10,30 +10,20 @@
  *
  * ## Ablauf
  *
- * ⚠️ **Vor dem Quit koordinieren — Obsidian ist geteilte Infrastruktur.** Dieses Rezept
- * braucht den frischen Start (ein Bild pro Start, jeder Lauf hinterlaesst Zustand); Mitnutzen ist
- * hier keine Alternative. Aber Obsidian ist Single-Instance: der Quit trifft die Instanz, an der
- * moeglicherweise eine andere Session arbeitet, und zerstoert deren Zustand. Der eigene Lauf ist
- * danach sauber gruen; der Schaden faellt nicht auf.
+ * ⚠️ **Aufnahmen laufen in einer eigenen Zweitinstanz** (eigenes `--user-data-dir`, eigener Port; die
+ * reguläre Instanz wird nie beendet). `--port` ist Pflicht. Vorher prüfen, dass der Port frei ist:
  *
  * ```bash
- * lsof -nP -iTCP:9222 -sTCP:LISTEN >/dev/null && echo "belegt — erst fragen, wem"
+ * lsof -nP -iTCP:<port> -sTCP:LISTEN >/dev/null && echo "belegt — anderen Port wählen"
  * ```
  *
- * Hoert der Port, haengt jemand dran: **erst fragen, dann quitten.** ⚠️ Und die Pruefung ersetzt die
- * Frage nicht — sie zeigt aktive CDP-Treiber, aber nicht, wer ein Fenster offen haelt oder auf den
- * Port wartet; am 2026-08-30 haette sie einen zwei Stunden alten Reindex nicht gezeigt, denn der
- * hing an Ollama, nicht am Port.
- *
  * ```bash
- * export STAGING_VAULTS_DIR="$HOME/StagingVaults"   # einmalig
  * npm run build && npm run shots -- --setup         # Vault aus dem Fixture bauen
  *
- * osascript -e 'quit app "Obsidian"'                # Handarbeit: Debug-Port
- * open -a Obsidian --args --remote-debugging-port=9222
+ * /Applications/Obsidian.app/Contents/MacOS/Obsidian --user-data-dir=<profil> --remote-debugging-port=<port> &
  * #   ... den Aufnahme-Vault oeffnen und einmalig als vertrauenswuerdig markieren
  *
- * npm run shots                                     # alles aufnehmen
+ * npm run shots -- --port <port>                   # alles aufnehmen
  * npm run shots -- --only hero.png                  # ein Bild nachziehen
  * npm run shots -- --list                           # Vertrag anzeigen
  * ```
@@ -678,24 +668,24 @@ async function main(): Promise<void> {
       console.log(`  ${zeile}`);
     }
     console.log(
-      "\n⚠️  Lief Obsidian waehrend dieses Setups, muss es JETZT neu starten. --setup hat\n" +
+      "\n⚠️  Lief eine Zweitinstanz waehrend dieses Setups, muss sie JETZT neu starten. --setup hat\n" +
       "   Notizen, Layout und Plugin-Einstellungen ersetzt; ein laufendes Obsidian haelt\n" +
       "   den alten Stand im Speicher und schreibt ihn zurueck. Der naechste Aufnahme-Lauf\n" +
       "   scheitert dann an jedem Bild mit \"Zustand kam nicht zustande\".\n" +
-      "\n⚠️  Erst prüfen, ob schon ein Obsidian läuft — ein Quit zerstört den Zustand\n" +
-      "    einer fremden Session, und der eigene Lauf ist danach trotzdem grün:\n" +
-      "      lsof -nP -iTCP:9222 -sTCP:LISTEN\n" +
-      "    Hört der Port, hängt jemand dran: erst fragen, dann quitten.\n" +
-      "\nObsidian mit offenem Debug-Port starten und diesen Vault oeffnen:\n" +
-      "  osascript -e 'quit app \"Obsidian\"'\n" +
-      "  open -a Obsidian --args --remote-debugging-port=9222\n" +
+      "\nEigene Zweitinstanz starten (Profil und Port gehoeren dieser Session; die reguläre Instanz\n" +
+      "wird nie beendet):\n" +
+      "  /Applications/Obsidian.app/Contents/MacOS/Obsidian --user-data-dir=<profil> --remote-debugging-port=<port> &\n" +
+      "Dann: npm run shots -- --port <port>\n" +
       "Beim ersten Mal fragt Obsidian, ob es dem Vault-Autor vertraut — bestaetigen,\n" +
       "sonst laeuft das Plugin nicht und jedes Bild zeigt einen rohen Codeblock.",
     );
     return;
   }
 
-  const port = Number(flag("--port") ?? env.SHOTS_PORT ?? 9222);
+  const port = Number(flag("--port") ?? env.SHOTS_PORT);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error("--port <1024-65535> ist Pflicht (kein Standardport: 9222 gehoert der regulaeren Instanz). Beispiel: npm run shots -- --port 9390");
+  }
   const nur = flag("--only");
 
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
