@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Prompt panel, answer area:** the streamed answer now follows to the end also when a large block arrives in one piece (several lines at once), as long as you are at the bottom; before, the area stopped following after the first big piece. If you scroll up while an answer streams, it still does not pull you back down. (Measured in the smoke run with pieces of 300 characters: distance to the end 2,480 px before, 1 px now.)
+
+### Changed
+
+- **Settings, endpoint list:** the "move up" and "remove endpoint" buttons stay together in one row instead of the trash can standing alone on a second line; the key and model fields are a little narrower, the address stays fully visible.
+- **Settings, section "Request":** for an endpoint whose model family is not known yet, it now says "not detected yet" with a note that this is normal for a freshly entered endpoint (and that the LLM Endpoint Manager keeps family and backend), and the fields read "not sent yet — waiting for the model family" instead of "unknown".
+- Behaviour of the shared kit pins taken with the update: obsidian-kit 0.59.0 and code-kit 0.24.0 (from 0.56.0 and 0.23.0). The other changes in 0.56.1–0.58.0 (kit mock additions, `sanitizeChoice`, `pruefeLinearFuzz`, `fetchEndpointContext`, embedding rows without "server picks") touch modules this plugin does not use or tests only.
+
 ## [0.9.0] — 2026-10-12
 
 ### Fixed

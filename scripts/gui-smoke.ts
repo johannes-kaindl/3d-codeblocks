@@ -4399,7 +4399,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4415,6 +4415,7 @@ const PP_TITEL = {
   PP13: "Folge-Regel: Hochscrollen mitten im Strom wird respektiert",
   PP14: "Kontrolle: ohne Störung folgt der Strom bis zum Ende",
   PP15: "Denkblock live: der Denk-Text ist während des Stroms sichtbar und wächst",
+  PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
   PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
 } as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
@@ -4542,15 +4543,21 @@ const ppStreamAnswer = (): string => {
 interface PpStreamRow { len: number; rl: number; st: number; overflow: number; gap: number; open: boolean; vis: boolean; grew: boolean; disturbed: boolean }
 interface PpStreamRun { rows: PpStreamRow[]; disturbed: { len: number; overflow: number; st0: number } | null; maxOverflow: number; finalPhase: string }
 
-async function ppStreamRun(cdp: Cdp, sub: Substitute, stoere: boolean): Promise<PpStreamRun | null> {
+interface PpStreamForm { unit: number; takt: number; reasoning: string }
+const PP_STREAM_TOKEN: PpStreamForm = { unit: PP_STREAM_UNIT, takt: PP_STREAM_TAKT_MS, reasoning: PP_STREAM_REASONING };
+/** Absatzgrosse Stuecke (ein Push mit mehreren Zeilen, ~6 Zeilen im 14em-Rumpf): bei „unten?“ erst NACH dem Wachsen gemessen
+ *  (obsidian-kit < 0.59.0) springt der Abstand ueber die Folge-Schwelle von 40 px, und der Strom folgt nach dem ersten Absatz nicht mehr. */
+const PP_STREAM_PARAGRAPH: PpStreamForm = { unit: 300, takt: 150, reasoning: "" };
+
+async function ppStreamRun(cdp: Cdp, sub: Substitute, stoere: boolean, form: PpStreamForm = PP_STREAM_TOKEN): Promise<PpStreamRun | null> {
   if (!(await ppOpenFresh(cdp))) return null;
   await ppType(cdp, PP_CREATE_PROMPT);
   sub.queue({
     text: ppStreamAnswer(),
-    reasoning: PP_STREAM_REASONING,
-    laenge: PP_STREAM_UNIT,
-    takt: PP_STREAM_TAKT_MS,
-    nachlaufMs: 8 * PP_STREAM_TAKT_MS,
+    ...(form.reasoning !== "" ? { reasoning: form.reasoning } : {}),
+    laenge: form.unit,
+    takt: form.takt,
+    nachlaufMs: 8 * form.takt,
   });
   const armed = await cdp.evaluate<boolean>(`
     const area = document.querySelector(".tdcb-prompt .tdcb-prompt-stream");
@@ -5307,6 +5314,22 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           const open = reasoningRows.every((x) => x.open);
           const visible = reasoningRows.every((x) => x.vis);
           ppRecord("PP15", T.PP15, open && visible && distinct >= 2, `${distinct} Wachstumsstände (${reasoningRows[0]?.rl}→${reasoningRows[reasoningRows.length - 1]?.rl} Zeichen) · geöffnet: ${open} · sichtbar: ${visible}`);
+        }
+      }
+      // PP16: dieselbe Kontrolle mit absatzgrossen Stuecken (Befund kuro-w20): der Strom folgt bei jedem Stand mit Ueberlauf.
+      const paragraph = await ppStreamRun(cdp, sub, false, PP_STREAM_PARAGRAPH);
+      if (paragraph === null) {
+        ppNothing("PP16", T.PP16, "das Panel öffnete nicht");
+      } else {
+        const g = growing(paragraph);
+        if (paragraph.finalPhase !== "ok" && paragraph.finalPhase !== "error") {
+          ppNothing("PP16", T.PP16, `der Strom kam nicht zum Ende (Status ${paragraph.finalPhase})`);
+        } else if (g.length < 2) {
+          ppNothing("PP16", T.PP16, `der Überlauf erreichte 80 px nicht oft genug (höchstens ${Math.round(paragraph.maxOverflow)} px, ${g.length} Stände)`);
+        } else {
+          const worst = Math.max(...g.map((x) => x.gap));
+          const lastGap = g[g.length - 1]?.gap ?? 0;
+          ppRecord("PP16", T.PP16, worst < 40 && lastGap < 40, `${g.length} Stände mit Überlauf ≥ 80 px, Stücke zu ${PP_STREAM_PARAGRAPH.unit} Zeichen im Takt ${PP_STREAM_PARAGRAPH.takt} ms · größter Abstand zum Ende ${Math.round(worst)} px (erwartet < 40), beim letzten Stück ${Math.round(lastGap)} px`);
         }
       }
       // PP13: Stoerung (scrollTop = 0), danach darf der Bereich nicht wieder zum Ende springen.
