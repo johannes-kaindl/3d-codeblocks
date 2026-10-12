@@ -1,7 +1,7 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.53.0" },
-    "code-kit": { "ref": "0.21.1" }
+    "obsidian-kit": { "ref": "0.56.0" },
+    "code-kit": { "ref": "0.23.0" }
   },
   "targets": [
     {
@@ -10,7 +10,7 @@
         "num", "settings_schema", "secrets", "redact", "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "stream-blocks", "i18n", "replace-span"
+        "think-toggle", "timeout", "model-choice", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context"
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
@@ -24,10 +24,10 @@
         "confirm", "folder-suggest", "settings_walker", "help-setting",
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
-        "clock", "stream-area", "hub", "version-list"
+        "clock", "stream-area", "hub", "version-list", "endpoint-plumbing", "embedding-connection", "endpoint-status-text"
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },
-    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": ["kit-css"] }
+    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": ["kit-css", "window-timers"] }
   ]
 }
