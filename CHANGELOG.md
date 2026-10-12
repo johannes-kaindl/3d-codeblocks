@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-12
+
 ### Fixed
 
 - Reading the JSON out of a model answer is no longer quadratic for two more kinds of degenerate answer (measured on a prompt-panel answer, 2,000 / 10,000 / 20,000 / 50,000 repetitions): `\"[` repeated took 10 / 157 / 657 / 3,593 ms and `[` repeated, then `x`, then `]` repeated took 28 / 566 / 2,048 / 11,391 ms; both now take a few milliseconds (1 / 1 / 1 / 4 ms and 1 / 3 / 5 / 10 ms). The scan is the shared kit module `llm-json` now; an answer that is so degenerate that it reaches the work budget is reported as incomplete, as an unclosed bracket is.
