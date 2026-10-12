@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diffParts, formatDiff } from "../../../src/core/shapes/diff";
+import { pruefeLinear } from "../../vendor/kit/linear-probe";
 import type { ShapeDraft } from "../../../src/core/shapes/types";
 
 const P = (over: Partial<ShapeDraft>): ShapeDraft => ({ kind: "box", name: "Platte", size: [1.2, 0.05, 0.7], at: [0, 0.725, 0], rot: [0, 0, 0], color: "#8b5a2b", ...over });
@@ -65,13 +66,17 @@ describe("diffParts", () => {
     const d = diffParts([P({ at: [0, 0, 0] })], [P({ at: [NaN, Infinity, -Infinity] })]);
     expect(d.map(formatDiff)).toEqual(["Platte: at 0 0 0 → NaN Infinity -Infinity"]);
   });
-  it("handles 5000 parts without quadratic behaviour", () => {
-    const before = Array.from({ length: 5000 }, (_, i) => P({ name: `T${i}` }));
+  const paare = (n: number): [ShapeDraft[], ShapeDraft[]] => {
+    const before = Array.from({ length: n }, (_, i) => P({ name: `T${i}` }));
     const after = before.map((p, i) => (i % 2 ? p : { ...p, at: [1, 0, 0] as [number, number, number] })).reverse();
-    const t = performance.now();
-    const d = diffParts(before, after);
-    const ms = performance.now() - t;
-    expect(d).toHaveLength(2500);
-    expect(ms).toBeLessThan(500);
+    return [before, after];
+  };
+  it("5000 parts: every second one changed", () => {
+    const [before, after] = paare(5000);
+    expect(diffParts(before, after)).toHaveLength(2500);
+  });
+  it("stays linear in the number of parts", () => {
+    const r = pruefeLinear(([before, after]: [ShapeDraft[], ShapeDraft[]]) => diffParts(before, after), paare);
+    expect(r.linear, r.message).toBe(true);
   });
 });

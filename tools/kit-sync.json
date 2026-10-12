@@ -28,6 +28,6 @@
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },
-    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": ["kit-css", "window-timers"] }
+    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": ["kit-css", "window-timers", "linear-probe"] }
   ]
 }

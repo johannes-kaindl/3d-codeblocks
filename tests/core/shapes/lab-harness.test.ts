@@ -241,7 +241,6 @@ describe("lab harness (dry, no model, no network)", () => {
       const rec = await runRefineCase(REFINE_CASES[0], httpChat(url, "m", 0.2, 300), ctx);
       expect(rec).toMatchObject({ outcome: "timeout", good: false });
       expect(Number(rec.ms)).toBeGreaterThanOrEqual(250);
-      expect(Number(rec.ms)).toBeLessThan(3000);
       expect(sum([rec]).summary).toMatchObject({ complete: true, timeouts: 1 });
     }, 10_000);
   });

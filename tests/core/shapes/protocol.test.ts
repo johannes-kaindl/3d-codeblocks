@@ -8,6 +8,7 @@ import {
   readPartsAnswer,
   REFINE_SYSTEM,
 } from "../../../src/core/shapes/protocol";
+import { pruefeLinear } from "../../vendor/kit/linear-probe";
 
 describe("readPartsAnswer", () => {
   it("reads a parts object with leading whitespace", () => {
@@ -24,18 +25,10 @@ describe("readPartsAnswer", () => {
 });
 
 describe("readPartsAnswer: Laufzeit", () => {
-  const zeit = (text: string) => {
-    const t = performance.now();
-    readPartsAnswer(text);
-    return performance.now() - t;
-  };
-  // Quadratisch waere 5x Eingabe = 25x Zeit; linear 5x. Grosszuegig gegen Rauschen, dazu harte Obergrenze.
+  // Quadratisch waere 5x Eingabe = 25x Zeit; die Probe misst n = 1 000, 10 000, 50 000 (Quotient < 12 oder unter 50 ms).
   const linear = (bau: (n: number) => string) => {
-    zeit(bau(1000));
-    const klein = zeit(bau(10_000));
-    const gross = zeit(bau(50_000));
-    expect(gross).toBeLessThan(Math.max(klein, 5) * 15);
-    expect(gross).toBeLessThan(1000);
+    const r = pruefeLinear(readPartsAnswer, bau);
+    expect(r.linear, r.message).toBe(true);
   };
   it("viele offene Klammern bleiben linear", () => linear((n) => "[1,".repeat(n)));
   it("viele offene geschweifte Klammern bleiben linear", () => linear((n) => '{"a":'.repeat(n)));
