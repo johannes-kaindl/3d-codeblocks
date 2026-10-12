@@ -41,6 +41,11 @@ describe("readPartsAnswer: Laufzeit", () => {
   it("viele offene geschweifte Klammern bleiben linear", () => linear((n) => '{"a":'.repeat(n)));
   it("viele nie geschlossene think-Tags bleiben linear", () => linear((n) => "<think>".repeat(n) + '{"parts":[]}'));
   it("viele Zeichen im String zwischen Klammern bleiben linear", () => linear((n) => '["'.repeat(n)));
+  // Zwei quadratische Familien (Fuzz von kitcc-w18, 2026-10-12): ein Escape frisst das schliessende Anfuehrungszeichen
+  // jedes Strings, und verschachtelte Spannen sind alle ausgeglichen, parsen aber alle an derselben Stelle nicht.
+  it("Escape vor Anfuehrungszeichen und Klammer bleibt linear", () => linear((n) => '\\"['.repeat(n)));
+  it("verschachtelte ausgeglichene Spannen, die nicht parsen, bleiben linear", () =>
+    linear((n) => "[".repeat(n) + "x" + "]".repeat(n)));
   it("findet die Liste nach vielen offenen Klammern, die später geschlossen werden", () => {
     expect(readPartsAnswer(`[1,[2,${'{"parts":[{"shape":"box"}]}'}`)).toEqual({ ok: true, parts: [{ shape: "box" }] });
   });
