@@ -66,7 +66,7 @@ import {
   requireVisible,
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
-import { createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
+import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
 
 
 const PLUGIN_ID = "three-d-codeblocks";
@@ -243,9 +243,18 @@ const CAMERA_BLOCK_TITLE = "Kamera-Probe";
 
 /** Bilanz in vier Zustaenden (CORE-TEST-19) aus dem zentralen Modul `tools/obsidian-cdp/bilanz.ts`; die Aufrufstellen
  *  unten behalten ihre Namen. `skipped` heisst „bewusst nicht gemessen“, `nothingMeasured` „haette gemessen werden sollen
- *  und konnte nicht“ (eine Voraussetzung fehlt) — beides zaehlt im Nenner, nie als gruen. Ohne Soll-Liste (`punkte`):
- *  ein Lauf fuehrt je nach `--section` nur einen Teil der Punkte aus, der Nenner ist die Zahl der Eintraege. */
-const bilanz = createBilanz();
+ *  und konnte nicht“ (eine Voraussetzung fehlt) — beides zaehlt im Nenner, nie als gruen. Mit Soll-Liste (`punkte`):
+ *  der Nenner ist die Soll-Liste `PUNKTE_JE_SECTION` der gewaehlten Abschnitte (siehe `main`). */
+let bilanz: Bilanz = createBilanz();
+/** Soll-Liste des laufenden Abschnitts-Satzes; `skipIds` verbucht die Punkte einer Kennung (`B2`, `SH6b` …) unter ihrem echten Namen. */
+let sollListe: readonly string[] = [];
+function skipIds(ids: readonly string[], reason: string): void {
+  for (const id of ids) {
+    const namen = sollListe.filter((n) => n.startsWith(`${id}. `));
+    if (namen.length !== 1) throw new Error(`Kennung ${id} trifft ${namen.length} Namen in der Soll-Liste`);
+    bilanz.skipped(namen[0]!, reason);
+  }
+}
 const record = (name: string, passed: boolean, detail: string): void => bilanz.record(name, passed, detail);
 const skipped = (name: string, reason: string): void => bilanz.skipped(name, reason);
 const nothingMeasured = (name: string, reason: string): void => bilanz.unmeasured(name, reason);
@@ -794,7 +803,7 @@ async function sectionSaveView(cdp: Cdp, model: string): Promise<void> {
   );
   const live = await activateBlock(cdp, 0, VIEW_BLOCK_TITLE);
   if (!live) {
-    record("V1. Modell wird live und liefert eine Ansicht", false, "kein Controller mit getView()");
+    record("V1. Drehen per echter Maus-Interaktion bewegt die Kamera", false, "Modell wird nicht live: kein Controller mit getView()");
     return;
   }
 
@@ -1260,7 +1269,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     rendered ? `${rendered.colors} Farbtöne · ${rendered.width}px breit` : await describeScene(cdp),
   );
   if (!rendered) {
-    skipped("B2-B12", "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
+    skipIds(["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12"], "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
     return;
   }
 
@@ -1462,7 +1471,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   // und geprüft wird das Bild, nicht der Dateiinhalt: dass die Datei anders ist, weiß
   // der Smoke ohnehin, die Frage ist, ob der Viewport das mitbekommt.
   if (!probe.endsWith(".gltf")) {
-    skipped("B8. Regenerierung", `Prüfmodell ist ${probe} — die Änderung braucht Text-glTF`);
+    skipped("B8. Eine extern neu erzeugte Datei erneuert die Ansicht ohne Neustart", `Prüfmodell ist ${probe} — die Änderung braucht Text-glTF`);
   } else {
     const regenerated = await cdp.evaluate<{ before: number | null; after: number | null; moved: string }>(`
       ${SAMPLER}
@@ -1849,7 +1858,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
   createdNotes.add(SMOKE_NOTE_SPLIT);
 
   if (!split.ok) {
-    skipped("B18. Mehrteiliges glTF", split.grund);
+    skipped("B18. Ein mehrteiliges glTF findet seine .bin im Vault", split.grund);
   } else {
     await closeExtraLeaves(cdp);
     await openNote(
@@ -1979,7 +1988,7 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
     return file ? file.path : null;
   `);
   if (!other) {
-    skipped("F3. Zweites Format", "keine .glb/.stl im Vault — der Punkt läuft mit, sobald eine da ist");
+    skipped("F3. Das zweite Format lädt in der Datei-Ansicht", "keine .glb/.stl im Vault — der Punkt läuft mit, sobald eine da ist");
   } else {
     await cdp.evaluate(`
       const file = app.vault.getAbstractFileByPath(${JSON.stringify(other)});
@@ -2002,7 +2011,7 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
       40_000,
     );
     record(
-      `F3. Auch ${other.slice(other.lastIndexOf("."))} lädt in der Datei-Ansicht`,
+      "F3. Das zweite Format lädt in der Datei-Ansicht",
       otherStats !== null && otherStats.message === "",
       otherStats ? `${otherStats.colors} Farbtöne · ${other}` : `nichts gezeichnet (${other})`,
     );
@@ -2068,7 +2077,7 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
     return text.length < 200000 ? text : null;
   `);
   if (!gltfSource) {
-    skipped("F6/F7. gltf-Codeblock", "kein Text-glTF unter 200 KB im Vault, aus dem sich ein Block bauen ließe");
+    skipIds(["F6", "F7"], "kein Text-glTF unter 200 KB im Vault, aus dem sich ein Block bauen ließe");
   } else {
     await closeExtraLeaves(cdp);
     await openNote(
@@ -2633,8 +2642,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     };
   `);
   if (!probe) {
-    skipped(
-      "Edit mode (E1-E8)",
+    skipIds(["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"],
       "Prüfmodell ist kein Text-glTF mit mindestens zwei Top-Level-Knoten, von denen einer ein ungeteiltes mesh hat — daraus lässt sich kein auswählbarer gesperrter Knoten bauen",
     );
     return;
@@ -2675,7 +2683,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     30_000,
   );
   if (!awake) {
-    record("E1. Edit-Modus betreten", false, `Block nicht weckbar — ${await describeScene(cdp)}`);
+    record("E1. 'Edit model' schaltet den Bearbeitungsmodus ein", false, `Block nicht weckbar — ${await describeScene(cdp)}`);
     return;
   }
 
@@ -2880,7 +2888,7 @@ async function sectionEditMode(cdp: Cdp, model: string): Promise<void> {
     );
   } else {
     skipped(
-      "E8. Geteiltes Mesh meldet sich beim Klick",
+      "E8. Ein Klick auf einen Knoten mit geteiltem Mesh wählt nichts aus — und meldet warum",
       "Prüfmodell hat keinen zweiten Top-Level-Knoten mit geteiltem mesh-Index außer dem gesperrten",
     );
   }
@@ -3218,6 +3226,7 @@ async function sectionClickRace(cdp: Cdp, model: string): Promise<void> {
     record("R0. Block aktivierbar (Voraussetzung der Klick-Sturm-Probe)", false, "kein Controller — Probe übersprungen");
     return;
   }
+  record("R0. Block aktivierbar (Voraussetzung der Klick-Sturm-Probe)", true, "Controller mit Klick-Fläche");
 
   const FIT = `[...document.querySelectorAll(".tdcb-panel-actions button")].find((b) => b.textContent === "Fit")`;
   const N = 20;
@@ -3243,7 +3252,7 @@ async function sectionClickRace(cdp: Cdp, model: string): Promise<void> {
   const baseline = await cdp.evaluate<number>(`return window.__tdcbClicks;`);
   record("R1. Grundlinie: 20 atomare Klicks ohne Sturm kommen alle an", baseline === N, `${baseline}/${N}`);
   if (baseline !== N) {
-    record("R2/R3. Sturm-Fälle übersprungen", false, "Grundlinie schon nicht 20/20 — alles Folgende wäre wertlos");
+    skipIds(["R2", "R3"], "Grundlinie schon nicht 20/20 — alles Folgende wäre wertlos");
     await cdp.evaluate(`document.removeEventListener("click", window.__tdcbClickHandler, true); return true;`);
     return;
   }
@@ -3440,9 +3449,9 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
   for (const path of reset.wiped) console.log(`  Aufgeräumt (Rest eines früheren Laufs): ${path}`);
   const remaining = reset.remaining;
   if (remaining.length > 0) {
-    for (const name of ["SH6", "SH7", "SH8", "SH13", "SH14", "SH15", "SH16", "SH17", "SH9", "SH10", "SH11", "SH12"]) {
-      skipped(name, `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`);
-    }
+    skipIds(["SH6", "SH6b", "SH7", "SH8", "SH13", "SH14", "SH14b", "SH15", "SH15b", "SH16", "SH16b", "SH17", "SH9", "SH10", "SH11", "SH12", "SH12b"],
+      `${remaining.join(", ")} liegt nach dem Zurücksetzen noch im Vault — Besitz nicht bewiesen, nichts gemessen`,
+    );
     return;
   }
   shapesFileOwned = true;
@@ -3501,17 +3510,20 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       const visibleLabels = s.pills.filter((p) => p.visible).map((p) => p.label);
       const pressed = s.pills.filter((p) => p.pressed === "true");
       const expectedPressed = wide ? "Split" : "Model";
-      record(
-        "SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen",
+      const sixOk =
         visibleLabels.join("|") === expectedLabels.join("|") &&
           pressed.length === 1 &&
           pressed[0]?.visible === true &&
           pressed[0]?.label === expectedPressed &&
           s.colors >= 3 &&
-          s.editors === 1,
+          s.editors === 1;
+      record(
+        "SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen",
+        sixOk,
         `Breite ${s.width} px · sichtbar: ${visibleLabels.join("/")} (erwartet ${expectedLabels.join("/")}) · aria-pressed=true: ${pressed.map((p) => p.label).join("/") || "keine"} (erwartet genau ${expectedPressed}) · ${s.colors} Farbtöne · ${s.editors} Texteditor`,
       );
       if (!wide) skipped("SH6b. Drei Pillen und Start in Split ab 700 px", `Ansichtsbreite nur ${s.width} px — der breite Fall wurde nicht gemessen`);
+      else record("SH6b. Drei Pillen und Start in Split ab 700 px", sixOk, `Breite ${s.width} px: drei Pillen, Split gedrückt (zusammen mit SH6 gemessen)`);
     }
 
     // --- SH7. Tippen rendert neu --------------------------------------------
@@ -3764,6 +3776,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
           : " | Split nicht angeboten (Breite < 700 px) — Split-Teil nicht gemessen"),
     );
     if (!wideNow) skipped("SH14b. Trennlinie im Split", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
+    else record("SH14b. Trennlinie im Split", splitEnds?.reached === true, `Trennlinie ${s14?.splitDivider ?? "?"} px, Editor ${s14?.editorH ?? "?"} px, Modell ${s14?.modelH ?? "?"} px ≤ Fläche ${s14?.bodyH ?? "?"} px`);
 
     // --- SH15. Pfeiltasten schieben die Ansicht (Lesemodus-Block und Live Preview) -----------------
     // Ungemessen waren: bekommt die Flaeche per echtem Klick den Fokus (tabIndex -1: fokussierbar, kein
@@ -3958,6 +3971,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       `5 Zeilen (erwartet Editor = 5×Zeile + Rahmen/Padding ± 1 Zeile, < 50 % der Fläche): ${describeHeight(f5)} | 200 Zeilen (erwartet Editor = Textspalte innen ± 2 px, scrollt innen): ${describeHeight(f200)} | leer (erwartet ≥ 3 Zeilenhöhen): ${describeHeight(f0)} | Split, 5 Zeilen (erwartet wie die erste, Modell ≥ Fläche − 2 px): ${wide16 ? describeHeight(f4) : "Split nicht angeboten (Breite < 700 px) — nicht gemessen"}`,
     );
     if (!wide16) skipped("SH16b. Split-Teil der Editor-Höhe", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
+    else record("SH16b. Split-Teil der Editor-Höhe", split_ok, `Split: Editor ${f4?.editorH ?? "?"} px, Fläche ${f4?.bodyH ?? "?"} px`);
 
     // --- SH17. Der Editor-Rahmen bleibt durchgezogen, auch im Fokus -----------------------------
     // CodeMirrors Basisthema setzt auf den fokussierten Editor `outline: 1px dotted #212121`; das sah wie ein
@@ -4330,10 +4344,11 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
       s ? `${s.opened ? "Menü offen" : "Menü NICHT offen"}: Block-Eintrag ${count(s, titleBlock)}${s.iconOf[titleBlock] ? " mit svg" : ""}, Datei-Eintrag ${count(s, titleFile)}${s.iconOf[titleFile] ? " mit svg" : ""}` : "Cursor nicht setzbar";
     if (menuMeasured) {
       record(
-        "SH12. Befehle sind registriert, nur am richtigen Ort verfügbar, das echte Kontextmenü trägt die Einträge mit Icon",
-        namesOk && gatingOk && menuOk,
+        "SH12. Befehle sind registriert und nur am richtigen Ort verfügbar",
+        namesOk && gatingOk,
         `Namen: ${registered.block} / ${registered.file} · verfügbar (Überschrift | im Block | auf Embed) Block→Datei ${onHeading?.block}|${inBlock?.block}|${onEmbed?.block}, Datei→Block ${onHeading?.file}|${inBlock?.file}|${onEmbed?.file} · Kontextmenü Überschrift [${describe(onHeading)}] · im Block [${describe(inBlock)}] · auf Embed [${describe(onEmbed)}]`,
       );
+      record("SH12b. Kontextmenü-Einträge mit Icon", menuOk, `Block-Eintrag ${count(inBlock, titleBlock)}${inBlock?.iconOf[titleBlock] ? " mit svg" : ""} im Block, Datei-Eintrag ${count(onEmbed, titleFile)}${onEmbed?.iconOf[titleFile] ? " mit svg" : ""} auf dem Embed, keiner auf der Überschrift`);
     } else {
       record(
         "SH12. Befehle sind registriert und nur am richtigen Ort verfügbar",
@@ -4386,6 +4401,20 @@ const PP_MODEL = "smoke-model";
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
 const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12"] as const;
+const PP_TITEL = {
+  PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
+  PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
+  PP3: "Erzeugen streamt in Stücken und zeigt eine Vorschau",
+  PP4: "Übernehmen als Codeblock schreibt einen shapes-Block in die Notiz",
+  PP5: "Ändern über die Aktionsleiste: Ziel, Diff, nur die Platte-Zeile ändert sich",
+  PP6: "Abbruch: „Stopped.“, keine Runde, der Server sah den Abbruch",
+  PP7: "Aktionsleiste: jeder Knopf trägt ein Icon, „Edit in prompt panel“ öffnet das Panel",
+  PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
+  PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
+  PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
+  PP12: "Altwert llmModel im data.json: nach dem Laden steht er in der Zeile, der Schlüssel ist weg, keine Zeile „Model“, keine Option „global model“",
+  PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
+} as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
 const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
@@ -4840,20 +4869,7 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
 
 async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
   ppDone.clear();
-  const T = {
-    PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
-    PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
-    PP3: "Erzeugen streamt in Stücken und zeigt eine Vorschau",
-    PP4: "Übernehmen als Codeblock schreibt einen shapes-Block in die Notiz",
-    PP5: "Ändern über die Aktionsleiste: Ziel, Diff, nur die Platte-Zeile ändert sich",
-    PP6: "Abbruch: „Stopped.“, keine Runde, der Server sah den Abbruch",
-    PP7: "Aktionsleiste: jeder Knopf trägt ein Icon, „Edit in prompt panel“ öffnet das Panel",
-    PP8: "Übernehmen nach Handänderung am Block wird abgelehnt, Notiz unverändert",
-    PP9: "Block mit Leerzeile am Rumpfende: Übernehmen wendet an oder lehnt sicher ab",
-    PP10: "Die Ersatz-Zeile ist ERREICHBAR (Status is-ok, Modell in der Liste), nicht nur vorhanden",
-    PP12: "Altwert llmModel im data.json: nach dem Laden steht er in der Zeile, der Schlüssel ist weg, keine Zeile „Model“, keine Option „global model“",
-    PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
-  } as const;
+  const T = PP_TITEL;
   const nothingFor = (reason: string): void => {
     for (const id of PP_IDS) if (!ppDone.has(id)) ppNothing(id, T[id], reason);
   };
@@ -5318,6 +5334,130 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
   }
 }
 
+/** Soll-Liste (Nenner der Bilanz): jeder Punktname, den ein Abschnitt aufzeichnen kann, nach Abschnitt. Bei `--section` ist die
+ *  Teilmenge das Soll; ein Name ausserhalb wirft in `createBilanz`. Jeder Punkt hat GENAU EINEN Namen (Erfolg, Fehlschlag und
+ *  Uebersprungen zeichnen dieselbe Zeile auf) — Sammelnamen wie „B2-B12“ gibt es nicht, `skipIds` verbucht jede Kennung einzeln. */
+const PUNKTE_VORLAUF = ["Keine liegen gebliebenen Smoke-Dateien aus einem abgebrochenen frueheren Lauf"] as const;
+const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
+  active: [
+    "1. Modus 'erst auf Klick': beide Blöcke starten als Standbild",
+    "2. Sidebar zeigt zunächst den Platzhalter",
+    "3. Klick aufs Standbild füllt die Sidebar (Smoke-#4-Befund)",
+    "4. 'Save view' ist bedienbar, nicht nur sichtbar",
+    "5. Genau ein Block ist als aktiv markiert",
+    "6. Der Titel des aktiven Blocks hebt sich ab",
+    "7. Der Aktiv-Rahmen liegt auf der Bühne",
+    "8. Der Akzent folgt dem Theme (hell ≠ dunkel)",
+  ],
+  view: [
+    "V1. Drehen per echter Maus-Interaktion bewegt die Kamera",
+    "V2. 'Save view' schreibt eine view:-Zeile in den Block",
+    "V3. Die gemerkte Ansicht steht nach dem Neuöffnen wieder da",
+    "V3b. Ein zweiter Speicherzyklus verschiebt die Ansicht nicht weiter",
+    "V4. Nahe an einem Standardwinkel steht der Name im Block, nicht drei Zahlen",
+    "V5. 'Clear view' entfernt die Zeile wieder (Lesemodus)",
+    "V6. Im Editor gespeichert, per Undo rückgängig",
+    "V7. Sidebar zu → Hover-Leiste erscheint, Sidebar auf → verschwindet",
+    "V8. Der Wechsel läuft ohne Neuaufbau der Notiz",
+    "V9. Im Embed sind 'Save view'/'Clear view' deaktiviert, 'Fit' nicht",
+    "V10. Der deaktivierte Knopf sagt auch, warum",
+    "V11. Die geöffnete Datei zeigt das Modell, kann aber nichts merken",
+    "V12. 'view: quatsch' erzeugt eine Hinweiszeile",
+    "V13. Das Modell bleibt trotz kaputter Ansicht sichtbar",
+    "SMOKE.md 'Ansicht merken' Punkt 5 (fünf Etagen, Aktiv-Rahmen)",
+  ],
+  basis: [
+    "B1. Der Block rendert ein sichtbares Modell (nicht nur ein Canvas)",
+    "B2. Orbit per echter Maus dreht die Kamera",
+    "B3. Das Mausrad ändert die Distanz",
+    "B4. Pan (rechte Maustaste) verschiebt das Bild",
+    "B5. Doppelklick setzt die Ansicht auf den Einpass-Zustand zurück",
+    "B6. Im Split schrumpft der Viewport mit — auch der Renderer-Puffer",
+    "B7. Der Viewport folgt dem Theme (hell ≠ dunkel)",
+    "B8. Eine extern neu erzeugte Datei erneuert die Ansicht ohne Neustart",
+    "B9. Achtmal im Block getippt hinterlässt keine verwaisten Canvas",
+    "B10. Beim Durchscrollen zeigen alle fünf Blöcke ein Modell",
+    "B11. 'Maximum live 3D views' = 2 hält nur zwei Ansichten live",
+    "B12. Das Standbild zeigt das Modell, nicht eine leere Fläche",
+    "B13. Fehlende Datei nennt den Pfad",
+    "B14. Falsche Endung nennt die unterstützten Formate",
+    "B15. Ein Tippfehler im Schlüssel meldet sich, versteckt aber das Modell nicht",
+    "B16. Eine STL-Datei lädt und ist sichtbar",
+    "B17. Die drei Beleuchtungs-Zustände erzeugen drei verschiedene Bilder",
+    "B18. Ein mehrteiliges glTF findet seine .bin im Vault",
+    "SMOKE.md Punkt 9 (Draco-GLB)",
+    "SMOKE.md 'Zusätzlich' (Popout-Fenster)",
+    "SMOKE.md Punkt 8 (Klick-Modus)",
+  ],
+  files: [
+    "F1. Eine 3D-Datei öffnet sich als eigene View und zeigt das Modell",
+    "F2. In der Datei-Ansicht drehen und per Doppelklick zurücksetzen",
+    "F3. Das zweite Format lädt in der Datei-Ansicht",
+    "F4. Ein `![[modell]]`-Embed rendert im Lesemodus",
+    "F5. Die Höhenangabe aus `![[modell|300]]` kommt an",
+    "F6. Ein `gltf`-Codeblock rendert seinen eigenen Quelltext",
+    "F7. Kaputtes glTF-JSON sagt genau das",
+    "SH1. Ein ```shapes-Block rendert seine Teile",
+    "SH2. Eine kaputte Zeile kostet nur sich selbst und wird mit Nummer gemeldet",
+    "SH3. Ein Block ohne gültiges Teil sagt das und zeichnet nichts",
+    "SH4. Dieselbe DSL als Datei rendert über ```3d file: und als Embed",
+    "SH5. Export schreibt eine glTF-Datei, die ihre Quelle nennt",
+    "F8. 'Maximum live 3D views' ist ein Slider von 0 bis 12",
+    "F8b. Die Hilfe-Zeile steht als ERSTE Zeile im Settings-Tab",
+    "F9. 'Maximum live 3D views' = 0 friert nichts ein",
+    "F10. Codeblock und Embed rendern in derselben Notiz nebeneinander",
+    "F11. Codeblock UND Embed folgen dem Theme",
+  ],
+  shapesfile: [
+    "SH6. Die .shapes-Datei öffnet in der eigenen Ansicht mit Pillen",
+    "SH6b. Drei Pillen und Start in Split ab 700 px",
+    "SH7. Tippen schreibt die Datei und rendert das Modell neu",
+    "SH8. Eine kaputte Zeile ist im Text markiert",
+    "SH13. Das Modell der Dateiansicht sitzt in der Mitte und wird bei jeder Größenänderung neu gerahmt (nichts abgeschnitten, auch im schmalen Pane)",
+    "SH14. Text- und Split-Ansicht haben ein sichtbares Ende: Rahmen, Abschlusslinie, im Split eine Trennlinie, Höhen innerhalb der Fläche",
+    "SH14b. Trennlinie im Split",
+    "SH15. Pfeiltasten schieben die Ansicht eines Blocks im Lesemodus (echter Klick fokussiert, echte Tasten)",
+    "SH15b. Pfeiltasten schieben die Ansicht eines Blocks im Live Preview, die Cursorzeile des Editors bleibt",
+    "SH16. Die Höhe des Editors folgt dem Text: 5 Zeilen ≈ 5 Zeilenhöhen, 200 Zeilen = Textspalte und scrollen innen, leere Datei ≥ 3 Zeilenhöhen, Split dieselbe Regel",
+    "SH16b. Split-Teil der Editor-Höhe",
+    "SH17. Der Editor-Rahmen bleibt durchgezogen 1 px, im Fokus ohne gepunkteten Outline und mit anderer Randfarbe",
+    "SH9. Block → Datei: neue .shapes-Datei mit dem Blocktext, die Notiz verweist darauf",
+    "SH10. Datei → Block: abgelehnt bei zwei Verweisen, durchgeführt bei einem",
+    "SH11. Datei → Block bei offener Ansicht mit ungespeichertem Tippen verliert nichts",
+    "SH12. Befehle sind registriert und nur am richtigen Ort verfügbar",
+    "SH12b. Kontextmenü-Einträge mit Icon",
+  ],
+  edit: [
+    "E1. 'Edit model' schaltet den Bearbeitungsmodus ein",
+    "E2. Ein Klick aufs Modell wählt einen Knoten aus",
+    "E3. Verschieben macht 'Save edits' bedienbar und schreibt die .edit-Datei",
+    "E4. Die Original-Datei wird dabei nicht angefasst",
+    "E5. Beim Wiedereinstieg sitzt die gespeicherte Verschiebung wieder",
+    "E6. Ein 'env__'-Knoten ist gesperrt — und ohne Sperre wäre er auswählbar",
+    "E8. Ein Klick auf einen Knoten mit geteiltem Mesh wählt nichts aus — und meldet warum",
+    "E7. Ungespeicherte Änderungen fragen nach — 'Keep editing' bleibt, 'Discard' verlässt",
+    "SMOKE.md Edit mode Punkt 6 (Abnahme-Test im outpost-Repo)",
+    "SMOKE.md Edit mode Punkt 7 (Regeneration bei offenem Edit-Modus)",
+    "Gizmo-Drag selbst",
+  ],
+  cameras: [
+    "K1. Eine benannte Kamera aus der Datei wird angefahren (Bild ≠ Auto-Einpassen)",
+    "K2. Ein Kameraname mit Leerzeichen ist erreichbar (`Schnitt A`)",
+    "K4. Ein unbekannter Name nennt die vorhandenen Kameras und zeigt das Modell trotzdem",
+    "K5. Eine orthographische Kamera meldet sich als nicht unterstützt",
+    "K6. Ein doppelt vergebener Name meldet die Mehrdeutigkeit und fährt trotzdem an",
+    "K7. `camera:` auf einer STL nennt das Format als Bedingung",
+    "K3. Nach dem Anfahren bleibt der Blick frei (Orbit ändert das Bild)",
+  ],
+  clickrace: [
+    "R0. Block aktivierbar (Voraussetzung der Klick-Sturm-Probe)",
+    "R1. Grundlinie: 20 atomare Klicks ohne Sturm kommen alle an",
+    "R2. Lastfall: der reale Klick-Pfad (synchrones element.click()) übersteht den Panel-Sturm",
+    "R3. Positivkontrolle: Press/Release-Split (clickReal, 15ms Haltezeit) verliert Treffer im selben Sturm",
+  ],
+  promptpanel: PP_IDS.map((id) => `${id}. ${PP_TITEL[id]}`),
+};
+
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
   { key: "active", title: "Aktiver Block + Sidebar (2026-08-04)", run: sectionActiveBlock },
   { key: "view", title: "Ansicht merken (SMOKE.md 2026-07-25)", run: sectionSaveView },
@@ -5402,6 +5542,12 @@ async function main(): Promise<void> {
   if (sections.length === 0) {
     throw new Error(`Unbekannter --section ${sectionArg}. Bekannt: ${SECTIONS.map((s) => s.key).join(", ")}`);
   }
+
+  // Soll-Liste der gewaehlten Abschnitte (plus Vorlauf-Punkt) = Nenner der Bilanz.
+  const ohneSoll = sections.filter((x) => PUNKTE_JE_SECTION[x.key] === undefined).map((x) => x.key);
+  if (ohneSoll.length > 0) throw new Error(`Abschnitt ohne Soll-Liste in PUNKTE_JE_SECTION: ${ohneSoll.join(", ")}`);
+  sollListe = [...PUNKTE_VORLAUF, ...sections.flatMap((x) => PUNKTE_JE_SECTION[x.key] ?? [])];
+  bilanz = createBilanz({ punkte: sollListe });
 
   console.log(`GUI-Smoke — Obsidian auf Port ${port}`);
   assertDeployedBuildMatches(vault);
