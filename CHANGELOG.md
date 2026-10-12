@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-10-12
+
 ### Fixed
 
 - **Prompt panel, answer area:** the streamed answer now follows to the end also when a large block arrives in one piece (several lines at once), as long as you are at the bottom; before, the area stopped following after the first big piece. If you scroll up while an answer streams, it still does not pull you back down. (Measured in the smoke run with pieces of 300 characters: distance to the end 2,480 px before, 1 px now.)
