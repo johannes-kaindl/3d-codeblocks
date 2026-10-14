@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-10-14
+
 ### Security
 
 - **OBJ/MTL: a library or texture is only read when it is a file in your vault.** Since 0.10.0 the check relied on the loader's address being "changed" by the vault lookup; a blocked or missing reference now also comes back changed (as a placeholder), and with "Allow external resources" on a disguised web address (`ht<TAB>tps://…`) came back as a cleaned `https://…` address. Neither could reach the network for the texture path (placeholder or cleaned web address), but a cleaned web address would have been fetched with the setting on, and a placeholder would have been read as a material library. Both are closed; OBJ/MTL never loads from the web, whatever the setting says.
