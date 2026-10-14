@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-14
+
 ### Security
 
 - **With "Allow external resources" off, a model no longer loads anything from the web.** Until now a `.gltf` that named a texture or buffer at an `https://…` address was reported as "not loaded" under the viewport, but the address was still handed to the loader and requested (measured: a counting server received both requests). The setting did what the README said only for the notice, not for the request. Now every reference that is not a file in your vault or an embedded `data:` URI is replaced by a transparent placeholder, so the model appears without that texture and the notice under the viewport says what was left out. The same holds for references the loader would otherwise try relative to the app, and for references that could not be found.
