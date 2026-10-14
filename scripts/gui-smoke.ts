@@ -1967,6 +1967,13 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     `,
     20_000,
   );
+  // Sofort weg: spaetere Abschnitte (F3 'zweites Format') nehmen die erste .glb im Vault als Pruefmodell und fanden sonst diese Datei
+  // (gemessen 2026-10-14: F3 'nichts gezeichnet (_tdcb-smoke-draco.glb)', CORE-TEST-21: ein Prüfpunkt darf den Zustand der anderen nicht verändern).
+  await cdp.evaluate(`
+    const f = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_MODEL_DRACO)});
+    if (f) await app.vault.delete(f);
+    return true;
+  `);
   record(
     "B19. Eine Draco-GLB nennt Grund und Ausweg und zeigt kein Modell",
     draco !== null && draco.meldung.includes("Draco-compressed glTF is not supported") && draco.meldung.includes("Meshopt") && draco.canvas === 0,
