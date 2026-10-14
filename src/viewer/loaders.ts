@@ -222,17 +222,17 @@ function loadPly(buffer: ArrayBuffer, materialColor: string): Object3D {
   return geometry.getIndex() === null ? pointsFrom(geometry, materialColor) : meshFrom(geometry, materialColor);
 }
 
-/** 1x1 transparentes GIF: Ersatz fuer jede Referenz, die ein OBJ/MTL ins Netz schicken wuerde. */
+/** 1x1 transparentes GIF: Ersatz fuer jede Referenz, die ein OBJ/MTL nicht laden darf. */
 const BLOCKED_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 
-/** `resolveUrl` fuer OBJ/MTL: was kein Vault-Treffer ist und ein Schema traegt (http, https, file, blob, `//host`), wird nie geladen — three bekaeme
- *  sonst die unveraenderte URL zurueck und fragte das Netz (`map_Kd https://…` in einer fremden MTL). `data:` bleibt (eingebettet, kein Netz).
- *  Dieselbe Strenge wie bei glTF mit ausgeschalteter Einstellung „Allow external resources“; OBJ kennt die Einstellung nicht und laedt nie extern. */
+/** `resolveUrl` fuer OBJ/MTL, als Positivliste: durch kommt nur ein Vault-Treffer (der Resolver hat die URI umgeschrieben) und `data:`. Alles andere —
+ *  auch eine nicht gefundene relative Datei — wird nie geladen. Eine Sperrliste ueber Schemata reichte nicht: der URL-Parser des Browsers entfernt
+ *  Tabulator und Zeilenumbruch mitten im Schema (`ht\ttps://…` ist `https://…`), ein Muster ueber `^[A-Za-z][…]*:` sieht darin einen relativen Pfad. */
 function noNetwork(resolveUrl: (uri: string) => string): (uri: string) => string {
   return (uri) => {
     const resolved = resolveUrl(uri);
-    const t = uri.trim();
-    return resolved === uri && /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/\/)/.test(t) && !/^data:/i.test(t) ? BLOCKED_PIXEL : resolved;
+    if (resolved !== uri) return resolved;
+    return uri.startsWith("data:") ? uri : BLOCKED_PIXEL;
   };
 }
 
@@ -248,9 +248,10 @@ async function loadObj(buffer: ArrayBuffer, materialColor: string, resolveUrl?: 
     // `resolveUrl` gibt eine unveraenderte URI zurueck, wenn die Datei fehlt oder abgelehnt wurde: dann bleibt es beim Theme-Material.
     if (url !== library) {
       try {
+        // Die MTL selbst kommt von der schon aufgeloesten Vault-URL (ohne Modifier); der Modifier gilt nur fuer das, was IN der MTL steht.
+        const mtlText = (await new FileLoader().loadAsync(url)) as string;
         const manager = new LoadingManager();
         manager.setURLModifier(noNetwork(resolveUrl));
-        const mtlText = (await new FileLoader(manager).loadAsync(url)) as string;
         const creator = new MTLLoader(manager).parse(mtlText, "");
         creator.preload();
         return new OBJLoader().setMaterials(creator).parse(text);

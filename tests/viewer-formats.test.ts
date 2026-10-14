@@ -49,7 +49,9 @@ describe("OBJ (+MTL)", () => {
   });
 
   it("eine MTL, die eine Textur aus dem Netz verlangt, schickt nichts ins Netz", async () => {
-    const mtl = "newmtl rot\nKd 0.8 0.1 0.1\nmap_Kd https://evil.example/x.png\nnewmtl gruen\nmap_Kd //evil.example/y.png\nnewmtl blau\nmap_Kd file:///etc/passwd\n";
+    // Auch Schreibweisen, die ein Schema-Muster verfehlt, der Browser aber als Netz-URL liest (Tabulator/Zeilenumbruch im Schema, fuehrende Leerzeichen, Grossschreibung).
+    const feindlich = ["https://evil.example/x.png", "//evil.example/y.png", "file:///etc/passwd", "ht\ttps://evil.example/t.png", "h\nttp://evil.example/n.png", " https://evil.example/s.png", "HTTPS://EVIL.EXAMPLE/u.png", "javascript:alert(1)", "fehlt.png"];
+    const mtl = ["newmtl rot", "Kd 0.8 0.1 0.1", ...feindlich.flatMap((u, i) => [`newmtl m${i}`, `map_Kd ${u}`])].join("\n") + "\n";
     const asked: string[] = [];
     const handedToThree: string[] = [];
     // three setzt die URL am Ende auf `image.src` (ImageLoader): ein Dokument-Stub schreibt mit, was dort ankommt — also das, was nach dem
@@ -73,9 +75,11 @@ describe("OBJ (+MTL)", () => {
       vi.unstubAllGlobals();
     }
     // three ist nach der MTL-Texturaufloesung gefragt worden (der Test erreicht die Stelle) ...
-    expect(asked.filter((u) => /evil|etc\/passwd/.test(u)).length).toBeGreaterThan(0);
+    expect(asked.filter((u) => /evil|etc\/passwd/i.test(u)).length).toBeGreaterThan(3);
     // ... und hat zu keiner Zeit eine Netz- oder Datei-URL bekommen.
-    expect(handedToThree.filter((u) => /^(https?:|file:|\/\/)/i.test(u))).toEqual([]);
+    // Was ankommt, ist ein 1x1-GIF (data:) — nichts anderes, auch kein relativer Name.
+    expect(handedToThree.length).toBeGreaterThan(3);
+    expect(handedToThree.filter((u) => !u.startsWith("data:image/gif;base64,"))).toEqual([]);
   });
 
   it("kaputte MTL bricht das Laden nicht ab", async () => {
