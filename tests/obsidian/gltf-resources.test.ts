@@ -14,6 +14,8 @@ function vaultWith(...paths: string[]) {
   return app;
 }
 
+const BLOCKED = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+
 describe("createResourceResolver", () => {
   it("resolves a sibling file relative to the model, not the note", () => {
     const app = vaultWith("weltmodell/3d/scene.bin");
@@ -32,17 +34,50 @@ describe("createResourceResolver", () => {
   it("records a missing sibling instead of inventing a path", () => {
     const r = createResourceResolver(vaultWith(), "a/m.gltf", false);
 
-    expect(r.resolve("textures/wall.png")).toBe("textures/wall.png");
+    expect(r.resolve("textures/wall.png")).toBe(BLOCKED);
     expect(r.problems).toEqual([{ uri: "textures/wall.png", reason: "missing" }]);
   });
 
-  it("blocks an external URL while the setting is off", () => {
+  it("blocks an external URL while the setting is off: what three receives is the placeholder, never the URL", () => {
     const r = createResourceResolver(vaultWith(), "a/m.gltf", false);
 
-    expect(r.resolve("https://cdn.example.com/w.png")).toBe("https://cdn.example.com/w.png");
+    expect(r.resolve("https://cdn.example.com/w.png")).toBe(BLOCKED);
     expect(r.problems).toEqual([
       { uri: "https://cdn.example.com/w.png", reason: "external-blocked" },
     ]);
+  });
+
+  // Schreibweisen, die ein Schema-Muster verfehlt, der URL-Parser des Browsers aber als Netz-URL liest. Nichts davon darf bei ausgeschalteter
+  // Einstellung als etwas anderes als der Platzhalter bei three ankommen (und nichts davon als Original-Zeichenkette, auch bei eingeschalteter nicht).
+  const HOSTILE = [
+    "ht\ttps://evil.example/a.png",
+    "h\nttp://evil.example/b.png",
+    "htt\rps://evil.example/c.png",
+    " https://evil.example/d.png",
+    "\u0001https://evil.example/e.png",
+    "HTTPS://EVIL.EXAMPLE/f.png",
+    "//evil.example/g.png",
+    "\\\\evil.example/h.png",
+    "/\\evil.example/i.png",
+  ];
+
+  it.each(HOSTILE)("setting off: %j never reaches three as a URL", (uri) => {
+    const r = createResourceResolver(vaultWith(), "a/m.gltf", false);
+    expect(r.resolve(uri)).toBe(BLOCKED);
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]?.reason).toBe("external-blocked");
+  });
+
+  it.each(HOSTILE)("setting on: %j arrives as one clean https URL (no control characters left)", (uri) => {
+    const r = createResourceResolver(vaultWith(), "a/m.gltf", true);
+    const out = r.resolve(uri);
+    expect(out).toMatch(/^https?:\/\/evil\.example\/[a-i]\.png$/i);
+    expect(r.problems).toEqual([]);
+  });
+
+  it("a data URI with control characters inside the scheme is cleaned, not passed raw", () => {
+    const r = createResourceResolver(vaultWith(), "a/m.gltf", false);
+    expect(r.resolve("da\tta:image/png;base64,AAAA")).toBe("data:image/png;base64,AAAA");
   });
 
   it("lets an external URL through once the setting is on", () => {
@@ -50,6 +85,12 @@ describe("createResourceResolver", () => {
 
     expect(r.resolve("https://cdn.example.com/w.png")).toBe("https://cdn.example.com/w.png");
     expect(r.problems).toEqual([]);
+  });
+
+  it("a rejected reference (outside the vault, other scheme) gets the placeholder too", () => {
+    const r = createResourceResolver(vaultWith(), "a/m.gltf", true);
+    expect(r.resolve("../../../etc/passwd")).toBe(BLOCKED);
+    expect(r.resolve("file:///etc/passwd")).toBe(BLOCKED);
   });
 
   it("never leaves the vault, not even with the setting on", () => {

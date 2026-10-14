@@ -4,10 +4,10 @@
 // protokolliert. Bewusst KEIN eigener Ablehnungsgrund in dieser Datei: sonst stuende die
 // Sicherheitsregel an zwei Orten und koennte auseinanderlaufen.
 //
-// Abgelehnte oder nicht gefundene Referenzen werden UNVERAENDERT zurueckgegeben statt durch
-// einen Platzhalter ersetzt: three scheitert daran sichtbar, und `problems` liefert die
-// Erklaerung dazu. Ein stiller Platzhalter waere ein Modell, das falsch aussieht, ohne es
-// zu sagen.
+// Was nicht geladen werden darf (abgelehnt, nicht gefunden, extern bei ausgeschalteter Einstellung), bekommt ein 1x1-GIF als Ersatz — NIE die
+// Original-URI zurueck: three haette sie sonst geladen, und eine externe URL waere trotz „Allow external resources: aus“ ins Netz gegangen
+// (und `//host/x` oder `ht<TAB>tps://…`, die ein Muster als relativ liest). `problems` nennt dem Nutzer, was fehlt; das Modell sieht ohne die
+// Textur falsch aus, aber nie still: die Hinweiszeile unter dem Viewport steht je Datei.
 import { type App, TFile } from "obsidian";
 import { type ResourceProblem, classifyUri } from "../core/gltf-uri";
 
@@ -21,6 +21,9 @@ export interface ResourceResolver {
   /** Je URI hoechstens einmal; der Loader fragt dieselbe Textur mehrfach. */
   problems: ResourceProblem[];
 }
+
+/** 1x1 transparentes GIF. */
+const BLOCKED_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 
 export function createResourceResolver(
   app: App,
@@ -43,22 +46,25 @@ export function createResourceResolver(
     resolve: (uri: string): string => {
       const verdict = classifyUri(uri, baseDir);
 
-      if (verdict.kind === "embedded") return uri;
+      if (verdict.kind === "embedded") return verdict.uri;
 
       if (verdict.kind === "external") {
-        if (!allowExternal) note(uri, "external-blocked");
-        return uri;
+        if (!allowExternal) {
+          note(uri, "external-blocked");
+          return BLOCKED_PIXEL;
+        }
+        return verdict.url;
       }
 
       if (verdict.kind === "rejected") {
         note(uri, verdict.reason);
-        return uri;
+        return BLOCKED_PIXEL;
       }
 
       const file = app.vault.getAbstractFileByPath(verdict.path);
       if (!(file instanceof TFile)) {
         note(uri, "missing");
-        return uri;
+        return BLOCKED_PIXEL;
       }
       return app.vault.getResourcePath(file);
     },

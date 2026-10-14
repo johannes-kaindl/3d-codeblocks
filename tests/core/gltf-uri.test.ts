@@ -5,7 +5,28 @@ describe("classifyUri", () => {
   it("leaves data URIs to the loader", () => {
     expect(classifyUri("data:application/octet-stream;base64,AAAA", "weltmodell/3d")).toEqual({
       kind: "embedded",
+      uri: "data:application/octet-stream;base64,AAAA",
     });
+  });
+
+  it("reads the scheme the way the browser does: control characters inside it are dropped first", () => {
+    expect(classifyUri("ht\ttps://x.example/a.png", "a")).toEqual({ kind: "external", url: "https://x.example/a.png" });
+    expect(classifyUri("h\nttp://x.example/a.png", "a")).toEqual({ kind: "external", url: "http://x.example/a.png" });
+    expect(classifyUri("\u0001  https://x.example/a.png  ", "a")).toEqual({ kind: "external", url: "https://x.example/a.png" });
+    expect(classifyUri("da\tta:text/plain,x", "a")).toEqual({ kind: "embedded", uri: "data:text/plain,x" });
+  });
+
+  it("a scheme-relative reference is a network target, with forward or back slashes", () => {
+    expect(classifyUri("//x.example/a.png", "a")).toEqual({ kind: "external", url: "https://x.example/a.png" });
+    expect(classifyUri("\\\\x.example/a.png", "a")).toEqual({ kind: "external", url: "https://x.example/a.png" });
+  });
+
+  it("stays linear on a long run of white space (no backtracking trim)", () => {
+    for (const n of [1000, 10000, 50000]) {
+      const t0 = performance.now();
+      classifyUri(" ".repeat(n) + "x" + " ".repeat(n), "a");
+      expect(performance.now() - t0).toBeLessThan(50);
+    }
   });
 
   it("resolves a sibling file against the model's folder, not the note's", () => {

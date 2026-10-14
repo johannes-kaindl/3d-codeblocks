@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **With "Allow external resources" off, a model no longer loads anything from the web.** Until now a `.gltf` that named a texture or buffer at an `https://…` address was reported as "not loaded" under the viewport, but the address was still handed to the loader and requested (measured: a counting server received both requests). The setting did what the README said only for the notice, not for the request. Now every reference that is not a file in your vault or an embedded `data:` URI is replaced by a transparent placeholder, so the model appears without that texture and the notice under the viewport says what was left out. The same holds for references the loader would otherwise try relative to the app, and for references that could not be found.
+- **Web addresses are recognised the way the browser reads them.** An address with a tab or line break inside the scheme (`ht<TAB>tps://…`), leading control characters or spaces, upper case, or a scheme-relative form (`//host/x`, `\\host\x`) was treated as a file name in the vault and so slipped past the check; all of these count as web addresses now (blocked with the setting off, loaded once on, in a cleaned form).
+
 ### Added
 
 - **Seven more file formats** (open in their own pane, embed with `![[…]]` or `file:` in a block): **`.3mf`** (3D printing; colours and materials from the file, turned from Z-up to Y-up), **`.obj`** (materials from the `.mtl` named in the file when it lies in the same folder, otherwise the theme-aware default; a missing or broken `.mtl` does not stop the model; textures and libraries are only read from your vault, a `.mtl` that asks for a web address or a `file:` path gets nothing loaded, whatever the setting "Allow external resources" says), **`.ply`** (faces with the colours of the file, a file without faces as a point cloud), **`.gcode`** (the printer path as lines, travel red and extrusion green), **`.xyz`** and **`.pcd`** (point clouds, colours from the file or the theme colour, point size follows the extent). A file without any geometry now says so ("the file holds no geometry") instead of showing an empty view. The bundle grows from 851 to 904 KB. README and getting-started list the formats; `.fbx`, `.dae` and the like stay unsupported.

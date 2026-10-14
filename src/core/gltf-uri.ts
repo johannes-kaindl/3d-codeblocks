@@ -5,8 +5,8 @@
 // Vault und ohne WebGL pruefbar. `src/obsidian/gltf-resources.ts` fuehrt das Urteil nur aus.
 
 export type UriClass =
-  /** `data:` — der three-Loader loest das selbst auf, wir fassen es nicht an. */
-  | { kind: "embedded" }
+  /** `data:` — der three-Loader loest das selbst auf; `uri` ist die Fassung nach der Normalisierung (ohne Steuerzeichen im Schema). */
+  | { kind: "embedded"; uri: string }
   /** Vault-relativer Pfad, normalisiert und garantiert innerhalb des Vaults. */
   | { kind: "vault"; path: string }
   /** `http(s):` — ob geladen wird, entscheidet die Einstellung, nicht diese Funktion. */
@@ -15,17 +15,33 @@ export type UriClass =
 
 const SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 
+/** Wie der URL-Parser des Browsers (WHATWG), BEVOR er das Schema liest: Tabulator und Zeilenumbruch fallen ueberall weg (`ht<TAB>tps://x` ist
+ *  `https://x`), fuehrende und nachgestellte Steuerzeichen und Leerzeichen ebenfalls. Ein Urteil ueber die rohe Zeichenkette sahe darin einen
+ *  relativen Pfad, den three dann als Netz-URL laedt. Bewusst ohne Regex mit Rueckverfolgung ueber Leerraum (quadratisch bei langen Laeufen). */
+function normalizeLikeBrowser(uri: string): string {
+  let s = uri.replace(/[\t\n\r]/g, "");
+  let start = 0;
+  let end = s.length;
+  while (start < end && s.charCodeAt(start) <= 0x20) start += 1;
+  while (end > start && s.charCodeAt(end - 1) <= 0x20) end -= 1;
+  s = s.slice(start, end);
+  return s;
+}
+
 /**
  * @param uri      Referenz aus der glTF-Datei (`buffers[].uri`, `images[].uri`).
  * @param baseDir  Ordner der Modelldatei, vault-relativ und ohne Schraegstrich am Ende.
  *                 Nebendateien liegen bei der MODELLDATEI, nicht bei der Notiz.
  */
 export function classifyUri(uri: string, baseDir: string): UriClass {
-  const trimmed = uri.trim();
+  const trimmed = normalizeLikeBrowser(uri);
   if (trimmed === "") return { kind: "rejected", reason: "empty" };
 
+  // Schema-relative Referenz (`//host/x`, auch mit Rueckwaertsstrichen: der Browser liest `\\host` bei http(s) wie `//host`): ein Netz-Ziel.
+  if (/^[\\/]{2}/.test(trimmed)) return { kind: "external", url: `https:${trimmed.replace(/\\/g, "/")}` };
+
   const scheme = SCHEME.exec(trimmed)?.[1].toLowerCase();
-  if (scheme === "data") return { kind: "embedded" };
+  if (scheme === "data") return { kind: "embedded", uri: trimmed };
   if (scheme === "http" || scheme === "https") return { kind: "external", url: trimmed };
   if (scheme !== undefined) return { kind: "rejected", reason: "scheme" };
 

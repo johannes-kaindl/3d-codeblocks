@@ -49,10 +49,11 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { cwd } from "node:process";
 
-import { cameraFloorGltf, coloredCubeObj, cube3mf, dracoDeclaredGlb, octahedronPly, spherePcd, sphereXyz, towerGcode } from "../docs/images/fixture/make-models.mjs";
+import { cameraFloorGltf, groundFloorGltf, coloredCubeObj, cube3mf, dracoDeclaredGlb, octahedronPly, spherePcd, sphereXyz, towerGcode } from "../docs/images/fixture/make-models.mjs";
 import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
 import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
@@ -2139,6 +2140,75 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
       }
       return true;
     `);
+  }
+
+  // --- B27. Externe Textur bei ausgeschaltetem „Allow external resources“ (Datenschutz) --------------------------------
+  // Eine glTF nennt zwei Texturen auf einem lokalen Zaehl-Server: eine glatt (`http://…`), eine mit Tabulator im Schema (`ht<TAB>tp://…`, vom Browser
+  // als `http://…` gelesen, von einem Schema-Muster als relativer Pfad). Bei ausgeschalteter Einstellung muss der Server NULL Anfragen sehen und das
+  // Modell trotzdem erscheinen, mit Hinweiszeile; Gegenprobe im selben Punkt: mit eingeschalteter Einstellung kommt mindestens eine Anfrage an
+  // (sonst waere die Null kein Beleg, CORE-TEST-08/16).
+  {
+    let anfragen = 0;
+    const zaehler = createServer((_req, res) => {
+      anfragen += 1;
+      res.writeHead(200, { "content-type": "image/gif", "access-control-allow-origin": "*" });
+      res.end(Buffer.from("R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==", "base64"));
+    });
+    await new Promise<void>((resolve) => zaehler.listen(0, "127.0.0.1", resolve));
+    const adresse = zaehler.address();
+    const zPort = typeof adresse === "object" && adresse ? adresse.port : 0;
+    try {
+      const doc = groundFloorGltf() as { images?: unknown[]; textures?: unknown[]; materials?: { pbrMetallicRoughness?: Record<string, unknown>; emissiveTexture?: unknown }[] };
+      doc.images = [{ uri: `http://127.0.0.1:${zPort}/glatt.png` }, { uri: `ht\ttp://127.0.0.1:${zPort}/tab.png` }];
+      doc.textures = [{ source: 0 }, { source: 1 }];
+      const mat = doc.materials?.[0];
+      if (mat) {
+        mat.pbrMetallicRoughness = { ...(mat.pbrMetallicRoughness ?? {}), baseColorTexture: { index: 0 } };
+        mat.emissiveTexture = { index: 1 };
+      }
+      const name = "_tdcb-smoke-extern.gltf";
+      createdNotes.add(name);
+      createdNotes.add("_tdcb-gui-smoke-extern.md");
+      await cdp.evaluate(`
+        const pfad = ${JSON.stringify(name)};
+        const text = ${JSON.stringify(JSON.stringify(doc))};
+        const alt = app.vault.getAbstractFileByPath(pfad);
+        if (alt) await app.vault.modify(alt, text); else await app.vault.create(pfad, text);
+        return true;
+      `);
+      const messen = async (erlaubt: boolean): Promise<{ anfragen: number; zeichnet: boolean; hinweis: string }> => {
+        await setSetting(cdp, "allowExternalResources", erlaubt);
+        anfragen = 0;
+        await closeExtraLeaves(cdp);
+        createdNotes.add(`_tdcb-gui-smoke-extern-${erlaubt ? "an" : "aus"}.md`);
+        await openNote(cdp, `_tdcb-gui-smoke-extern-${erlaubt ? "an" : "aus"}.md`, [`${fence}3d`, `file: ${name}`, "title: Extern", fence, ""].join("\n"), "preview");
+        const r = await pollUntil<{ zeichnet: boolean; hinweis: string }>(
+          cdp,
+          `
+            ${SAMPLER}
+            const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas");
+            const stats = canvas ? sample(canvas) : null;
+            if (!stats || stats.coverage < 2) return null;
+            const box = document.querySelector(".markdown-preview-view .tdcb-message");
+            return { zeichnet: true, hinweis: box ? box.textContent.trim() : "" };
+          `,
+          30_000,
+        );
+        await new Promise((r2) => setTimeout(r2, 1500));
+        return { anfragen, zeichnet: r?.zeichnet === true, hinweis: r?.hinweis ?? "" };
+      };
+      const aus = await messen(false);
+      const an = await messen(true);
+      await setSetting(cdp, "allowExternalResources", false);
+      record(
+        "B27. Bei ausgeschaltetem „Allow external resources“ geht keine Anfrage an eine externe Textur-URL",
+        aus.anfragen === 0 && aus.zeichnet && aus.hinweis.includes("Allow external resources") && an.anfragen >= 1,
+        `aus: ${aus.anfragen} Anfrage(n) am Zähl-Server, Modell ${aus.zeichnet ? "gezeichnet" : "NICHT gezeichnet"}, Hinweis "${aus.hinweis.slice(0, 70)}" · an (Gegenprobe): ${an.anfragen} Anfrage(n)`,
+      );
+      await cdp.evaluate(`const f = app.vault.getAbstractFileByPath(${JSON.stringify(name)}); if (f) await app.vault.delete(f); return true;`);
+    } finally {
+      zaehler.close();
+    }
   }
 
   // --- B19. Draco-GLB -----------------------------------------------------
@@ -5731,6 +5801,7 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "B24. Eine G-Code-Datei zeigt ihre Linien",
     "B25. Eine XYZ-Punktwolke mit Farben lädt und ist sichtbar",
     "B26. Eine PCD-Punktwolke ohne Farbe lädt im Theme-Material",
+    "B27. Bei ausgeschaltetem „Allow external resources“ geht keine Anfrage an eine externe Textur-URL",
     "SMOKE.md 'Zusätzlich' (Popout-Fenster)",
     "SMOKE.md Punkt 8 (Klick-Modus)",
   ],
