@@ -5619,7 +5619,9 @@ async function main(): Promise<void> {
 
   // `--skip a,b` lässt Abschnitte weg (Gegenprobe: misst ein Abschnitt den Rest des Laufs mit?).
   const skipped = new Set((flag("skip") ?? "").split(",").filter((k) => k !== ""));
-  const sections = (sectionArg ? SECTIONS.filter((s) => s.key === sectionArg) : SECTIONS).filter((s) => !skipped.has(s.key));
+  // `--section a,b` fährt mehrere Abschnitte in der Reihenfolge von SECTIONS (Bisektion von Zustandslecks, Fokus-Lauf auf die WebGL-Abschnitte schneiden).
+  const wanted = sectionArg ? sectionArg.split(",").map((k) => k.trim()) : null;
+  const sections = (wanted ? SECTIONS.filter((s) => wanted.includes(s.key)) : SECTIONS).filter((s) => !skipped.has(s.key));
   if (sections.length === 0) {
     throw new Error(`Unbekannter --section ${sectionArg}. Bekannt: ${SECTIONS.map((s) => s.key).join(", ")}`);
   }
