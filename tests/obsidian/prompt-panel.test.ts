@@ -134,12 +134,14 @@ describe("PromptPanelView", () => {
     const { view } = makeView(async (req, h) =>
       configured
         ? good(req, h)
-        : { ok: false, kind: "no-endpoint", detail: "disabled", partial: "", reasoning: "", timing: TIMING, facts: null, deviations: [], source: {} },
+        : { ok: false, kind: "no-endpoint", detail: "disabled", partial: "", reasoning: "", timing: TIMING, facts: null, deviations: [], source: { kind: "manager" } },
     );
     await view.onOpen();
     expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(true);
     await send(view, "a box");
     expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(false);
+    // `disabled` ist ein Code des Managers: der Nutzer liest, wo er es behebt, nicht den rohen Code.
+    expect(one(view, "tdcb-prompt-empty-detail").textContent).toContain("switched off in the LLM Endpoint Manager");
     expect(view.state().rounds.rounds).toHaveLength(0);
     // Kein Sackgasse: nach der Konfiguration geht Senden wieder, der Empty-State verschwindet.
     expect(one(view, "tdcb-prompt-send").disabled).toBe(false);
@@ -147,6 +149,13 @@ describe("PromptPanelView", () => {
     await send(view, "a box");
     expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(true);
     expect(view.state().rounds.rounds).toHaveLength(1);
+  });
+
+  it("no-endpoint from the local list keeps the plain reason, even when it looks like a manager code", async () => {
+    const { view } = makeView(async () => ({ ok: false, kind: "no-endpoint", detail: "disabled", partial: "", reasoning: "", timing: TIMING, facts: null, deviations: [], source: { kind: "local" } }));
+    await view.onOpen();
+    await send(view, "a box");
+    expect(one(view, "tdcb-prompt-empty-detail").textContent).toBe("Reason: disabled");
   });
 
   it("aborts a running request on close and writes nothing afterwards", async () => {

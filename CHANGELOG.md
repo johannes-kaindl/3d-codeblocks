@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **New command "Save current view as image":** saves the current frame of the active 3D model as a PNG in the attachment folder of the open note. An existing file is never overwritten (the file name is numbered instead). It works for code blocks, embeds and the file view; while the model is still loading it says so instead of saving an empty picture.
+
+### Fixed
+
+- **Prompt panel, "Apply" as a new block:** a selection that ends inside another code block, or a cursor inside it, now puts the new block after that code block instead of inside it. If the code block is never closed there is no "after it": the panel refuses with a message and writes nothing. In a note with Windows line endings the inserted block keeps them.
+
+### Changed
+
+- **Prompt panel, no language model:** when the LLM Endpoint Manager is the source, the hint now says what is missing and where to fix it (no usable endpoint, endpoint removed, endpoint switched off, API key not stored yet, manager not answering) instead of the raw reason. A local endpoint list keeps the plain "Reason: …" line.
+- Behaviour of the shared kit pins taken with the update: obsidian-kit 0.60.1 and code-kit 0.27.1 (from 0.59.1 and 0.24.0). The other changes in 0.60.0, 0.60.1, 0.25.0, 0.26.0, 0.27.0 and 0.27.1 (tool-provider contract, share export, plugin-id check, local time stamps, slugs, sizes, secret value, `version-list` mode, byte tokens, Lua-port exports) do not change what this plugin shows; the list of request settings that were dropped (`sanitizeRequestSettings`) is now sorted, which only changes the order of that hint.
+
 ## [0.9.1] — 2026-10-12
 
 ### Fixed

@@ -1,6 +1,7 @@
 // UI-Texte, die nicht an einer einzelnen Zeile haengen (UI-STANDARD §10). Das Plugin ist
 // englisch; die Hilfe-Zeile nimmt die Kit-Vorgabe unveraendert.
 import { HELP_SETTING_TEXTS_EN, type HelpSettingTexts } from "../vendor/kit-obsidian/help-setting";
+import { isManagerErrorCode, LLM_CONNECTION_STRINGS_EN, managerErrorText } from "../vendor/kit-obsidian/llm-connection-strings";
 
 export const HELP_TEXTS: HelpSettingTexts = HELP_SETTING_TEXTS_EN;
 
@@ -50,5 +51,7 @@ export const PANEL_TEXTS = {
   cutOff: "The answer was cut off (length limit).",
   targetChanged: "The target changed while the model was answering — nothing was added.",
   noUsableParts: "the answer holds no usable part",
-  noEndpointDetail: (detail: string) => `Reason: ${detail}`,
+  // Ein Code des LLM Endpoint Managers bekommt seinen Text (jeder nennt die Stelle, an der es behoben wird); alles andere
+  // (etwa eine Konfigurationsmeldung) bleibt als „Reason“ stehen.
+  noEndpointDetail: (detail: string, sourceKind?: string) => (sourceKind === "manager" && isManagerErrorCode(detail) ? managerErrorText(LLM_CONNECTION_STRINGS_EN, detail) : `Reason: ${detail}`),
 } as const;

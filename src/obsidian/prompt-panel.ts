@@ -369,7 +369,7 @@ export class PromptPanelView extends ItemView {
         this.setStatus("idle", PANEL_TEXTS.aborted);
       } else if (r.kind === "no-endpoint") {
         this.noEndpoint = true;
-        this.emptyDetail.setText(PANEL_TEXTS.noEndpointDetail(r.detail));
+        this.emptyDetail.setText(PANEL_TEXTS.noEndpointDetail(r.detail, r.source?.kind));
         this.setStatus("error", PANEL_TEXTS.noEndpoint);
       } else {
         this.setStatus("error", r.detail);
