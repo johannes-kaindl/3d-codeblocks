@@ -82,6 +82,33 @@ describe("OBJ (+MTL)", () => {
     expect(handedToThree.filter((u) => !u.startsWith("data:image/gif;base64,"))).toEqual([]);
   });
 
+  it("auch wenn der Resolver (Einstellung an) bereinigte https-URLs herausgibt, laedt OBJ/MTL nichts aus dem Netz", async () => {
+    const cube = coloredCubeObj();
+    const mtl = ["newmtl rot", "Kd 0.8 0.1 0.1", "map_Kd ht\ttps://evil.example/a.png", "newmtl m2", "map_Kd //evil.example/b.png"].join("\n") + "\n";
+    const dataUrl = `data:text/plain;base64,${Buffer.from(mtl).toString("base64")}`;
+    const handed: string[] = [];
+    vi.stubGlobal("document", {
+      createElementNS: () => ({ addEventListener: () => undefined, removeEventListener: () => undefined, set src(value: string) { handed.push(value); } }),
+    });
+    // Wie der Resolver bei eingeschalteter Einstellung: die URL kommt bereinigt und ANDERS als die Eingabe zurueck.
+    const resolveUrl = (uri: string): string => (uri === cube.mtlName ? dataUrl : /evil/.test(uri) ? `https:${uri.replace(/^.*evil/, "//evil")}` : uri);
+    try {
+      await loadModel(bytes(cube.obj), "obj", "#888888", resolveUrl);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(handed.length).toBeGreaterThan(0);
+    expect(handed.filter((u) => !u.startsWith("data:image/gif;base64,"))).toEqual([]);
+  });
+
+  it("ein gesperrtes mtllib (Platzhalter zurueck) wird nicht als MTL gelesen: Theme-Material", async () => {
+    const BLOCKED = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+    const { object } = await loadModel(bytes(coloredCubeObj().obj), "obj", "#888888", () => BLOCKED);
+    const meshes = kinds(object).filter((c): c is Mesh => c instanceof Mesh);
+    expect(meshes.length).toBeGreaterThan(0);
+    expect(meshes.every((m) => m.userData.tdcbThemedMaterial === true)).toBe(true);
+  });
+
   it("kaputte MTL bricht das Laden nicht ab", async () => {
     const cube = coloredCubeObj();
     const resolveUrl = (uri: string): string => (uri === cube.mtlName ? "data:text/plain;base64,###" : uri);

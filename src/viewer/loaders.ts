@@ -229,11 +229,17 @@ const BLOCKED_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAA
  *  auch eine nicht gefundene relative Datei — wird nie geladen. Eine Sperrliste ueber Schemata reichte nicht: der URL-Parser des Browsers entfernt
  *  Tabulator und Zeilenumbruch mitten im Schema (`ht\ttps://…` ist `https://…`), ein Muster ueber `^[A-Za-z][…]*:` sieht darin einen relativen Pfad. */
 function noNetwork(resolveUrl: (uri: string) => string): (uri: string) => string {
-  return (uri) => {
-    const resolved = resolveUrl(uri);
-    if (resolved !== uri) return resolved;
-    return uri.startsWith("data:") ? uri : BLOCKED_PIXEL;
-  };
+  return (uri) => (uri.startsWith("data:") ? uri : (vaultUrl(resolveUrl, uri) ?? BLOCKED_PIXEL));
+}
+
+/** Die Ressourcen-URL, wenn `uri` ein Vault-Treffer (oder ein bereinigtes `data:`) ist, sonst `null`. „Der Resolver hat etwas veraendert“ reicht NICHT
+ *  als Kennzeichen: er gibt auch den Platzhalter zurueck (abgelehnt, fehlt, extern gesperrt) und bei eingeschalteter Einstellung die bereinigte
+ *  `https://…`-Fassung einer verschleierten URL (`ht<TAB>tps://…`). OBJ/MTL laedt nie aus dem Netz, auch wenn die Einstellung es fuer glTF erlaubt. */
+function vaultUrl(resolveUrl: (uri: string) => string, uri: string): string | null {
+  const resolved = resolveUrl(uri);
+  if (resolved === uri || resolved === BLOCKED_PIXEL) return null;
+  if (/^(?:https?:|wss?:|ftps?:|file:|blob:|\/\/|\\\\)/i.test(resolved.trim())) return null;
+  return resolved;
 }
 
 /** OBJ, mit seiner MTL, wenn sie neben der Datei liegt (`mtllib`). Ohne MTL (oder wenn sie fehlt) bekommt das Modell das Theme-Material wie STL.
@@ -244,9 +250,9 @@ async function loadObj(buffer: ArrayBuffer, materialColor: string, resolveUrl?: 
   const plain = new OBJLoader().parse(text);
   const library = (plain as unknown as { materialLibraries?: string[] }).materialLibraries?.[0];
   if (library && resolveUrl) {
-    const url = resolveUrl(library);
-    // `resolveUrl` gibt eine unveraenderte URI zurueck, wenn die Datei fehlt oder abgelehnt wurde: dann bleibt es beim Theme-Material.
-    if (url !== library) {
+    const url = vaultUrl(resolveUrl, library);
+    // Kein Vault-Treffer (fehlt, abgelehnt, extern): es bleibt beim Theme-Material.
+    if (url !== null) {
       try {
         // Die MTL selbst kommt von der schon aufgeloesten Vault-URL (ohne Modifier); der Modifier gilt nur fuer das, was IN der MTL steht.
         const mtlText = (await new FileLoader().loadAsync(url)) as string;
