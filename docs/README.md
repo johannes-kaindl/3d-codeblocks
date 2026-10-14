@@ -17,4 +17,4 @@ The [README](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/README.m
 
 ---
 
-`SMOKE.md`, `editor-anforderungen-outpost.md` and `superpowers/` are maintainer material and not user documentation.
+`SMOKE.md` is maintainer material and not user documentation.

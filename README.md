@@ -315,7 +315,7 @@ npm run dev     # watch build
 npm run gate    # lint + typecheck + tests + purity + bundle size
 ```
 
-Design and plan: `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+Early design notes and plans are in the git history (`docs/superpowers/`, removed after 0.9.1).
 Manual test checklist: `docs/SMOKE.md`.
 
 ## License

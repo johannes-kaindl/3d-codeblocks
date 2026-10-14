@@ -330,7 +330,7 @@ npm run dev     # Watch-Build
 npm run gate    # lint + typecheck + tests + purity + bundle size
 ```
 
-Entwurf und Plan: `docs/superpowers/specs/` und `docs/superpowers/plans/`.
+Frühe Entwürfe und Pläne stehen in der Git-History (`docs/superpowers/`, nach 0.9.1 entfernt).
 Manuelle Testcheckliste: `docs/SMOKE.md`.
 
 ## Lizenz

@@ -10,10 +10,7 @@ Orientierung für KI-Agenten (Claude Code, Codex, …) und Mitwirkende an diesem
 
 ## Project character
 
-Obsidian-Plugin `three-d-codeblocks` („3D Codeblocks", v0.2.0) von Johannes Kaindl. Rendert
-3D-Artefakte (GLB, glTF, STL) direkt in Obsidian — als eigene Ansicht, als Wiki-Embed oder in
-`3d`-/`gltf`-Codeblöcken; Orbit/Zoom/Pan ohne die Notiz zu verlassen. three.js gebündelt;
-Draco/Meshopt bewusst nicht unterstützt (worker-basiert, Obsidians Renderer verbietet Worker).
+Obsidian-Plugin `three-d-codeblocks` („3D Codeblocks", aktuelle Version in `manifest.json`) von Johannes Kaindl. Rendert 3D-Artefakte (GLB, glTF, STL) direkt in Obsidian — als eigene Ansicht, als Wiki-Embed oder in `3d`-/`gltf`-Codeblöcken; Orbit/Zoom/Pan ohne die Notiz zu verlassen. three.js gebündelt; Meshopt-komprimierte Dateien laufen (der Decoder arbeitet im Hauptthread), Draco bewusst nicht (worker-basiert, Obsidians Renderer verbietet Worker).
 
 ## Commands
 
@@ -32,11 +29,7 @@ npm run release    # Release via ../tools/release/ (braucht das Dach-Verzeichnis
 
 - Conventional Commits, deutsche Beschreibung erlaubt. Nur berührte Dateien stagen.
 - Pure-Core-Trennung: `src/core/` bleibt Obsidian-frei (`npm run check:pure` erzwingt das); Tests mit vitest.
-- **`src/vendor/` ist ein Verbatim-Snapshot aus `obsidian-kit`** — nie von Hand editieren, sondern
-  `sh tools/sync-kit.sh` fahren (kopiert aus `../obsidian-kit`, setzt die Stempelzeile, schreibt beide
-  `VENDOR.json`; idempotent). Der Zielordner ist Vertrag, nicht Geschmack: `kit/` ← Kit-`src/pure/`,
-  `kit-obsidian/` ← Kit-`src/obsidian/`. Bricht ein Kit-Modul hier, gehört der Fix ins Kit und danach
-  ein erneutes Vendoring — nicht eine Änderung an der Kopie.
+- **`src/vendor/` ist ein Verbatim-Snapshot aus `obsidian-kit` und `code-kit`** — nie von Hand editieren, sondern `sh tools/sync-kit.sh` fahren (dünner Wrapper auf das zentrale `../tools/kit-sync/kit-sync.mjs`; Quellen, Pins und Zielordner stehen in `tools/kit-sync.json`, `VENDOR.json` wird gemergt, `sh tools/sync-kit.sh --check` misst Drift ohne zu schreiben). Der Zielordner ist Vertrag, nicht Geschmack: `src/vendor/kit/` ← reine Module, `src/vendor/kit-obsidian/` ← Kit-`src/obsidian/`. Bricht ein Kit-Modul hier, gehört der Fix ins Kit und danach ein erneutes Vendoring — nicht eine Änderung an der Kopie.
 
 ## Memory
 
@@ -44,7 +37,7 @@ npm run release    # Release via ../tools/release/ (braucht das Dach-Verzeichnis
   Coding-Cockpit des Maintainers (`$VAULT/25_Coding/3d-codeblocks/_SDD/`, CORE-META-14, maintainer-lokal).
   Sie tragen Arbeitskontext (Vault-Pfade, Schwester-Repo-Interna), der in einem public Repo niemandem nützt.
   Das Repo behält die Design-Essenz in dieser Datei + `CHANGELOG.md`.
-- **Alt-Bestand:** `docs/superpowers/{specs,plans}/` ist eingefroren — nichts Neues dort ablegen.
+- **Alt-Bestand:** `docs/superpowers/` wurde nach 0.9.1 ins Cockpit (`_SDD/`) umgezogen und liegt nur noch in der Git-History — nichts Neues dort ablegen.
 - **Nie im Repo:** absolute Pfade außerhalb des Repos (`/Users/…`, Vault-Pfade) — Platzhalter nutzen
   (`$VAULT/…`, `~/…`, repo-relativ). Herkunftsnachweise als Repo-Name + `Datei:Zeile` sind dagegen erwünscht.
   Gate: `scripts/check-no-abs-paths.mjs` (Teil von `npm test`).
