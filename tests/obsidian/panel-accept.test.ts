@@ -393,6 +393,35 @@ describe("acceptPanel — target new", () => {
     expect(selections).toEqual([]);
     expect(store["n.md"]).toBe(["a", "```js", "x()", "```", "", "```shapes", MODEL, "```", "", "b"].join("\n"));
   });
+  it("as block with a selection ending INSIDE a fence: inserted after that fence, the selection stays", async () => {
+    const note = ["a", "```js", "x()", "y()", "```", "b"].join("\n");
+    const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, selection: { to: { line: 2, ch: 3 } } });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.message).toBe("Applied to the open note as a code block after the code block at the selection.");
+    expect(store["n.md"]).toBe(["a", "```js", "x()", "y()", "```", "", "```shapes", MODEL, "```", "", "b"].join("\n"));
+  });
+  it("as block with the cursor in a fence that is never closed: refused with a message, nothing written", async () => {
+    const note = ["a", "```js", "x()", "y()"].join("\n");
+    const { env, store, selections } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/never closed.*nothing was applied/i);
+    expect(selections).toEqual([]);
+    expect(store["n.md"]).toBe(note);
+  });
+  it("as block with the selection ending in a fence that is never closed: refused too", async () => {
+    const note = ["a", "```js", "x()"].join("\n");
+    const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, selection: { to: { line: 2, ch: 1 } } });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.ok).toBe(false);
+    expect(store["n.md"]).toBe(note);
+  });
+  it("inserting after a fence in a CRLF note keeps the line endings uniform", async () => {
+    const note = ["a", "```js", "x()", "```", "b"].join("\r\n");
+    const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
+    expect((await acceptPanel(env, stateOf(NEW, create(MODEL)))).ok).toBe(true);
+    expect(store["n.md"].replace(/\r\n/g, "")).not.toContain("\n");
+  });
   it("the file way inserts its reference with the same rules", async () => {
     const note = ["a", "```js", "x()", "```", "b"].join("\n");
     const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "file" }, cursorLine: 1 });

@@ -170,19 +170,36 @@ function sourceView(env: AcceptEnv): { view: MarkdownView } | { message: string;
   return view.getMode() === "source" ? { view } : { message: PANEL_TEXTS.noteInReadingView, reading: true };
 }
 
-/** Einfuegen ohne Nutzerinhalt zu zerstoeren: eine Auswahl bleibt (Einfuegung an ihrem Ende), ein Cursor INNERHALB
- *  eines Zauns fuegt hinter dem Zaun ein (sonst entstuende ein Block im Block). Der Standardfall ist unveraendert. */
+/** Ist der Zaun nie geschlossen? Dann ist seine letzte Zeile Inhalt, und dahinter einzufuegen hiesse: im Zaun. */
+function isUnclosed(fence: Fence, lines: string[]): boolean {
+  const open = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[fence.openLine] ?? "");
+  if (!open || fence.closeLine <= fence.openLine) return true;
+  const close = new RegExp(`^\\s{0,3}${open[1][0] === "`" ? "`" : "~"}{${open[1].length},}\\s*$`);
+  return !close.test(lines[fence.closeLine] ?? "");
+}
+
+/** Einfuegen ohne Nutzerinhalt zu zerstoeren: ein Zaun unter dem Cursor bzw. am Ende der Auswahl bekommt den Block
+ *  dahinter (sonst entstuende ein Block im Block); eine Auswahl ausserhalb eines Zauns bleibt (Einfuegung an ihrem
+ *  Ende). Ein Zaun, der nie geschlossen wird, hat kein „dahinter": Abbruch mit Meldung. Der Standardfall ist
+ *  unveraendert. Zeilenenden der Notiz bleiben einheitlich. */
 function insertText(view: MarkdownView, text: string): string {
   const editor = view.editor;
-  if (editor.somethingSelected()) {
-    editor.replaceRange(text, editor.getCursor("to"));
-    return "after the selection";
-  }
-  const lines = editor.getValue().split(/\r?\n/);
-  const fence = findFenceAt(editor.getValue(), editor.getCursor().line);
+  const value = editor.getValue();
+  const lines = value.split(/\r?\n/);
+  const selected = editor.somethingSelected();
+  const anchor = selected ? editor.getCursor("to") : editor.getCursor();
+  const fence = findFenceAt(value, anchor.line);
   if (fence) {
-    editor.replaceRange(`\n${text}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
-    return "after the code block at the cursor";
+    if (isUnclosed(fence, lines)) {
+      throw new Error(`the ${selected ? "selection ends" : "cursor is"} in a code block that is never closed`);
+    }
+    const eol = value.includes("\r\n") ? "\r\n" : "\n";
+    editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
+    return selected ? "after the code block at the selection" : "after the code block at the cursor";
+  }
+  if (selected) {
+    editor.replaceRange(text, anchor);
+    return "after the selection";
   }
   editor.replaceSelection(text);
   return "at the cursor";
