@@ -3,7 +3,7 @@
  * 3MF fehlt hier bewusst als Ladetest: `ThreeMFLoader` braucht `DOMParser`, und die Testumgebung ist `node` — der Weg ist im GUI-Smoke
  * (Abschnitt basis, B20) belegt; hier wird nur die Zip-Struktur der Fixture-Datei geprueft.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LineSegments, Mesh, Points, type Object3D } from "three";
 import { unzipSync } from "three/examples/jsm/libs/fflate.module.js";
 import { loadModel } from "../src/viewer/loaders";
@@ -46,6 +46,36 @@ describe("OBJ (+MTL)", () => {
     const meshes = kinds(object).filter((c): c is Mesh => c instanceof Mesh);
     expect(meshes.length).toBeGreaterThan(0);
     expect(meshes.every((m) => m.userData.tdcbThemedMaterial === true)).toBe(true);
+  });
+
+  it("eine MTL, die eine Textur aus dem Netz verlangt, schickt nichts ins Netz", async () => {
+    const mtl = "newmtl rot\nKd 0.8 0.1 0.1\nmap_Kd https://evil.example/x.png\nnewmtl gruen\nmap_Kd //evil.example/y.png\nnewmtl blau\nmap_Kd file:///etc/passwd\n";
+    const asked: string[] = [];
+    const handedToThree: string[] = [];
+    // three setzt die URL am Ende auf `image.src` (ImageLoader): ein Dokument-Stub schreibt mit, was dort ankommt — also das, was nach dem
+    // URL-Modifier wirklich geladen wuerde.
+    vi.stubGlobal("document", {
+      createElementNS: () => ({
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        set src(value: string) { handedToThree.push(value); },
+      }),
+    });
+    try {
+      const cube = coloredCubeObj();
+      const dataUrl = `data:text/plain;base64,${Buffer.from(mtl).toString("base64")}`;
+      const resolveUrl = (uri: string): string => {
+        asked.push(uri);
+        return uri === cube.mtlName ? dataUrl : uri;
+      };
+      await loadModel(bytes(cube.obj), "obj", "#888888", resolveUrl);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // three ist nach der MTL-Texturaufloesung gefragt worden (der Test erreicht die Stelle) ...
+    expect(asked.filter((u) => /evil|etc\/passwd/.test(u)).length).toBeGreaterThan(0);
+    // ... und hat zu keiner Zeit eine Netz- oder Datei-URL bekommen.
+    expect(handedToThree.filter((u) => /^(https?:|file:|\/\/)/i.test(u))).toEqual([]);
   });
 
   it("kaputte MTL bricht das Laden nicht ab", async () => {
