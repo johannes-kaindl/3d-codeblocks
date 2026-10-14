@@ -11,6 +11,15 @@ describe("detectFormat", () => {
     expect(detectFormat("a/b.stl")).toBe("stl");
   });
 
+  it("maps the print and exchange formats", () => {
+    expect(detectFormat("druck/teil.3mf")).toBe("3mf");
+    expect(detectFormat("druck/teil.OBJ")).toBe("obj");
+    expect(detectFormat("scan/raum.ply")).toBe("ply");
+    expect(detectFormat("druck/teil.gcode")).toBe("gcode");
+    expect(detectFormat("scan/wolke.xyz")).toBe("xyz");
+    expect(detectFormat("scan/wolke.pcd")).toBe("pcd");
+  });
+
   it("ignores case", () => {
     expect(detectFormat("A/B.GLB")).toBe("gltf");
   });
@@ -20,7 +29,7 @@ describe("detectFormat", () => {
   });
 
   it("returns null for unknown or missing extensions", () => {
-    expect(detectFormat("a/b.obj")).toBeNull();
+    expect(detectFormat("a/b.fbx")).toBeNull();
     expect(detectFormat("a/b")).toBeNull();
     expect(detectFormat("")).toBeNull();
   });
@@ -35,6 +44,6 @@ describe("detectFormat", () => {
   });
 
   it("lists every supported extension", () => {
-    expect(SUPPORTED_EXTENSIONS).toEqual([".glb", ".gltf", ".stl", ".shapes"]);
+    expect(SUPPORTED_EXTENSIONS).toEqual([".glb", ".gltf", ".stl", ".3mf", ".obj", ".ply", ".gcode", ".xyz", ".pcd", ".shapes"]);
   });
 });

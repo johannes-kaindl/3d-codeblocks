@@ -36,6 +36,7 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > | 7. Kein Leck | B9 (achtmal im Block getippt, keine verwaisten Canvas) |
 > | 8. Klick-Modus | **bewusst nicht doppelt** — Abschnitt „aktiver Block" deckt ihn mit 1–3 ab |
 > | 9. Fehlerfälle | B13 (fehlende Datei) · B14 (falsche Endung) · B15 (Tippfehler-Schlüssel: Hinweis, Modell bleibt) · B19 (Draco-GLB: Grund und Ausweg, kein Modell; der Treiber legt einen Container an, der Draco als Pflicht-Erweiterung deklariert, ohne Nutzlast — gemessen wird die Vorab-Erkennung, nicht der Decoder) |
+> | 10b. Weitere Formate (Roadmap S7) | B20 (3MF) · B21 (OBJ ohne MTL, Theme-Material: kein Farbton im Bild) · B22 (OBJ mit MTL im selben Ordner: Rot und Grün der MTL im Bild — ohne diese Probe haben B21 und B22 dieselben Zahlen) · B23 (PLY mit Flächen und Eckenfarben) · B24 (G-Code-Linien) · B25 (XYZ mit Farben) · B26 (PCD ohne Farbe). Die Dateien erzeugt der Fixture-Generator, der Treiber legt sie an und löscht sie sofort wieder (die erste Datei einer Endung ist Prüfmaterial anderer Abschnitte). Gegenprobe: MTL-Zweig stillgelegt → B22 rot, G-Code-Zweig stillgelegt → B24 rot |
 > | 10. STL | B16 — eine echte `.stl` aus dem Vault hat Vorrang; gibt es keine, legt der Lauf seine eigene an (gemessen wird der **Deckungsgrad**, nicht die Farbzahl: ein einfacher Körper säße sonst genau auf der Schwelle; Schwelle seit 2026-10-01 ≥ 2 % und ≥ 3 Farbtöne, vorher 5 %) |
 > | Zusätzlich: Kontext-Budget | B11 (`Maximum live 3D views` = 2 → nur zwei live) |
 > | Zusätzlich: Poster-Qualität | B12 (das Standbild zeigt das Modell, keine leere Fläche) |
@@ -231,7 +232,7 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
       erscheint, Klick aktiviert den Viewport.
 - [ ] **9. Fehlerfälle** — je die richtige Meldung:
       - [ ] fehlende Datei → „File not found: <pfad>"
-      - [ ] falsche Endung (`.obj`) → „Unsupported format …"
+      - [ ] falsche Endung (`.fbx`) → „Unsupported format …"
       - [ ] Draco-GLB → „Compressed glTF is not supported …"
       - [ ] Tippfehler-Schlüssel (`heigth: 400`) → Hinweis unter dem Viewport, Modell
             wird trotzdem angezeigt
@@ -743,7 +744,7 @@ Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprung
       erscheint, Klick aktiviert den Viewport.
 - [ ] **9. Fehlerfälle** — je die richtige Meldung:
       - [ ] fehlende Datei → „File not found: <pfad>"
-      - [ ] falsche Endung (`.obj`) → „Unsupported format …"
+      - [ ] falsche Endung (`.fbx`) → „Unsupported format …"
       - [ ] Draco-GLB → „Compressed glTF is not supported …"
       - [ ] Tippfehler-Schlüssel (`heigth: 400`) → Hinweis unter dem Viewport, Modell
             wird trotzdem angezeigt

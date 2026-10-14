@@ -12,7 +12,7 @@
 import { MarkdownRenderChild, Notice, type App, type TFile } from "obsidian";
 import type { ActiveViewport } from "../core/active-viewport";
 import { embedHeightFromAttrs } from "../core/embed-src";
-import { detectFormat } from "../core/format";
+import { MODEL_FILE_EXTENSIONS, detectFormat } from "../core/format";
 import { parseLockedPrefixes } from "../core/settings-types";
 import { EditCoordinator, type EditIo } from "./edit-mode";
 import { buildBox, syncBadge, type BoxParts } from "./render-box";
@@ -64,7 +64,7 @@ interface EmbedRegistry {
   unregisterExtension?(extension: string): void;
 }
 
-const MODEL_EXTENSIONS = ["gltf", "glb", "stl", "shapes"] as const;
+const MODEL_EXTENSIONS = [...MODEL_FILE_EXTENSIONS, "shapes"] as const;
 
 export class ModelEmbed extends MarkdownRenderChild implements TrackedView {
   private parts: BoxParts | null = null;

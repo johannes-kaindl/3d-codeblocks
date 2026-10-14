@@ -15,6 +15,7 @@ import {
   Object3D,
   PMREMGenerator,
   PerspectiveCamera,
+  Points,
   Scene,
   Texture,
   Vector3,
@@ -231,7 +232,7 @@ export class Viewport {
 
     if (this.model) {
       this.model.traverse((child) => {
-        if (child instanceof Mesh && child.userData.tdcbThemedMaterial === true) {
+        if ((child instanceof Mesh || child instanceof Points) && child.userData.tdcbThemedMaterial === true) {
           const material = child.material as { color?: Color };
           material.color?.set(colors.material);
         }

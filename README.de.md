@@ -16,7 +16,7 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 
 ## Features
 
-- `.glb`-, `.gltf`- und `.stl`-Dateien in einem eigenen Tab öffnen oder mit `![[…]]`
+- `.glb`-, `.gltf`-, `.stl`-, `.3mf`-, `.obj`-, `.ply`-, `.gcode`-, `.xyz`- und `.pcd`-Dateien in einem eigenen Tab öffnen oder mit `![[…]]`
   einbetten, so wie man ein PDF einbettet.
 - Zwei Codeblöcke: `3d` für einen Dateiverweis mit optionalem Titel und optionaler
   Höhe, `gltf` für glTF-JSON direkt in der Notiz.
@@ -55,7 +55,7 @@ bauen, dann `main.js`, `manifest.json` und `styles.css` nach
 
 ### Vier Wege, ein Modell zu zeigen
 
-**1. Eine Datei öffnen.** Klick auf eine `.gltf`, `.glb` oder `.stl` im Dateibaum — sie
+**1. Eine Datei öffnen.** Klick auf eine Modelldatei (`.gltf`, `.glb`, `.stl`, `.3mf`, `.obj`, `.ply`, `.gcode`, `.xyz` oder `.pcd`) im Dateibaum — sie
 öffnet sich in einem eigenen Tab, in voller Größe und vollständig bedienbar.
 
 **2. Eine Datei einbetten** mit der normalen Wiki-Embed-Syntax. `|<höhe>` setzt eine
@@ -104,6 +104,11 @@ Datei nehmen.)
 |---|---|
 | `.glb`, `.gltf` | Materialien und Farben kommen aus der Datei |
 | `.stl` | Das Format kennt keine Materialien; das Plugin setzt ein theme-treues Standardmaterial — außer die Datei bringt Flächenfarben mit |
+| `.3mf` | 3D-Druck; Farben und Materialien kommen aus der Datei. 3MF ist Z-oben, das Plugin dreht es nach Y-oben |
+| `.obj` | Materialien kommen aus der in der Datei genannten `.mtl` (`mtllib`), wenn sie im selben Ordner liegt; ohne sie gilt das theme-treue Standardmaterial |
+| `.ply` | Flächen mit den Farben der Datei; eine Datei ohne Flächen erscheint als Punktwolke |
+| `.gcode` | Der Druckerpfad als Linien (Leerfahrten rot, Extrusion grün); kein Körper, die Kamera rahmt den Pfad |
+| `.xyz`, `.pcd` | Punktwolken; Farben kommen aus der Datei, sonst die Theme-Farbe. Die Punktgröße folgt der Ausdehnung der Wolke |
 
 <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/colored-stl.png" width="380" alt="Ein STL-Modell mit eigenen Flächenfarben — jede Fläche in einer anderen Farbe statt dem Theme-Standard">
 

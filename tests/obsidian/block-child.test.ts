@@ -123,14 +123,14 @@ describe("ModelBlock", () => {
 
   it("rejects an unsupported extension before touching the vault", async () => {
     const { deps, app } = makeDeps();
-    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.obj"));
+    app.metadataCache.getFirstLinkpathDest = vi.fn().mockReturnValue(glbFile("model.fbx"));
     const el = makeFakeEl();
 
-    const block = new ModelBlock(el, "file: model.obj", "note.md", deps);
+    const block = new ModelBlock(el, "file: model.fbx", "note.md", deps);
     block.onload();
     await block.loadNow();
 
-    expect(JSON.stringify(el.children)).toContain("Unsupported format: model.obj");
+    expect(JSON.stringify(el.children)).toContain("Unsupported format: model.fbx");
     expect(app.vault.readBinary).not.toHaveBeenCalled();
   });
 

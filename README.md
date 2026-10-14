@@ -14,7 +14,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 
 ## Features
 
-- Open `.glb`, `.gltf` and `.stl` files in their own pane, or embed them with `![[…]]`
+- Open `.glb`, `.gltf`, `.stl`, `.3mf`, `.obj`, `.ply`, `.gcode`, `.xyz` and `.pcd` files in their own pane, or embed them with `![[…]]`
   the way you would embed a PDF.
 - Two code blocks: `3d` for a file reference with an optional title and height, `gltf`
   for glTF JSON written straight into the note.
@@ -51,7 +51,7 @@ Install, then Enable.
 
 ### Ways to show a model
 
-**1. Open a file.** Click a `.gltf`, `.glb` or `.stl` in the file explorer — it opens
+**1. Open a file.** Click a model file (`.gltf`, `.glb`, `.stl`, `.3mf`, `.obj`, `.ply`, `.gcode`, `.xyz` or `.pcd`) in the file explorer — it opens
 in its own pane, full size, fully interactive.
 
 **2. Embed a file** with the normal wiki-embed syntax. Add `|<height>` for a fixed height:
@@ -109,6 +109,11 @@ box Leg-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3
 | `.glb`, `.gltf` | Materials and colours come from the file |
 | `.shapes` | Text, one part per line (box, cylinder, sphere, cone); see [Modelling with shapes](https://github.com/johannes-kaindl/3d-codeblocks/blob/main/docs/guide/modelling-with-shapes.md) |
 | `.stl` | No materials in the format; the plugin applies a theme-aware default, unless the file carries per-facet colours |
+| `.3mf` | 3D printing; colours and materials come from the file. 3MF is Z-up, the plugin turns it to Y-up |
+| `.obj` | Materials come from the `.mtl` named in the file (`mtllib`) if it lies in the same folder; without one the theme-aware default applies |
+| `.ply` | Faces with the colours of the file; a file without faces is shown as a point cloud |
+| `.gcode` | The printer path as lines (travel moves red, extrusion green); no solid, the camera fits the path |
+| `.xyz`, `.pcd` | Point clouds; colours come from the file, otherwise the theme colour. The point size follows the extent of the cloud |
 
 <img src="https://raw.githubusercontent.com/johannes-kaindl/3d-codeblocks/main/docs/images/colored-stl.png" width="380" alt="An STL model with its own per-facet colours, each face a different colour instead of the theme default">
 

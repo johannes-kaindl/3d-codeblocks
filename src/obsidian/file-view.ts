@@ -1,4 +1,4 @@
-// Datei direkt öffnen: `.gltf/.glb/.stl` im Datei-Explorer anklicken öffnet diese
+// Datei direkt öffnen: `.gltf/.glb/.stl/.3mf/.obj/.ply/.gcode/.xyz/.pcd` im Datei-Explorer anklicken öffnet diese
 // View im ganzen Pane — wie der PDF-Viewer. `registerExtensions` verdrahtet die
 // Endungen mit `VIEW_TYPE_3D` (in main.ts).
 //

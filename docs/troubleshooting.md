@@ -8,7 +8,7 @@ Each entry starts with the message you see, as the plugin words it.
 
 **Fix:** Check the spelling and the extension. The path is resolved like a wikilink: relative, vault-absolute or short form all work. Renamed or moved the file? Update the block.
 
-## Unsupported format: `<path>` (supported: .glb, .gltf, .stl)
+## Unsupported format: `<path>` (supported: .glb, .gltf, .stl, .3mf, .obj, .ply, .gcode, .xyz, .pcd, .shapes)
 
 **Cause:** The file has another extension.
 

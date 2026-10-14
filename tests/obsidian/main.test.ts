@@ -131,7 +131,7 @@ describe("shapes registration", () => {
     await plugin.onload();
     const calls = plugin.registerExtensions.mock.calls as [string[], string][];
     expect(calls).toContainEqual([["shapes"], VIEW_TYPE_SHAPES]);
-    expect(calls).toContainEqual([["gltf", "glb", "stl"], VIEW_TYPE_3D]);
+    expect(calls).toContainEqual([["gltf", "glb", "stl", "3mf", "obj", "ply", "gcode", "xyz", "pcd"], VIEW_TYPE_3D]);
     expect(calls.filter(([exts, type]) => exts.includes("shapes") && type === VIEW_TYPE_3D)).toEqual([]);
     const types = plugin.registerView.mock.calls.map((c: unknown[]) => c[0]);
     expect(types).toContain("tdcb-shapes-file");

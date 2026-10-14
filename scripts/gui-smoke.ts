@@ -48,11 +48,11 @@
  * bleibt die View leer und man debuggt ein Phantom (CORE-TEST-02).
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 
-import { cameraFloorGltf, dracoDeclaredGlb } from "../docs/images/fixture/make-models.mjs";
+import { cameraFloorGltf, coloredCubeObj, cube3mf, dracoDeclaredGlb, octahedronPly, spherePcd, sphereXyz, towerGcode } from "../docs/images/fixture/make-models.mjs";
 import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
 import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
@@ -239,7 +239,7 @@ const FALLBACK_STL = [
 const SMOKE_MODEL_BASE = "_tdcb-smoke-model";
 /** Existierende Datei mit nicht unterstützter Endung: ohne sie meldet der Prüfling
  *  "File not found" statt "Unsupported format" und der Prüfpunkt misst den falschen Fall. */
-const SMOKE_WRONG_EXT = "_tdcb-smoke-model.obj";
+const SMOKE_WRONG_EXT = "_tdcb-smoke-model.fbx";
 /** Pruefmaterial des Kamera-Abschnitts: das Demo-Erdgeschoss MIT Kameras, erzeugt aus
  *  derselben Quelle wie der Aufnahme-Vault (`docs/images/fixture/make-models.mjs`).
  *  Der Abschnitt bringt es selbst mit, weil er ueber konkrete Kameranamen redet — ein
@@ -2045,6 +2045,100 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
         ? `${splitStats.coverage}% der Fläche belegt · ${splitStats.colors} Farbtöne · Meldung: ${splitStats.meldung || "keine"}`
         : "nichts gezeichnet — die .bin wurde nicht gefunden oder nicht geladen",
     );
+  }
+
+  // --- B20-B26. Weitere Formate (Roadmap S7) --------------------------------------------------------------------------
+  // Je Format eine echte Beispieldatei aus dem Fixture-Generator, als Block `file: …` in einer eigenen Notiz. Gemessen wird das BILD
+  // (Deckungsgrad und Farbtoene wie B16), nicht dass ein Loader nicht wirft; ohne Modell steht ein leerer Canvas bei 0 % und einem Ton.
+  // Linien (G-Code) und Punkte (XYZ, PCD) fuellen weniger Flaeche als ein Koerper, ihre Schwelle ist deshalb niedriger. Jede Datei wird sofort
+  // nach der Messung geloescht (die erste Datei einer Endung ist Pruefmaterial anderer Abschnitte, CORE-TEST-21).
+  const cube = coloredCubeObj();
+  const formatProbes: { id: string; titel: string; dateien: { name: string; data: string | Uint8Array }[]; haupt: string; deckung: number; farben: number; farbton?: "mehrere" | "keiner" }[] = [
+    { id: "B20", titel: "Eine 3MF-Datei lädt und ist sichtbar", dateien: [{ name: "_tdcb-smoke-cube.3mf", data: cube3mf() }], haupt: "_tdcb-smoke-cube.3mf", deckung: 2, farben: 3 },
+    { id: "B21", titel: "Eine OBJ-Datei ohne MTL lädt im Theme-Material", dateien: [{ name: "_tdcb-smoke-plain.obj", data: cube.obj.replace("mtllib colored-cube.mtl\n", "").replace(/^usemtl .*\n/gm, "") }], haupt: "_tdcb-smoke-plain.obj", deckung: 2, farben: 3, farbton: "keiner" },
+    { id: "B22", titel: "Eine OBJ-Datei mit MTL im selben Ordner zeigt die Materialfarben der MTL", dateien: [{ name: "_tdcb-smoke-colored.obj", data: cube.obj }, { name: cube.mtlName, data: cube.mtl }], haupt: "_tdcb-smoke-colored.obj", deckung: 2, farben: 5, farbton: "mehrere" },
+    { id: "B23", titel: "Eine PLY-Datei mit Flächen und Eckenfarben lädt und ist sichtbar", dateien: [{ name: "_tdcb-smoke-octa.ply", data: octahedronPly() }], haupt: "_tdcb-smoke-octa.ply", deckung: 2, farben: 5 },
+    { id: "B24", titel: "Eine G-Code-Datei zeigt ihre Linien", dateien: [{ name: "_tdcb-smoke-tower.gcode", data: towerGcode() }], haupt: "_tdcb-smoke-tower.gcode", deckung: 1, farben: 2 },
+    { id: "B25", titel: "Eine XYZ-Punktwolke mit Farben lädt und ist sichtbar", dateien: [{ name: "_tdcb-smoke-sphere.xyz", data: sphereXyz() }], haupt: "_tdcb-smoke-sphere.xyz", deckung: 1, farben: 4 },
+    { id: "B26", titel: "Eine PCD-Punktwolke ohne Farbe lädt im Theme-Material", dateien: [{ name: "_tdcb-smoke-sphere.pcd", data: spherePcd() }], haupt: "_tdcb-smoke-sphere.pcd", deckung: 1, farben: 2 },
+  ];
+  for (const probe of formatProbes) {
+    const name = `${probe.id}. ${probe.titel}`;
+    for (const datei of probe.dateien) createdNotes.add(datei.name);
+    createdNotes.add(`_tdcb-gui-smoke-${probe.id}.md`);
+    await cdp.evaluate(`
+      for (const datei of ${JSON.stringify(probe.dateien.map((d) => ({ name: d.name, b64: Buffer.from(d.data).toString("base64") })))}) {
+        const roh = atob(datei.b64);
+        const bytes = new Uint8Array(roh.length);
+        for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+        const alt = app.vault.getAbstractFileByPath(datei.name);
+        if (alt) await app.vault.modifyBinary(alt, bytes.buffer);
+        else await app.vault.createBinary(datei.name, bytes.buffer);
+      }
+      return true;
+    `);
+    await closeExtraLeaves(cdp);
+    await openNote(cdp, `_tdcb-gui-smoke-${probe.id}.md`, [`${fence}3d`, `file: ${probe.haupt}`, `title: ${probe.id}`, fence, ""].join("\n"), "preview");
+    let stats = await pollUntil<{ coverage: number; colors: number; message: string }>(
+      cdp,
+      `
+        ${SAMPLER}
+        const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas");
+        const stats = canvas ? sample(canvas) : null;
+        if (!stats || stats.coverage < ${probe.deckung} || stats.colors < ${probe.farben}) return null;
+        const box = document.querySelector(".markdown-preview-view .tdcb-message-error");
+        return { coverage: stats.coverage, colors: stats.colors, message: box ? box.textContent.trim() : "" };
+      `,
+      30_000,
+    );
+    // Bei Misserfolg die Meldung des Blocks nennen: „nichts gezeichnet“ allein sagt nicht, ob der Loader geworfen hat.
+    const meldung = stats === null
+      ? await cdp.evaluate<string>(`const box = document.querySelector(".markdown-preview-view .tdcb-message-error, .markdown-preview-view .tdcb-message"); return box ? box.textContent.trim() : "keine Meldung";`)
+      : "";
+    // Farbton-Probe (OBJ mit/ohne MTL): die Dateifarben der MTL muessen im Bild ankommen, das Theme-Material bleibt grau. Ohne diese Probe haetten
+    // B21 und B22 dieselben Zahlen (gemessen: je 28 % und 9 Farbtoene) — ein Beleg, dass die MTL angewendet wird, sind sie nicht.
+    let farbton = "";
+    if (stats !== null && probe.farbton) {
+      const h = await cdp.evaluate<{ rot: number; gruen: number; blau: number }>(`
+        const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas");
+        const off = document.createElement("canvas");
+        off.width = 96; off.height = 72;
+        const ctx = off.getContext("2d");
+        ctx.drawImage(canvas, 0, 0, off.width, off.height);
+        const d = ctx.getImageData(0, 0, off.width, off.height).data;
+        let rot = 0, gruen = 0, blau = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const [r, g, b] = [d[i], d[i + 1], d[i + 2]];
+          if (r > g + 40 && r > b + 40) rot++;
+          else if (g > r + 30 && g > b + 30) gruen++;
+          else if (b > r + 40 && b > g + 20) blau++;
+        }
+        const n = off.width * off.height;
+        return { rot: Math.round((rot / n) * 1000) / 10, gruen: Math.round((gruen / n) * 1000) / 10, blau: Math.round((blau / n) * 1000) / 10 };
+      `);
+      const vorhanden = [h.rot, h.gruen, h.blau].filter((x) => x >= 1).length;
+      farbton = ` · Rot ${h.rot}% Grün ${h.gruen}% Blau ${h.blau}%`;
+      if (probe.farbton === "mehrere" && vorhanden < 2) stats = null;
+      if (probe.farbton === "keiner" && vorhanden > 0) stats = null;
+    }
+    record(
+      name,
+      stats !== null && stats.message === "",
+      stats ? `${stats.coverage}% der Fläche belegt · ${stats.colors} Farbtöne · ${probe.haupt}${farbton}` : `nichts gezeichnet oder Farbe falsch (${probe.haupt})${farbton} · Meldung: ${meldung}`,
+    );
+    // Regel 12: das Bild selbst ansehen (Ablage /tmp/w22-shots/3d-codeblocks/); der Canvas behaelt seinen Puffer (preserveDrawingBuffer).
+    const bild = await cdp.evaluate<string | null>(`const canvas = document.querySelector(".markdown-preview-view .tdcb-block canvas"); return canvas ? canvas.toDataURL("image/png") : null;`);
+    if (bild) {
+      mkdirSync("/tmp/w22-shots/3d-codeblocks", { recursive: true });
+      writeFileSync(`/tmp/w22-shots/3d-codeblocks/${probe.id}.png`, Buffer.from(bild.split(",")[1] ?? "", "base64"));
+    }
+    await cdp.evaluate(`
+      for (const name of ${JSON.stringify(probe.dateien.map((d) => d.name))}) {
+        const f = app.vault.getAbstractFileByPath(name);
+        if (f) await app.vault.delete(f);
+      }
+      return true;
+    `);
   }
 
   // --- B19. Draco-GLB -----------------------------------------------------
@@ -5630,6 +5724,13 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "B17. Die drei Beleuchtungs-Zustände erzeugen drei verschiedene Bilder",
     "B18. Ein mehrteiliges glTF findet seine .bin im Vault",
     "B19. Eine Draco-GLB nennt Grund und Ausweg und zeigt kein Modell",
+    "B20. Eine 3MF-Datei lädt und ist sichtbar",
+    "B21. Eine OBJ-Datei ohne MTL lädt im Theme-Material",
+    "B22. Eine OBJ-Datei mit MTL im selben Ordner zeigt die Materialfarben der MTL",
+    "B23. Eine PLY-Datei mit Flächen und Eckenfarben lädt und ist sichtbar",
+    "B24. Eine G-Code-Datei zeigt ihre Linien",
+    "B25. Eine XYZ-Punktwolke mit Farben lädt und ist sichtbar",
+    "B26. Eine PCD-Punktwolke ohne Farbe lädt im Theme-Material",
     "SMOKE.md 'Zusätzlich' (Popout-Fenster)",
     "SMOKE.md Punkt 8 (Klick-Modus)",
   ],

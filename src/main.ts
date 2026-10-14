@@ -8,6 +8,7 @@ import {
 } from "obsidian";
 import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
+import { MODEL_FILE_EXTENSIONS } from "./core/format";
 import type { PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
 import { fillMissingRowModels } from "./vendor/kit/endpoint_config";
@@ -217,7 +218,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       this.track(view);
       return view;
     });
-    this.registerExtensions(["gltf", "glb", "stl"], VIEW_TYPE_3D);
+    this.registerExtensions([...MODEL_FILE_EXTENSIONS], VIEW_TYPE_3D);
     // `.shapes` bekommt die eigene Dateiansicht (Text + Modell), nicht die ModelFileView.
     this.registerView(VIEW_TYPE_SHAPES, (leaf: WorkspaceLeaf) => {
       const view = new ShapesFileView(leaf, {

@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Seven more file formats** (open in their own pane, embed with `![[…]]` or `file:` in a block): **`.3mf`** (3D printing; colours and materials from the file, turned from Z-up to Y-up), **`.obj`** (materials from the `.mtl` named in the file when it lies in the same folder, otherwise the theme-aware default; a missing or broken `.mtl` does not stop the model), **`.ply`** (faces with the colours of the file, a file without faces as a point cloud), **`.gcode`** (the printer path as lines, travel red and extrusion green), **`.xyz`** and **`.pcd`** (point clouds, colours from the file or the theme colour, point size follows the extent). A file without any geometry now says so ("the file holds no geometry") instead of showing an empty view. The bundle grows from 851 to 904 KB. README and getting-started list the formats; `.fbx`, `.dae` and the like stay unsupported.
 - **New command "Save current view as image":** saves the current frame of the active 3D model as a PNG in the attachment folder of the open note. An existing file is never overwritten (the file name is numbered instead). It works for code blocks, embeds and the file view; while the model is still loading it says so instead of saving an empty picture.
 
 ### Fixed

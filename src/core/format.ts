@@ -1,13 +1,22 @@
 // Dateiendung → Format. Pure.
 
-export type ModelFormat = "gltf" | "stl" | "shapes";
+export type ModelFormat = "gltf" | "stl" | "shapes" | "3mf" | "obj" | "ply" | "gcode" | "xyz" | "pcd";
 
-export const SUPPORTED_EXTENSIONS = [".glb", ".gltf", ".stl", ".shapes"] as const;
+export const SUPPORTED_EXTENSIONS = [".glb", ".gltf", ".stl", ".3mf", ".obj", ".ply", ".gcode", ".xyz", ".pcd", ".shapes"] as const;
+
+/** Endungen ohne Punkt, wie Obsidians `registerExtensions` sie will (ohne `.shapes`: das hat eine eigene Dateiansicht). */
+export const MODEL_FILE_EXTENSIONS = ["gltf", "glb", "stl", "3mf", "obj", "ply", "gcode", "xyz", "pcd"] as const;
 
 const BY_EXTENSION: Record<string, ModelFormat> = {
   ".glb": "gltf",
   ".gltf": "gltf",
   ".stl": "stl",
+  ".3mf": "3mf",
+  ".obj": "obj",
+  ".ply": "ply",
+  ".gcode": "gcode",
+  ".xyz": "xyz",
+  ".pcd": "pcd",
   ".shapes": "shapes",
 };
 

@@ -402,6 +402,170 @@ export function dracoDeclaredGlb() {
   return new Uint8Array(out);
 }
 
+// --- Weitere Formate (Roadmap S7): je Format eine kleine, echte Beispieldatei ---------------------------------------------
+// Alle als Generatoren, nicht als getrackte Blobs (wie die uebrigen Modelle). Die Koerper sind absichtlich einfach, aber sichtbar gross
+// im Bild: der GUI-Smoke misst Deckungsgrad und Farbtoene.
+
+const CUBE_CORNERS = [
+  [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+  [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1],
+];
+// Flaechen als Vierecke (gegen den Uhrzeigersinn von aussen), je Flaeche ein Material.
+const CUBE_FACES = [
+  { q: [0, 3, 2, 1], m: "rot" }, { q: [4, 5, 6, 7], m: "gruen" }, { q: [0, 1, 5, 4], m: "blau" },
+  { q: [2, 3, 7, 6], m: "rot" }, { q: [1, 2, 6, 5], m: "gruen" }, { q: [3, 0, 4, 7], m: "blau" },
+];
+
+/** OBJ mit zugehoeriger MTL (`mtllib colored-cube.mtl`): ein Wuerfel, drei Materialien. */
+export function coloredCubeObj() {
+  const lines = ["# 3d-codeblocks fixture: colored cube", "mtllib colored-cube.mtl", "o Cube"];
+  for (const [x, y, z] of CUBE_CORNERS) lines.push(`v ${x} ${y} ${z}`);
+  let current = "";
+  for (const f of CUBE_FACES) {
+    if (f.m !== current) { lines.push(`usemtl ${f.m}`); current = f.m; }
+    lines.push(`f ${f.q.map((i) => i + 1).join(" ")}`);
+  }
+  const mtl = [
+    "newmtl rot", "Kd 0.85 0.1 0.1", "newmtl gruen", "Kd 0.1 0.7 0.2", "newmtl blau", "Kd 0.15 0.25 0.9",
+  ].join("\n") + "\n";
+  return { obj: lines.join("\n") + "\n", mtl, mtlName: "colored-cube.mtl" };
+}
+
+/** PLY (ASCII) mit Flaechen und Farben je Ecke: ein Oktaeder. */
+export function octahedronPly() {
+  const v = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const col = [[230, 60, 60], [60, 200, 90], [60, 90, 230], [240, 200, 40], [200, 80, 220], [60, 210, 210]];
+  const f = [[0, 2, 4], [2, 1, 4], [1, 3, 4], [3, 0, 4], [2, 0, 5], [1, 2, 5], [3, 1, 5], [0, 3, 5]];
+  return [
+    "ply", "format ascii 1.0", `element vertex ${v.length}`,
+    "property float x", "property float y", "property float z", "property uchar red", "property uchar green", "property uchar blue",
+    `element face ${f.length}`, "property list uchar int vertex_indices", "end_header",
+    ...v.map((p, i) => `${p.join(" ")} ${col[i].join(" ")}`),
+    ...f.map((t) => `3 ${t.join(" ")}`),
+  ].join("\n") + "\n";
+}
+
+/** Punkte auf einer Kugel (Fibonacci-Gitter): `n` Stuecke, Radius 1 — Rohstoff fuer XYZ, PCD und PLY ohne Flaechen. */
+function spherePoints(n) {
+  const out = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i += 1) {
+    const y = 1 - (2 * (i + 0.5)) / n;
+    const r = Math.sqrt(1 - y * y);
+    const t = golden * i;
+    out.push([Math.cos(t) * r, y, Math.sin(t) * r]);
+  }
+  return out;
+}
+
+/** XYZ: eine Zeile je Punkt, mit Farbe (`x y z r g b`): Himmelsrichtung als Farbverlauf. */
+export function sphereXyz() {
+  return spherePoints(4000).map(([x, y, z]) => {
+    const c = [x, y, z].map((q) => Math.round(((q + 1) / 2) * 255));
+    return `${x.toFixed(4)} ${y.toFixed(4)} ${z.toFixed(4)} ${c.join(" ")}`;
+  }).join("\n") + "\n";
+}
+
+/** PCD (ASCII, v0.7) ohne Farbe: dieselbe Kugel — misst nebenbei den Theme-Farben-Pfad der Punktwolke. */
+export function spherePcd() {
+  const pts = spherePoints(4000);
+  return [
+    "# .PCD v0.7 - Point Cloud Data file format", "VERSION 0.7", "FIELDS x y z", "SIZE 4 4 4", "TYPE F F F", "COUNT 1 1 1",
+    `WIDTH ${pts.length}`, "HEIGHT 1", "VIEWPOINT 0 0 0 1 0 0 0", `POINTS ${pts.length}`, "DATA ascii",
+    ...pts.map((p) => p.map((q) => q.toFixed(4)).join(" ")),
+  ].join("\n") + "\n";
+}
+
+/** G-Code: ein Turm aus 40 quadratischen Schichten (Z oben, Millimeter), je Schicht Umriss + Fuellung — dicht genug, dass die Linien im Bild tragen. */
+export function towerGcode() {
+  const lines = ["; 3d-codeblocks fixture: tower", "G21", "G90", "M82", "G92 E0"];
+  let e = 0;
+  const move = (x, y, z, extrude) => {
+    if (extrude) e += 0.4;
+    lines.push(`G1 X${x} Y${y} Z${z}${extrude ? ` E${e.toFixed(2)}` : ""} F1500`);
+  };
+  for (let layer = 0; layer < 40; layer += 1) {
+    const z = ((layer + 1) * 0.3).toFixed(2);
+    move(0, 0, z, false);
+    for (const [x, y] of [[20, 0], [20, 20], [0, 20], [0, 0]]) move(x, y, z, true);
+    for (let k = 2; k < 20; k += 2) {
+      move(k, 0, z, false);
+      move(layer % 2 === 0 ? k : 0, layer % 2 === 0 ? 20 : k, z, true);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+// --- 3MF = ZIP: ein Schreiber ohne Kompression ("stored") reicht, die Bibliothek (fflate) liest ihn wie jeden anderen -------
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+const crc32 = (buf) => {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+
+function storedZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const { name, data } of entries) {
+    const nameBytes = Buffer.from(name, "utf8");
+    const body = Buffer.from(data, "utf8");
+    const crc = crc32(body);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6); local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10); local.writeUInt16LE(0x21, 12); local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(body.length, 18); local.writeUInt32LE(body.length, 22); local.writeUInt16LE(nameBytes.length, 26); local.writeUInt16LE(0, 28);
+    locals.push(local, nameBytes, body);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0x21, 14); central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(body.length, 20); central.writeUInt32LE(body.length, 24); central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBytes);
+    offset += local.length + nameBytes.length + body.length;
+  }
+  const centralSize = centrals.reduce((n, b) => n + b.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+
+/** 3MF (ZIP mit `3D/3dmodel.model`): ein Wuerfel aus 12 Dreiecken, 20 mm, mit Basismaterial (Farbe). */
+export function cube3mf() {
+  const v = CUBE_CORNERS.map(([x, y, z]) => [(x + 1) * 10, (y + 1) * 10, (z + 1) * 10]);
+  const tris = CUBE_FACES.flatMap((f) => [[f.q[0], f.q[1], f.q[2]], [f.q[0], f.q[2], f.q[3]]]);
+  const model = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
+    "<resources>",
+    '<basematerials id="1"><base name="orange" displaycolor="#E8742AFF"/></basematerials>',
+    '<object id="2" type="model" pid="1" pindex="0"><mesh><vertices>',
+    ...v.map(([x, y, z]) => `<vertex x="${x}" y="${y}" z="${z}"/>`),
+    "</vertices><triangles>",
+    ...tris.map(([a, b, c]) => `<triangle v1="${a}" v2="${b}" v3="${c}"/>`),
+    "</triangles></mesh></object></resources>",
+    '<build><item objectid="2"/></build></model>',
+  ].join("\n");
+  const types = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>';
+  const rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>';
+  return new Uint8Array(storedZip([
+    { name: "[Content_Types].xml", data: types },
+    { name: "_rels/.rels", data: rels },
+    { name: "3D/3dmodel.model", data: model },
+  ]));
+}
+
 /** Schreibt die Modelle nach <ziel>/models/ und meldet die Pfade. */
 export function writeModels(target) {
   const modelPath = join(target, "models", "ground-floor.gltf");
@@ -417,6 +581,16 @@ export function writeModels(target) {
   const docCameraPath = join(target, "models", "doc-camera-floor.gltf");
   const colouredStlPath = join(target, "models", "colored-octahedron.stl");
   const metallicPath = join(target, "models", "metallic-orb.gltf");
+  const cube = coloredCubeObj();
+  const formatPaths = [
+    [join(target, "models", "colored-cube.obj"), cube.obj],
+    [join(target, "models", cube.mtlName), cube.mtl],
+    [join(target, "models", "octahedron.ply"), octahedronPly()],
+    [join(target, "models", "sphere.xyz"), sphereXyz()],
+    [join(target, "models", "sphere.pcd"), spherePcd()],
+    [join(target, "models", "tower.gcode"), towerGcode()],
+    [join(target, "models", "cube.3mf"), cube3mf()],
+  ];
   mkdirSync(dirname(modelPath), { recursive: true });
   writeFileSync(modelPath, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
   writeFileSync(editBase, JSON.stringify(groundFloorGltf(), null, 1) + "\n");
@@ -426,6 +600,7 @@ export function writeModels(target) {
   writeFileSync(docCameraPath, JSON.stringify(docCameraGltf(), null, 1) + "\n");
   writeFileSync(colouredStlPath, Buffer.from(colouredOctahedronStl()));
   writeFileSync(metallicPath, JSON.stringify(metallicOrbGltf(), null, 1) + "\n");
+  for (const [path, data] of formatPaths) writeFileSync(path, data);
 
   // Mehrteiliger Export: die `.bin` MUSS `ground-floor.bin` heissen und daneben liegen —
   // der Dateiname steht im JSON und wird relativ zur Modelldatei aufgeloest.
@@ -435,7 +610,7 @@ export function writeModels(target) {
 
   return [
     modelPath, editBase, editPath, stlPath, cameraPath, docCameraPath, splitPath, splitBin,
-    colouredStlPath, metallicPath,
+    colouredStlPath, metallicPath, ...formatPaths.map(([path]) => path),
   ];
 }
 

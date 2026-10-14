@@ -21,6 +21,19 @@ export declare function groundFloorEditGltf(): Record<string, unknown>;
 /** GLB-Container, der Draco als Pflicht-Erweiterung deklariert (ohne Nutzlast) — Pruefmaterial fuer die Vorab-Erkennung. */
 export declare function dracoDeclaredGlb(): Uint8Array;
 
+/** OBJ mit zugehoeriger MTL (`mtllib`): ein Wuerfel, drei Materialien. */
+export declare function coloredCubeObj(): { obj: string; mtl: string; mtlName: string };
+/** PLY (ASCII) mit Flaechen und Farben je Ecke. */
+export declare function octahedronPly(): string;
+/** XYZ mit Farbe (`x y z r g b`), 4000 Punkte auf einer Kugel. */
+export declare function sphereXyz(): string;
+/** PCD (ASCII, ohne Farbe), 4000 Punkte auf einer Kugel. */
+export declare function spherePcd(): string;
+/** G-Code eines 40-schichtigen Turms (Z oben). */
+export declare function towerGcode(): string;
+/** 3MF (ZIP ohne Kompression): ein Wuerfel mit Basismaterial. */
+export declare function cube3mf(): Uint8Array;
+
 /** Schreibt die Modelle nach `<target>/models/` und liefert die Pfade. */
 export declare function writeModels(target: string): string[];
 

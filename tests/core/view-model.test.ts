@@ -34,8 +34,8 @@ describe("toViewModel", () => {
   });
 
   it("lists the supported extensions on an unsupported format", () => {
-    const vm = toViewModel({ kind: "unsupported-format", path: "a/b.obj" });
-    expect(vm.message).toBe("Unsupported format: a/b.obj (supported: .glb, .gltf, .stl, .shapes)");
+    const vm = toViewModel({ kind: "unsupported-format", path: "a/b.fbx" });
+    expect(vm.message).toBe("Unsupported format: a/b.fbx (supported: .glb, .gltf, .stl, .3mf, .obj, .ply, .gcode, .xyz, .pcd, .shapes)");
   });
 
   it("explains why compressed glTF cannot work", () => {
