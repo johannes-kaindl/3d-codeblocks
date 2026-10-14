@@ -18,6 +18,9 @@ export declare function metallicOrbGltf(): Record<string, unknown>;
 /** glTF mit einem verschobenen Knoten — erzeugt das „Unapplied edits"-Abzeichen. */
 export declare function groundFloorEditGltf(): Record<string, unknown>;
 
+/** GLB-Container, der Draco als Pflicht-Erweiterung deklariert (ohne Nutzlast) — Pruefmaterial fuer die Vorab-Erkennung. */
+export declare function dracoDeclaredGlb(): Uint8Array;
+
 /** Schreibt die Modelle nach `<target>/models/` und liefert die Pfade. */
 export declare function writeModels(target: string): string[];
 

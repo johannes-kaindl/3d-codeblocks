@@ -9,6 +9,7 @@ import type { ViewSpec } from "../core/view-spec";
 
 interface HostLike {
   currentView(): ViewSpec | null;
+  snapshot?(): string | null;
   applyView(spec: ViewSpec | null): void;
 }
 
@@ -24,6 +25,7 @@ export function readOnlyController(
   return {
     label,
     getView: () => host()?.currentView() ?? null,
+    snapshot: () => host()?.snapshot?.() ?? null,
     applyView: (spec) => host()?.applyView(spec),
     canSave: () => false,
     async save() {

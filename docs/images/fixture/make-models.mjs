@@ -375,6 +375,33 @@ export function splitGroundFloor() {
   return { gltf, bin };
 }
 
+/**
+ * Ein GLB-Container, dessen JSON-Chunk `KHR_draco_mesh_compression` als PFLICHT-Erweiterung deklariert — ohne BIN-Chunk
+ * und ohne echte Draco-Nutzlast. Das reicht fuer das, was der Pruefling vor dem Loader tut (`inspectGlb` liest
+ * `extensionsRequired` und bricht mit der Draco-Meldung ab); der Decoder selbst ist nie beteiligt. Eine echte
+ * Draco-Datei braucht `gltf-transform` (keine Repo-Abhaengigkeit) und bewiese hier nichts Zusaetzliches.
+ */
+export function dracoDeclaredGlb() {
+  const json = JSON.stringify({
+    asset: { version: "2.0" },
+    extensionsUsed: ["KHR_draco_mesh_compression"],
+    extensionsRequired: ["KHR_draco_mesh_compression"],
+    scene: 0,
+    scenes: [{ nodes: [] }],
+  });
+  // JSON-Chunk wird laut Spec mit Leerzeichen (0x20) auf 4 Byte aufgefuellt.
+  const padded = json + " ".repeat((4 - (json.length % 4)) % 4);
+  const body = Buffer.from(padded, "utf8");
+  const out = Buffer.alloc(12 + 8 + body.length);
+  out.writeUInt32LE(0x46546c67, 0);
+  out.writeUInt32LE(2, 4);
+  out.writeUInt32LE(out.length, 8);
+  out.writeUInt32LE(body.length, 12);
+  out.writeUInt32LE(0x4e4f534a, 16);
+  body.copy(out, 20);
+  return new Uint8Array(out);
+}
+
 /** Schreibt die Modelle nach <ziel>/models/ und meldet die Pfade. */
 export function writeModels(target) {
   const modelPath = join(target, "models", "ground-floor.gltf");

@@ -225,6 +225,11 @@ export class ViewerHost {
     this.viewport.setLighting?.(settings.lighting, settings.modelLights);
   }
 
+  /** PNG-Data-URL des aktuellen Frames; ist der Viewport verdraengt, das Standbild. */
+  snapshot(): string | null {
+    return this.viewport?.capturePoster() ?? this.posterUrl;
+  }
+
   currentView(): ViewSpec | null {
     return this.viewport?.getView() ?? null;
   }

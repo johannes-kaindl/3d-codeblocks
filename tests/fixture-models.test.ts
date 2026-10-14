@@ -10,11 +10,13 @@ import { loadModel } from "../src/viewer/loaders";
 import {
   cameraFloorGltf,
   colouredOctahedronStl,
+  dracoDeclaredGlb,
   groundFloorGltf,
   metallicOrbGltf,
   octahedronStl,
   splitGroundFloor,
 } from "../docs/images/fixture/make-models.mjs";
+import { inspectGlb, unsupportedRequired } from "../src/core/gltf-inspect";
 import { fitCamera } from "../src/core/camera-fit";
 import { fileCameraNames, findFileCamera, type FileCameraInfo } from "../src/core/gltf-cameras";
 import { fileCameraFit } from "../src/viewer/file-camera";
@@ -210,5 +212,23 @@ describe("camera-floor.gltf — Pruefmaterial fuer `view: camera:<name>`", () =>
       auto.position.z - datei.position.z,
     );
     expect(abstand).toBeGreaterThan(3);
+  });
+});
+
+describe("Draco-Fixture fuer den GUI-Smoke", () => {
+  it("ist ein gueltiger GLB-Container, den die Vorab-Erkennung als Draco meldet", () => {
+    const bytes = dracoDeclaredGlb();
+    const inspection = inspectGlb(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    expect(inspection.valid).toBe(true);
+    expect(unsupportedRequired(inspection)).toEqual(["KHR_draco_mesh_compression"]);
+  });
+  it("Gegenprobe: ein Container ohne die Erweiterung wird nicht gemeldet", () => {
+    const glb = dracoDeclaredGlb();
+    // latin1 statt UTF-8: die Header-Bytes sind nicht ASCII und blieben sonst nicht erhalten.
+    const bytes = Buffer.from(Buffer.from(glb).toString("latin1").replace(/KHR_draco_mesh_compression/g, "KHR_materials_unlit_______"), "latin1");
+    expect(bytes.length).toBe(glb.length);
+    const inspection = inspectGlb(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    expect(inspection.valid).toBe(true);
+    expect(unsupportedRequired(inspection)).toEqual([]);
   });
 });

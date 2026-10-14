@@ -32,6 +32,7 @@ import {
 import { PromptPanelView, VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel";
 import { AcceptAsModal, acceptPanel, readTargetText, type AcceptEnv } from "./obsidian/panel-accept";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
+import { saveViewAsImage } from "./obsidian/save-image";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
 import { SourceEditor } from "./obsidian/source-editor";
 import { readSceneColors } from "./obsidian/theme";
@@ -337,6 +338,12 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       id: "clear-view",
       name: "Clear saved view",
       callback: withActive((controller) => void controller.save(null)),
+    });
+
+    this.addCommand({
+      id: "save-view-as-image",
+      name: "Save current view as image",
+      callback: withActive((controller) => void saveViewAsImage(this.app, controller)),
     });
 
     this.addCommand({

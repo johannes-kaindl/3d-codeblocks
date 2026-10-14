@@ -171,6 +171,10 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     this.host?.applyView(spec);
   }
 
+  snapshot(): string | null {
+    return this.host?.snapshot() ?? null;
+  }
+
   canSave(): boolean {
     return this.deps.sectionInfo() !== null;
   }

@@ -22,6 +22,13 @@ describe("readOnlyController", () => {
     expect(host.applyView).toHaveBeenCalledWith(null);
   });
 
+  it("hands the host's snapshot through, and null without host or snapshot support", () => {
+    const host = { ...fakeHost(), snapshot: vi.fn(() => "data:image/png;base64,AAA") };
+    expect(readOnlyController(() => host as any, () => "a.glb").snapshot?.()).toBe("data:image/png;base64,AAA");
+    expect(readOnlyController(() => fakeHost() as any, () => "a.glb").snapshot?.()).toBeNull();
+    expect(readOnlyController(() => null, () => "a.glb").snapshot?.()).toBeNull();
+  });
+
   it("survives a missing host", () => {
     const controller = readOnlyController(() => null, () => "a.glb");
     expect(controller.getView()).toBeNull();

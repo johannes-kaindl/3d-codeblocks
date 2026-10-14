@@ -52,7 +52,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 
-import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
+import { cameraFloorGltf, dracoDeclaredGlb } from "../docs/images/fixture/make-models.mjs";
 import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
 import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
@@ -121,6 +121,8 @@ const SMOKE_MODEL_STL = "_tdcb-smoke-model.stl";
 const SMOKE_MODEL_SPLIT = "_tdcb-smoke-split.gltf";
 const SMOKE_BIN_SPLIT = "_tdcb-smoke-split.bin";
 const SMOKE_NOTE_SPLIT = "_tdcb-gui-smoke-split.md";
+const SMOKE_MODEL_DRACO = "_tdcb-smoke-draco.glb";
+const SMOKE_NOTE_DRACO = "_tdcb-gui-smoke-draco.md";
 /** shapes-DSL (SH1–SH5). Der Titel `Tisch` bestimmt den Namen der Export-Datei
     (`Tisch.gltf`, src/core/shapes/export.ts exportBaseName); sie landet im Attachment-
     Ordner und traegt deshalb kein `_tdcb-`-Praefix — SH5 prueft vorher, dass keine fremde
@@ -791,6 +793,43 @@ async function sectionActiveBlock(cdp: Cdp, model: string): Promise<void> {
     "8. Der Akzent folgt dem Theme (hell ≠ dunkel)",
     themes.dark !== themes.light && themes.dark !== "" && themes.light !== "",
     `dunkel ${themes.dark || "?"} · hell ${themes.light || "?"}`,
+  );
+
+  // --- 9. Befehl "Save current view as image" -------------------------------
+  // Der aktive Block (Punkt 3) ist live. Der Befehl legt ein PNG im Attachment-Ordner ab; gemessen wird, dass es ein PNG ist UND
+  // dass es das Modell zeigt (Deckungsgrad der nicht-transparenten, nicht-hintergrundfarbenen Pixel), nicht eine leere Fläche.
+  const image = await cdp.evaluate<{ path: string; magic: string; coverage: number } | null>(`
+    const before = new Set(app.vault.getFiles().map((f) => f.path));
+    await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:save-view-as-image`)});
+    for (let i = 0; i < 50; i++) {
+      const fresh = app.vault.getFiles().find((f) => !before.has(f.path) && f.extension === "png");
+      if (fresh) {
+        const bytes = new Uint8Array(await app.vault.readBinary(fresh));
+        const magic = [...bytes.slice(0, 4)].map((b) => b.toString(16)).join("");
+        const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+        const c = document.createElement("canvas");
+        c.width = bmp.width; c.height = bmp.height;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(bmp, 0, 0);
+        const px = ctx.getImageData(0, 0, c.width, c.height).data;
+        const r0 = px[0], g0 = px[1], b0 = px[2];
+        let diff = 0;
+        for (let p = 0; p < px.length; p += 4) {
+          if (Math.abs(px[p] - r0) + Math.abs(px[p + 1] - g0) + Math.abs(px[p + 2] - b0) > 24) diff++;
+        }
+        const coverage = Math.round((diff / (px.length / 4)) * 100);
+        const path = fresh.path;
+        await app.vault.delete(fresh);
+        return { path, magic, coverage };
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return null;
+  `);
+  record(
+    "9. 'Save current view as image' legt ein PNG an, das das Modell zeigt",
+    image !== null && image.magic === "89504e47" && image.coverage >= 2,
+    image ? `${image.path} · Magic ${image.magic} · ${image.coverage}% der Fläche weicht vom Hintergrund ab` : "keine neue PNG-Datei im Vault",
   );
 }
 
@@ -1901,9 +1940,37 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     );
   }
 
-    skipped(
-    "SMOKE.md Punkt 9 (Draco-GLB)",
-    "braucht eine Draco-komprimierte Datei im Vault — der Treiber bringt keine Testdaten mit",
+  // --- B19. Draco-GLB -----------------------------------------------------
+  // Der Treiber legt einen GLB-Container an, der Draco als Pflicht-Erweiterung deklariert (`dracoDeclaredGlb`, ohne
+  // Nutzlast): gemessen wird die Vorab-Erkennung samt Ausweg-Hinweis, nicht der Decoder. Der Block darf kein Canvas zeigen.
+  createdNotes.add(SMOKE_MODEL_DRACO);
+  createdNotes.add(SMOKE_NOTE_DRACO);
+  await cdp.evaluate(`
+    const pfad = ${JSON.stringify(SMOKE_MODEL_DRACO)};
+    const roh = atob(${JSON.stringify(Buffer.from(dracoDeclaredGlb()).toString("base64"))});
+    const bytes = new Uint8Array(roh.length);
+    for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+    const alt = app.vault.getAbstractFileByPath(pfad);
+    if (alt) await app.vault.modifyBinary(alt, bytes.buffer);
+    else await app.vault.createBinary(pfad, bytes.buffer);
+    return true;
+  `);
+  await closeExtraLeaves(cdp);
+  await openNote(cdp, SMOKE_NOTE_DRACO, [`${fence}3d`, `file: ${SMOKE_MODEL_DRACO}`, "title: Draco", fence, ""].join("\n"), "preview");
+  const draco = await pollUntil<{ meldung: string; canvas: number }>(
+    cdp,
+    `
+      const preview = document.querySelector(".markdown-preview-view");
+      const block = [...(preview?.querySelectorAll(".tdcb-block") ?? [])].find((b) => b.querySelector(".tdcb-title")?.textContent.trim() === "Draco");
+      const box = block ? block.querySelector(".tdcb-message-error") : null;
+      return box ? { meldung: box.textContent.trim(), canvas: block.querySelectorAll("canvas").length } : null;
+    `,
+    20_000,
+  );
+  record(
+    "B19. Eine Draco-GLB nennt Grund und Ausweg und zeigt kein Modell",
+    draco !== null && draco.meldung.includes("Draco-compressed glTF is not supported") && draco.meldung.includes("Meshopt") && draco.canvas === 0,
+    draco ? `${draco.meldung.slice(0, 70)} · ${draco.canvas} Canvas` : "keine Fehlermeldung im Block",
   );
   skipped(
     "SMOKE.md 'Zusätzlich' (Popout-Fenster)",
@@ -5408,6 +5475,7 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "6. Der Titel des aktiven Blocks hebt sich ab",
     "7. Der Aktiv-Rahmen liegt auf der Bühne",
     "8. Der Akzent folgt dem Theme (hell ≠ dunkel)",
+    "9. 'Save current view as image' legt ein PNG an, das das Modell zeigt",
   ],
   view: [
     "V1. Drehen per echter Maus-Interaktion bewegt die Kamera",
@@ -5445,7 +5513,7 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "B16. Eine STL-Datei lädt und ist sichtbar",
     "B17. Die drei Beleuchtungs-Zustände erzeugen drei verschiedene Bilder",
     "B18. Ein mehrteiliges glTF findet seine .bin im Vault",
-    "SMOKE.md Punkt 9 (Draco-GLB)",
+    "B19. Eine Draco-GLB nennt Grund und Ausweg und zeigt kein Modell",
     "SMOKE.md 'Zusätzlich' (Popout-Fenster)",
     "SMOKE.md Punkt 8 (Klick-Modus)",
   ],

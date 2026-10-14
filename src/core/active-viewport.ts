@@ -29,6 +29,9 @@ export interface ViewportController {
   canSave(): boolean;
   /** In den Block schreiben; `null` entfernt den Key. */
   save(spec: ViewSpec | null): Promise<void>;
+  /** Aktueller Frame als PNG-Data-URL (Standbild bei verdraengtem Viewport); `null`, solange nichts zu sehen ist.
+   *  Fehlt bei Wegen ohne eigenen Viewport. */
+  snapshot?: () => string | null;
   /** Anzeigename fuer die Sidebar (Titel oder Dateipfad). */
   label(): string;
   /** Edit-Zustand fuers Sidebar-Panel; `undefined`/`null`, wenn der Weg (noch) keinen
