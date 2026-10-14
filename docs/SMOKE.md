@@ -610,7 +610,7 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 
 ### Prompt-Panel (Plan 3b)
 
-> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP16, eigener Abschnitt)
+> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP17, eigener Abschnitt)
 
 The substitute endpoint checks the wiring, not the LLM.
 
@@ -635,6 +635,8 @@ Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurüc
 **PP12 (2026-10-11, Welle 17):** Ein Altwert `llmModel` im `data.json` zieht beim Laden (Plugin aus- und wieder einschalten) in die Zeile ohne Modell, der Schlüssel ist danach weg, die Einstellungen kennen weder eine Zeile „Model“ noch die Option „global model“. Gegenprobe mit dem Build davor: PP12 rot („Schlüssel llmModel weg: NEIN · Option global model: VORHANDEN“), alles andere im Abschnitt grün. **Bilanz Gesamtlauf (Zweitinstanz Port 9387, Obsidian 1.14.4, frischer Prozess): vorher 99 grün · 0 rot · 8 übersprungen · 1 nichts gemessen von 108, nachher 101 grün · 0 rot · 8 übersprungen · 0 nichts gemessen von 109.**
 
 **PP13–PP15 (2026-10-12, Welle 20, B1):** Stream-Bereich im Panel, gemessen mit einem langen Strom aus tokengroßen Stücken (8 Zeichen, 20 ms; erst ein Denk-Text von 420 Zeichen, dann ein gültiger `parts`-Block mit 45 Teilen). Der scrollende Rumpf ist `.okit-stream-body`, begrenzt durch `.tdcb-prompt-stream { max-height: 14em }`. **PP14** (Kontrolle, ohne Störung): bei jedem wachsenden Stand mit Überlauf ≥ 80 px liegt der Abstand zum Ende unter der Folge-Schwelle von 40 px, auch beim letzten Stück. **PP13** (Folge-Regel): sobald der Überlauf ≥ 80 px ist, setzt der Treiber `scrollTop = 0`; danach darf der Bereich in mindestens zwei weiteren wachsenden Ständen nicht wieder nach unten springen (Abweichung des `scrollTop` ≤ 4 px gegen den Stand zur Störungszeit). Wird der Überlauf nie erreicht oder kommen weniger als zwei Stände nach der Störung, ist der Punkt „nichts gemessen“. **PP15** (Denkblock live): der Denk-Text steht in einem geöffneten, sichtbaren `<details>` und wächst in mindestens zwei Ständen, während der Strom läuft. **PP16** (Kontrolle mit absatzgroßen Stücken, 300 Zeichen im Takt von 150 ms, ohne Denk-Text): derselbe Maßstab wie PP14. Auf obsidian-kit 0.56.0 rot (Abstand zum Ende 2 480 px bei 14 Ständen mit Überlauf: `followTail` maß „unten?“ erst nach dem Wachsen), auf 0.59.0 grün (1 px). Gegenproben am gebauten `main.js` (beide Richtungen): `followTail` folgt immer → PP13 rot (Abweichung 2633 px), PP14 grün; `followTail` leer → PP14 rot (Abstand 2633 px), PP13 grün; Original → 16/16.
+
+**PP13, PP14, PP16, PP17 (2026-10-14, Welle 21):** Die Folge-Regel misst seitdem `messeFolge` der Brücke (`tools/obsidian-cdp/folge.ts`, README § Folge-Messung) statt der lokalen Fassung. Festgelegt sind dort: Überlauf ≥ 80 px, mindestens 3 Stände, Abstand zum Ende in der Kontrolle ≤ 24 px (statt < 40), Toleranz nach der Störung 4 px, Vorbedingung „der Bereich folgte vor der Störung“. **PP17** ist neu: steht der Nutzer nach dem Hochscrollen wieder unten (`scrollTop = scrollHeight`), ist der Abstand zum Ende wieder ≤ 24 px; dafür läuft PP13 mit einem längeren Strom (120 Teile). PP15 (Denk-Text) misst weiter ein lokaler Beobachter, weil die Brücke den Denk-Text nicht kennt.
 
 Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprungen · nichts gemessen); der Nenner ist die Zahl aller Punkte des Laufs, auch der übersprungenen und nicht gemessenen.
 

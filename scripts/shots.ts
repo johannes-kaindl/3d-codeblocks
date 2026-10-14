@@ -698,8 +698,8 @@ async function main(): Promise<void> {
   if (!cdp) {
     throw new Error(
       `Kein Obsidian-Fenster mit dem Vault "${REPO_NAME}" auf Port ${port}.\n` +
-      "Den Aufnahme-Vault oeffnen (er darf neben anderen Vaults offen sein):\n" +
-      `  open -a Obsidian "$STAGING_VAULTS_DIR/${REPO_NAME}"`,
+      "Den Aufnahme-Vault in der Zweitinstanz oeffnen (Vault in $UD/obsidian.json eintragen, Zweitinstanz neu starten;\n" +
+      "Rezept im Kopf dieser Datei).",
     );
   }
   console.log(`Verbunden auf Port ${port}.\n`);

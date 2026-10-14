@@ -145,14 +145,12 @@ hing an Ollama, nicht am Port.
 # 1. Vault aus dem Fixture aufbauen und das Plugin hineinbauen
 npm run shots -- --setup
 
-# 2. Obsidian mit offenem Debug-Port auf diesem Vault starten (Handarbeit —
-#    die App muss dafuer neu starten, und den Vault muss ein Mensch als
-#    vertrauenswuerdig markieren, bevor Plugins laufen)
-osascript -e 'quit app "Obsidian"'
-open -a Obsidian --args --remote-debugging-port=9222
+# 2. Obsidian als Zweitinstanz auf diesem Vault starten (eigenes Profil, eigener Port;
+#    die regulaere Instanz wird nie beendet). Das Rezept steht im Kopf von
+#    tools/obsidian-cdp/cdp.ts und in obsidian-plugins/AGENTS.md (Staging-Vaults).
 
 # 3. Aufnehmen
-npm run shots
+npm run shots -- --port <port>
 
 # 4. Vertrag, Dateien und README abgleichen
 npm run shots:check

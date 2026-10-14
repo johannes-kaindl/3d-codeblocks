@@ -31,6 +31,9 @@
  *
  * Dann, mit deployter Plugin-Version (`npm run deploy`):
  *
+ * Der Treiber baut den Staging-Vault vor dem Lauf aus dem Fixture (`buildVault`, nur fuer den eigenen Vault; `--ohne-fixture`
+ * schaltet es ab) und laedt das Plugin mit `ladePluginNeu` neu.
+ *
  * ```bash
  * npm run smoke:gui -- --port <port> --vault 3d-codeblocks
  * npm run smoke:gui -- --port <port> --model weltmodell/3d/eg.gltf --keep
@@ -47,16 +50,21 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cwd } from "node:process";
 
 import { cameraFloorGltf } from "../docs/images/fixture/make-models.mjs";
 import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
 import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
+  AbbruchAusnahme,
   Cdp,
+  beimAbbruch,
   clearNotices,
   bereiteInstanzVor,
   clickReal,
   closeExtraLeaves,
+  istAbgebrochen,
+  ladePluginNeu,
   notices,
   openNote as openNoteViaBridge,
   pollUntil,
@@ -65,10 +73,13 @@ import {
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
+import { messeFolge, zeichneFolge } from "../../tools/obsidian-cdp/folge.js";
+import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
 import { startLlmStub, type Antwort, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
 
 
 const PLUGIN_ID = "three-d-codeblocks";
+const REPO_NAME = "3d-codeblocks";
 const CONTROLS_VIEW = "three-d-controls";
 /** View-Typ der Datei-Ansicht (src/obsidian/file-view.ts: VIEW_TYPE_3D). */
 const FILE_VIEW = "tdcb-3d-model";
@@ -4399,7 +4410,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4416,6 +4427,7 @@ const PP_TITEL = {
   PP14: "Kontrolle: ohne Störung folgt der Strom bis zum Ende",
   PP15: "Denkblock live: der Denk-Text ist während des Stroms sichtbar und wächst",
   PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
+  PP17: "Wiederaufnahme: steht der Nutzer nach dem Hochscrollen wieder unten, folgt der Strom wieder",
   PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
 } as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
@@ -4444,6 +4456,8 @@ interface Substitute {
   requests: { kind: "create" | "refine" | "models" | "unknown"; stream: boolean }[];
   /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
   clientClosed: number;
+  /** Laufende Generierungen (der Strom ist noch offen). */
+  unterwegs: number;
   /** Methode und Pfad jeder Anfrage, die der strenge Stub mit 404 beantwortete (Mitschnitt). */
   unknownPaths: string[];
   /** Die nächste Chat-Antwort ist diese (statt der Fixture-Antwort), danach gilt wieder die Fixture. */
@@ -4476,6 +4490,7 @@ async function startSubstitute(answers: { create: string; refine: string }): Pro
     set hang(v: boolean) { state.hang = v; },
     get requests() { return stub.anfragen().map((a) => ({ kind: kindOf(a), stream: a.stream === true })); },
     get clientClosed() { return stub.zaehler().clientGeschlossen; },
+    get unterwegs() { return stub.zaehler().unterwegs; },
     get unknownPaths() { return stub.anfragen().filter((a) => kindOf(a) === "unknown").map((a) => `${a.methode} ${a.pfad}`); },
     queue: (antwort) => stub.antworten([antwort]),
     close: () => stub.stop(),
@@ -4529,77 +4544,79 @@ const PP_RESET = `
   return removed;
 `;
 
-/** Strom-Probe im Prompt-Panel (PP13–PP15): ein langer Strom aus tokengrossen Stuecken (8 Zeichen, 20 ms), dessen Tail den
- *  auf `max-height: 14em` begrenzten Rumpf (`.okit-stream-body`, der Scroll-Container) ueberlaufen laesst. Ein MutationObserver
- *  tastet bei jedem Wachsen von Tail oder Denk-Text ab; `stoere` setzt `scrollTop = 0`, sobald der Ueberlauf >= 80 px ist
- *  (Folge-Schwelle 40 px, `stream-area.ts`, plus 40 px Spielraum). Nach dem Abschluss-Chunk wird nicht mehr gemessen. */
+/** Strom-Probe im Prompt-Panel (PP13–PP17): ein langer Strom aus tokengrossen Stuecken (8 Zeichen, 20 ms), dessen Tail den
+ *  auf `max-height: 14em` begrenzten Rumpf (`.okit-stream-body`, der Scroll-Container) ueberlaufen laesst. Die Folge-Regel misst
+ *  `messeFolge` der Bruecke (README § Folge-Messung: Kontrolle, Stoerung `scrollTop = 0`, Wiederaufnahme); hier bleibt, was die
+ *  Bruecke nicht kennt: der Denk-Text (PP15) und das Starten des Stroms im Panel. */
 const PP_STREAM_UNIT = 8;
 const PP_STREAM_TAKT_MS = 20;
 const PP_STREAM_REASONING = "Ich ueberlege die Teile des Tisches: Platte, vier Beine, Masse, Lage. ".repeat(6);
-const ppStreamAnswer = (): string => {
-  const parts = Array.from({ length: 45 }, (_, i) => ({ name: `Teil-${i + 1}`, shape: "box", size: [0.1, 0.1, 0.1], at: [i * 0.05, 0.5, 0], color: "#8b5a2b" }));
+const PP_STREAM_BODY = ".tdcb-prompt .tdcb-prompt-stream .okit-stream-body";
+const ppStreamAnswer = (teile = 45): string => {
+  const parts = Array.from({ length: teile }, (_, i) => ({ name: `Teil-${i + 1}`, shape: "box", size: [0.1, 0.1, 0.1], at: [i * 0.05, 0.5, 0], color: "#8b5a2b" }));
   return JSON.stringify({ parts });
 };
-interface PpStreamRow { len: number; rl: number; st: number; overflow: number; gap: number; open: boolean; vis: boolean; grew: boolean; disturbed: boolean }
-interface PpStreamRun { rows: PpStreamRow[]; disturbed: { len: number; overflow: number; st0: number } | null; maxOverflow: number; finalPhase: string }
+interface PpReasoningRow { rl: number; open: boolean; vis: boolean }
 
-interface PpStreamForm { unit: number; takt: number; reasoning: string }
-const PP_STREAM_TOKEN: PpStreamForm = { unit: PP_STREAM_UNIT, takt: PP_STREAM_TAKT_MS, reasoning: PP_STREAM_REASONING };
+interface PpStreamForm { unit: number; takt: number; reasoning: string; teile: number }
+const PP_STREAM_TOKEN: PpStreamForm = { unit: PP_STREAM_UNIT, takt: PP_STREAM_TAKT_MS, reasoning: PP_STREAM_REASONING, teile: 45 };
 /** Absatzgrosse Stuecke (ein Push mit mehreren Zeilen, ~6 Zeilen im 14em-Rumpf): bei „unten?“ erst NACH dem Wachsen gemessen
  *  (obsidian-kit < 0.59.0) springt der Abstand ueber die Folge-Schwelle von 40 px, und der Strom folgt nach dem ersten Absatz nicht mehr. */
-const PP_STREAM_PARAGRAPH: PpStreamForm = { unit: 300, takt: 150, reasoning: "" };
+const PP_STREAM_PARAGRAPH: PpStreamForm = { unit: 300, takt: 150, reasoning: "", teile: 45 };
+/** Fuer die Wiederaufnahme: die dritte Phase (Kontrolle, Stoerung, Wiederaufnahme) braucht einen laengeren Strom; der Hebel ist
+ *  die Antwortlaenge (README § Folge-Messung), nie die Schwelle. */
+const PP_STREAM_LANG: PpStreamForm = { unit: PP_STREAM_UNIT, takt: PP_STREAM_TAKT_MS, reasoning: "", teile: 120 };
 
-async function ppStreamRun(cdp: Cdp, sub: Substitute, stoere: boolean, form: PpStreamForm = PP_STREAM_TOKEN): Promise<PpStreamRun | null> {
+interface PpStreamOptionen { kontrolle: boolean; stoerung: boolean; wiederaufnahme: boolean }
+
+/** Ein Strom im Panel, gemessen mit `messeFolge`. `null`: das Panel oeffnete nicht oder das Eingabefeld fehlte (Umgebung, kein Befund).
+ *  `reasoning` sind die Staende des Denk-Textes (leer, wenn die Form keinen sendet). */
+async function ppStromMessen(
+  cdp: Cdp,
+  sub: Substitute,
+  opt: PpStreamOptionen,
+  form: PpStreamForm = PP_STREAM_TOKEN,
+): Promise<{ ergebnis: Awaited<ReturnType<typeof messeFolge>>; finalPhase: string; reasoning: PpReasoningRow[] } | null> {
   if (!(await ppOpenFresh(cdp))) return null;
   await ppType(cdp, PP_CREATE_PROMPT);
   sub.queue({
-    text: ppStreamAnswer(),
+    text: ppStreamAnswer(form.teile),
     ...(form.reasoning !== "" ? { reasoning: form.reasoning } : {}),
     laenge: form.unit,
     takt: form.takt,
     nachlaufMs: 8 * form.takt,
   });
+  // Beobachter fuer den Denk-Text (PP15): die Bruecke kennt ihn nicht. Haengt vor dem Start des Stroms.
   const armed = await cdp.evaluate<boolean>(`
     const area = document.querySelector(".tdcb-prompt .tdcb-prompt-stream");
-    const body = area?.querySelector(".okit-stream-body");
-    const tail = area?.querySelector(".okit-stream-tail");
-    if (!area || !body || !tail) return false;
-    const S = { rows: [], disturbed: null, maxOverflow: 0 };
-    window.__ppStream = S;
-    window.__ppStreamObs?.disconnect();
-    let prevLen = 0;
+    if (!area) return false;
+    window.__ppReasoning = [];
+    window.__ppReasoningObs?.disconnect();
     let prevRl = 0;
-    window.__ppStreamObs = new MutationObserver(() => {
-      const len = (tail.textContent ?? "").length;
+    window.__ppReasoningObs = new MutationObserver(() => {
       const pre = area.querySelector(".okit-stream-reasoning > pre");
       const det = area.querySelector(".okit-stream-reasoning");
       const rl = pre ? (pre.textContent ?? "").length : 0;
-      if (len <= prevLen && rl <= prevRl) return;
-      const grew = len > prevLen;
-      prevLen = Math.max(prevLen, len);
-      prevRl = Math.max(prevRl, rl);
-      const overflow = body.scrollHeight - body.clientHeight;
-      S.maxOverflow = Math.max(S.maxOverflow, overflow);
-      const row = { len, rl, st: body.scrollTop, overflow, gap: body.scrollHeight - body.scrollTop - body.clientHeight,
-        open: det ? det.open : false, vis: pre ? pre.getBoundingClientRect().height > 0 : false, grew, disturbed: false };
-      if (${stoere ? "true" : "false"} && !S.disturbed && grew && overflow >= 80) {
-        body.scrollTop = 0;
-        S.disturbed = { len, overflow, st0: body.scrollTop };
-        row.disturbed = true;
-        row.st = body.scrollTop;
-      }
-      S.rows.push(row);
+      if (rl <= prevRl) return;
+      prevRl = rl;
+      window.__ppReasoning.push({ rl, open: det ? det.open : false, vis: pre ? pre.getBoundingClientRect().height > 0 : false });
     });
-    window.__ppStreamObs.observe(area, { childList: true, characterData: true, subtree: true });
+    window.__ppReasoningObs.observe(area, { childList: true, characterData: true, subtree: true });
     return true;
   `);
   if (!armed) return null;
-  await ppClick(cdp, ".tdcb-prompt-send");
+  const ergebnis = await messeFolge(cdp, {
+    selector: PP_STREAM_BODY,
+    laeuft: () => sub.unterwegs > 0,
+    starte: () => ppClick(cdp, ".tdcb-prompt-send"),
+    kontrolle: opt.kontrolle,
+    stoerung: opt.stoerung,
+    wiederaufnahme: opt.wiederaufnahme,
+    takt: Math.min(100, form.takt),
+  });
   const run = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 60_000, 300);
-  const out = await cdp.evaluate<{ rows: PpStreamRow[]; disturbed: PpStreamRun["disturbed"]; maxOverflow: number }>(
-    `window.__ppStreamObs?.disconnect(); return window.__ppStream ?? { rows: [], disturbed: null, maxOverflow: 0 };`,
-  );
-  return { ...out, finalPhase: run.state?.phase ?? "?" };
+  const reasoning = await cdp.evaluate<PpReasoningRow[]>(`window.__ppReasoningObs?.disconnect(); return window.__ppReasoning ?? [];`);
+  return { ergebnis, finalPhase: run.state?.phase ?? "?", reasoning };
 }
 
 /** Wie `cleanupState` und das `finally` des Abschnitts es brauchen: schliesst Server, räumt die Einstellungen,
@@ -4862,6 +4879,8 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
     return { ready: done.reached && done.state?.phase === "ok", reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons };
   } catch (error) {
+    // Ein Abbruch (Ctrl-C) ist kein Renderer-Fehler: weiterwerfen, sonst steht er als Befund in der Bilanz.
+    if (error instanceof AbbruchAusnahme) throw error;
     return { ready: false, reason: `Renderer-Fehler im Schritt „${step}“: ${error instanceof Error ? error.message : String(error)}`, round: null, buttons };
   }
 }
@@ -5283,70 +5302,45 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       }
     }
 
-    // --- PP13–PP15. Stream-Bereich im Prompt-Panel: Folge-Regel, Kontrolle, Denkblock live ------------------------------------
-    // Vorlauf-Check: der scrollende Rumpf (`.okit-stream-body`, kein `scrollEl` im Aufruf) ist durch `.tdcb-prompt-stream
-    // { max-height: 14em }` begrenzt. Die Gueltigkeit steht je Punkt: Ueberlauf zum Stoerungszeitpunkt >= 80 px, mindestens zwei
-    // wachsende Staende nach der Stoerung; sonst „nichts gemessen“ (CORE-TEST-22). Zeit zaehlt nur als Untergrenze des Taktes.
+    // --- PP13–PP17. Stream-Bereich im Prompt-Panel: Folge-Regel, Kontrolle, Denkblock live, Wiederaufnahme --------------------
+    // Gemessen mit `messeFolge` der Bruecke (README § Folge-Messung): der scrollende Rumpf (`.okit-stream-body`) ist durch
+    // `.tdcb-prompt-stream { max-height: 14em }` begrenzt. Die Gueltigkeit steht im Urteil der Bruecke (Ueberlauf >= 80 px, mindestens
+    // 3 Staende, Vorbedingung „Bereich folgte vor der Stoerung“); sonst „nichts gemessen“ (CORE-TEST-22).
     {
-      const control = await ppStreamRun(cdp, sub, false);
-      const growing = (r: PpStreamRun | null): PpStreamRow[] => (r?.rows ?? []).filter((x) => x.grew && x.overflow >= 80);
-      // PP14: ohne Stoerung folgt der Strom bei jedem Stand mit Ueberlauf (gap < Folge-Schwelle 40) bis zum letzten Stueck.
+      const namen = { PP14: T.PP14, PP16: T.PP16, PP13: T.PP13, PP17: T.PP17 };
+      const nichts = (ids: (keyof typeof namen)[], grund: string): void => { for (const id of ids) ppNothing(id, namen[id], grund); };
+      const eintragen = (id: "PP13" | "PP14" | "PP16" | "PP17", teil: "kontrolle" | "folge" | "wiederaufnahme", e: Awaited<ReturnType<typeof messeFolge>>): void => {
+        ppDone.add(id);
+        zeichneFolge(bilanz, { [teil]: `${id}. ${namen[id]}` }, e);
+      };
+      // PP14 + PP15: Kontrolle mit tokengrossen Stuecken und Denk-Text.
+      const control = await ppStromMessen(cdp, sub, { kontrolle: true, stoerung: false, wiederaufnahme: false });
       if (control === null) {
-        ppNothing("PP14", T.PP14, "das Panel öffnete nicht");
+        nichts(["PP14"], "das Panel öffnete nicht");
         ppNothing("PP15", T.PP15, "das Panel öffnete nicht");
       } else {
-        const g = growing(control);
-        if (control.finalPhase !== "ok" && control.finalPhase !== "error") {
-          ppNothing("PP14", T.PP14, `der Strom kam nicht zum Ende (Status ${control.finalPhase})`);
-        } else if (g.length < 2) {
-          ppNothing("PP14", T.PP14, `der Überlauf erreichte 80 px nicht oft genug (höchstens ${Math.round(control.maxOverflow)} px, ${g.length} Stände) — Bereich unbegrenzt oder Strom zu kurz`);
-        } else {
-          const worst = Math.max(...g.map((x) => x.gap));
-          const lastGap = g[g.length - 1]?.gap ?? 0;
-          ppRecord("PP14", T.PP14, worst < 40 && lastGap < 40, `${g.length} Stände mit Überlauf ≥ 80 px (höchstens ${Math.round(control.maxOverflow)} px) · größter Abstand zum Ende ${Math.round(worst)} px (erwartet < 40), beim letzten Stück ${Math.round(lastGap)} px`);
-        }
+        eintragen("PP14", "kontrolle", control.ergebnis);
         // PP15: der Denk-Text steht vor dem Inhalt, ist offen, sichtbar und waechst waehrend des Stroms.
-        const reasoningRows = control.rows.filter((x) => x.rl > 0);
-        const distinct = new Set(reasoningRows.map((x) => x.rl)).size;
+        const distinct = new Set(control.reasoning.map((x) => x.rl)).size;
         if (distinct < 2) {
           ppNothing("PP15", T.PP15, `der Denk-Text wuchs höchstens ${distinct}-mal (Reasoning-Feld kam nicht an oder zu kurz)`);
         } else {
-          const open = reasoningRows.every((x) => x.open);
-          const visible = reasoningRows.every((x) => x.vis);
-          ppRecord("PP15", T.PP15, open && visible && distinct >= 2, `${distinct} Wachstumsstände (${reasoningRows[0]?.rl}→${reasoningRows[reasoningRows.length - 1]?.rl} Zeichen) · geöffnet: ${open} · sichtbar: ${visible}`);
+          const open = control.reasoning.every((x) => x.open);
+          const visible = control.reasoning.every((x) => x.vis);
+          ppRecord("PP15", T.PP15, open && visible, `${distinct} Wachstumsstände (${control.reasoning[0]?.rl}→${control.reasoning[control.reasoning.length - 1]?.rl} Zeichen) · geöffnet: ${open} · sichtbar: ${visible}`);
         }
       }
-      // PP16: dieselbe Kontrolle mit absatzgrossen Stuecken (Befund kuro-w20): der Strom folgt bei jedem Stand mit Ueberlauf.
-      const paragraph = await ppStreamRun(cdp, sub, false, PP_STREAM_PARAGRAPH);
-      if (paragraph === null) {
-        ppNothing("PP16", T.PP16, "das Panel öffnete nicht");
-      } else {
-        const g = growing(paragraph);
-        if (paragraph.finalPhase !== "ok" && paragraph.finalPhase !== "error") {
-          ppNothing("PP16", T.PP16, `der Strom kam nicht zum Ende (Status ${paragraph.finalPhase})`);
-        } else if (g.length < 2) {
-          ppNothing("PP16", T.PP16, `der Überlauf erreichte 80 px nicht oft genug (höchstens ${Math.round(paragraph.maxOverflow)} px, ${g.length} Stände)`);
-        } else {
-          const worst = Math.max(...g.map((x) => x.gap));
-          const lastGap = g[g.length - 1]?.gap ?? 0;
-          ppRecord("PP16", T.PP16, worst < 40 && lastGap < 40, `${g.length} Stände mit Überlauf ≥ 80 px, Stücke zu ${PP_STREAM_PARAGRAPH.unit} Zeichen im Takt ${PP_STREAM_PARAGRAPH.takt} ms · größter Abstand zum Ende ${Math.round(worst)} px (erwartet < 40), beim letzten Stück ${Math.round(lastGap)} px`);
-        }
-      }
-      // PP13: Stoerung (scrollTop = 0), danach darf der Bereich nicht wieder zum Ende springen.
-      const disturbed = await ppStreamRun(cdp, sub, true);
-      if (disturbed === null) {
-        ppNothing("PP13", T.PP13, "das Panel öffnete nicht");
-      } else if (disturbed.disturbed === null) {
-        ppNothing("PP13", T.PP13, `der Überlauf erreichte zum Störungszeitpunkt nie 80 px (höchstens ${Math.round(disturbed.maxOverflow)} px) — keine Störung ausgelöst`);
-      } else {
-        const after = disturbed.rows.filter((x) => x.grew && !x.disturbed && x.len > disturbed.disturbed!.len);
-        if (after.length < 2) {
-          ppNothing("PP13", T.PP13, `nach der Störung kamen nur ${after.length} wachsende Stände (mindestens 2 nötig)`);
-        } else {
-          const st0 = disturbed.disturbed.st0;
-          const worst = Math.max(...after.map((x) => x.st - st0));
-          ppRecord("PP13", T.PP13, worst <= 4, `Störung bei ${disturbed.disturbed.len} Zeichen, Überlauf ${Math.round(disturbed.disturbed.overflow)} px, scrollTop ${st0} · ${after.length} Stände danach, größte Abweichung des scrollTop ${Math.round(worst)} px (erwartet ≤ 4)`);
-        }
+      // PP16: dieselbe Kontrolle mit absatzgrossen Stuecken (Befund kuro-w20).
+      const paragraph = await ppStromMessen(cdp, sub, { kontrolle: true, stoerung: false, wiederaufnahme: false }, PP_STREAM_PARAGRAPH);
+      if (paragraph === null) nichts(["PP16"], "das Panel öffnete nicht");
+      else eintragen("PP16", "kontrolle", paragraph.ergebnis);
+      // PP13 + PP17: Stoerung (scrollTop = 0), danach darf der Bereich nicht wieder zum Ende springen; steht der Nutzer wieder
+      // unten, folgt er wieder. Laengerer Strom, weil die dritte Phase Staende braucht.
+      const disturbed = await ppStromMessen(cdp, sub, { kontrolle: false, stoerung: true, wiederaufnahme: true }, PP_STREAM_LANG);
+      if (disturbed === null) nichts(["PP13", "PP17"], "das Panel öffnete nicht");
+      else {
+        eintragen("PP13", "folge", disturbed.ergebnis);
+        eintragen("PP17", "wiederaufnahme", disturbed.ergebnis);
       }
     }
 
@@ -5536,60 +5530,6 @@ const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => 
   { key: "clickrace", title: "Klick-Sturm-Probe (Task 'clickReal misst am ersetzten DOM womoeglich vorbei')", run: sectionClickRace },
 ];
 
-/** Misst der Lauf ueberhaupt den Code dieses Checkouts?
- *
- *  Der Treiber deployt NICHT — er haengt sich an ein laufendes Obsidian und prueft, was
- *  dort zufaellig installiert ist. Ohne diesen Guard misst ein gruener Lauf moeglicherweise
- *  einen fremden Build, und **nichts** faellt dabei auf: `manifest.version` ist dafuer
- *  blind, weil Repo- und Vault-Build dieselbe Nummer tragen, solange kein Release
- *  dazwischenlag.
- *
- *  Gemessen am 2026-08-30: im Staging-Vault lag ein Build vom 15.08. (666.980 Bytes)
- *  gegen 696.246 Bytes im Repo — beide `0.3.1`. Zwei Wochen Aenderungen waren in keinem
- *  Lauf enthalten, der sie zu pruefen glaubte. Dach-`AGENTS.md` fuehrt dieselbe Gattung
- *  fuer Store-Builds (4 von 8 gruenen Laeufen).
- *
- *  Bewusst nur eine Warnung statt eines Abbruchs, wenn der Vault gar nicht gefunden wird:
- *  ein Lauf gegen einen Vault ausserhalb von `STAGING_VAULTS_DIR` (etwa den Arbeits-Vault)
- *  ist zulaessig, nur eben nicht selbst-verifizierend. Weicht der Build dagegen NACHWEISLICH
- *  ab, ist Abbruch die richtige Antwort — weiterzulaufen hiesse, Messwerte zu erzeugen,
- *  die niemand einem Codestand zuordnen kann.
- */
-function assertDeployedBuildMatches(vault: string | undefined): void {
-  const repoBuild = "main.js";
-  if (!existsSync(repoBuild)) {
-    throw new Error("main.js fehlt — erst `npm run build`, dann den Smoke.");
-  }
-
-  const base = process.env.STAGING_VAULTS_DIR;
-  if (base === undefined || base === "") {
-    console.log("  ⚠ STAGING_VAULTS_DIR nicht gesetzt — Build-Abgleich uebersprungen.");
-    return;
-  }
-
-  const vaultName = vault ?? "3d-codeblocks";
-  const deployed = join(base, vaultName, ".obsidian", "plugins", "three-d-codeblocks", "main.js");
-  if (!existsSync(deployed)) {
-    console.log(`  ⚠ Kein Plugin-Build unter ${vaultName} gefunden — Build-Abgleich uebersprungen.`);
-    return;
-  }
-
-  const a = readFileSync(repoBuild);
-  const b = readFileSync(deployed);
-  if (a.equals(b)) {
-    console.log(`  ✔ Der Vault ${vaultName} traegt den Build dieses Checkouts (${a.length} Bytes).`);
-    return;
-  }
-
-  throw new Error(
-    `Der Vault ${vaultName} traegt einen ANDEREN Build als dieses Repo — der Lauf wuerde fremden Code messen.\n` +
-      `  Repo:  ${a.length} Bytes\n` +
-      `  Vault: ${b.length} Bytes\n` +
-      `  Beheben: OBSIDIAN_PLUGIN_DIR="${join(base, vaultName, ".obsidian", "plugins", "three-d-codeblocks")}" npm run deploy\n` +
-      `  (danach das Fenster neu laden — deploy allein ist KEIN Reload)`,
-  );
-}
-
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const flag = (name: string): string | undefined => args.value(name);
@@ -5616,7 +5556,29 @@ async function main(): Promise<void> {
   bilanz = createBilanz({ punkte: sollListe });
 
   console.log(`GUI-Smoke — Obsidian auf Port ${port}`);
-  assertDeployedBuildMatches(vault);
+  // Herkunft des Builds prueft `ladePluginNeu` unten (`repoMainJs` → `requireEigenerBuild`): ein Lauf gegen einen Store-Build
+  // oder fremden Stand wird dort abgelehnt, bevor etwas neu geladen wird. Gemessen 2026-08-30: Vault-Build vom 15.08. gegen
+  // das Repo, beide 0.3.1 — `manifest.version` ist dafuer blind.
+  const repoMainJs = join(cwd(), "main.js");
+  if (!existsSync(repoMainJs)) throw new Error("main.js fehlt — erst `npm run build`, dann den Smoke.");
+
+  // Staging-Vault aus dem getrackten Fixture bauen (wie `shots.ts --setup`): Notizen, Modelle, Einstellungen und Layout kommen
+  // aus dem Repo, nicht aus dem Zustand eines frueheren Laufs. Nur fuer den eigenen Staging-Vault; ein anderer Vault
+  // (`--vault outpost-worldbuilding`) wird nie ueberschrieben, `--ohne-fixture` schaltet es fuer den eigenen ab.
+  // Der Vault wird VOR dem Anhaengen gebaut; das Plugin laedt danach neu und liest `data.json` frisch.
+  if ((vault ?? REPO_NAME) === REPO_NAME && !args.has("ohne-fixture")) {
+    const vaultDir = stagingVaultDir(REPO_NAME);
+    console.log(`Staging-Vault aus dem Fixture: ${vaultDir}`);
+    for (const zeile of buildVault({
+      repoRoot: cwd(),
+      vaultDir,
+      fixtureDir: join(cwd(), "docs/images/fixture"),
+      generator: "make-models.mjs",
+      pluginId: PLUGIN_ID,
+    })) {
+      console.log(`  ${zeile}`);
+    }
+  }
   const cdp = await Cdp.attach(port, vault);
   // Ein verdecktes Fenster (anderer Space, Fokus bei einer anderen App) rendert nichts: Lesemodus leer, 0 Bilder je Sekunde,
   // `visibilityState` hidden (gemessen 2026-10-04: PP5/7/8/9 und SH15 rot oder nicht gemessen, ohne Codeaenderung). Erst sichtbar
@@ -5696,19 +5658,9 @@ async function main(): Promise<void> {
     }
   };
 
-  let signalCleanupRunning = false;
-  const onAbortSignal = (signal: NodeJS.Signals) => {
-    if (signalCleanupRunning) return;
-    signalCleanupRunning = true;
-    void (async () => {
-      console.log(`\n\nAbbruch durch ${signal} — raeume Smoke-Zustand auf...`);
-      await cleanupState();
-      cdp.close();
-      process.exit(130);
-    })();
-  };
-  process.on("SIGINT", onAbortSignal);
-  process.on("SIGTERM", onAbortSignal);
+  // Abbruch-Modul der Bruecke (README § Abbruch): bei Ctrl-C raeumt es `cleanupState` auf, druckt die Bilanz und endet mit
+  // Exit 130. Angemeldet VOR der ersten Mutation.
+  const zustand = beimAbbruch(cleanupState, "Smoke-Zustand zurücksetzen");
 
   try {
     // Ohne Fokus drosselt Chromium den Renderer. `Page.bringToFront` allein genuegt auf
@@ -5717,14 +5669,8 @@ async function main(): Promise<void> {
     // (`.tdcb-block` = 0, kein Notiztext), obwohl `app.workspace` die Datei korrekt als
     // aktiv meldete. Man debuggt dann ein Phantom: Zustand richtig, Anzeige nicht da.
     await cdp.send("Page.bringToFront");
-    // Fokus-Emulation: bei mehreren offenen Obsidian-Fenstern bekommt unseres den
-    // echten Tastaturfokus oft nicht (die App hat genau ein Key-Window). Chromium
-    // kann dem Renderer den Fokus vorspielen — damit entfällt die Hintergrund-
-    // Drosselung, ohne dass der Smoke fremde Fenster schliessen muss. Gemessen
-    // 2026-08-14: ohne das flackerte der Lauf zwischen 21/21 und Totalausfall.
-    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
+    // Die Fokus-Emulation setzt `requireVisible` oben (Bruecke, seit 9eb35c2); gemessen 2026-08-14: ohne sie flackerte der
+    // Lauf zwischen 21/21 und Totalausfall.
     // Fokus ist Voraussetzung, nicht Prüfgegenstand: ohne ihn drosselt Chromium den
     // Renderer, das Modell rendert nicht und ALLE Prüfpunkte werden rot — die Suche
     // beginnt dann am Plugin statt am Fenster. Deshalb hier abbrechen, mit Ansage.
@@ -5751,24 +5697,13 @@ async function main(): Promise<void> {
     // Frisches Profil: Vertrauensdialog bestätigen, Restricted Mode aufheben, Plugin laden (Dach-AGENTS § Staging-Vaults).
     const instanz = await bereiteInstanzVor(cdp, { pluginIds: [PLUGIN_ID], nurVault: "3d-codeblocks", sprache: "en" });
     if (instanz.plugins[PLUGIN_ID] === "fehlt") console.error(`bereiteInstanzVor: ${instanz.hinweis}`);
-    const plugin = await cdp.evaluate<{ ok: boolean; version?: string }>(`
-      const id = ${JSON.stringify(PLUGIN_ID)};
-      if (app.plugins.plugins[id]) {
-        await app.plugins.disablePlugin(id);
-        await new Promise((r) => setTimeout(r, 400));
-      }
-      await app.plugins.enablePlugin(id);
-      await new Promise((r) => setTimeout(r, 1200));
-      // Die Sidebar-Leaf aus einem früheren Lauf überlebt den Reload mit einer View-
-      // Instanz aus dem ALTEN Code — sie sieht richtig aus, ist aber an nichts mehr
-      // angeschlossen. Abräumen; der open-controls-Befehl erzeugt gleich eine frische.
-      app.workspace.detachLeavesOfType(${JSON.stringify(CONTROLS_VIEW)});
-      await new Promise((r) => setTimeout(r, 300));
-      const p = app.plugins.plugins[id];
-      return p ? { ok: true, version: p.manifest.version } : { ok: false };
-    `);
-    if (!plugin.ok) throw new Error(`Plugin ${PLUGIN_ID} ist nicht aktiv. Erst \`npm run deploy\`.`);
-    console.log(`Plugin-Version im Vault: ${plugin.version}\n`);
+    const neu = await ladePluginNeu(cdp, PLUGIN_ID, { repoMainJs, melde: console.error });
+    if (!neu.geladen) throw new Error(`Plugin ${PLUGIN_ID} ist nicht aktiv — ${neu.hinweis}`);
+    if (!neu.aktuell) throw new Error(neu.hinweis);
+    // Die Sidebar-Leaf aus einem früheren Lauf überlebt den Reload mit einer View-Instanz aus dem ALTEN Code — sie sieht
+    // richtig aus, ist aber an nichts mehr angeschlossen. Abräumen; der open-controls-Befehl erzeugt gleich eine frische.
+    await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(CONTROLS_VIEW)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
+    console.log(`${neu.hinweis}\n`);
 
     // Alle Namen, die dieser Treiber je anlegt, tragen das Praefix `_tdcb-` (SMOKE_NOTE_*/
     // SMOKE_MODEL_* oben, ausnahmslos) — das macht liegen gebliebene Dateien aus einem per
@@ -5878,11 +5813,10 @@ async function main(): Promise<void> {
     }
   } finally {
     // Aufräumen darf nie am Ergebnis hängen: auch ein abgebrochener Lauf gibt den Vault
-    // so zurück, wie er ihn vorgefunden hat. Dieselbe Funktion wie der SIGINT/SIGTERM-Handler
-    // oben — kein Doppelcode.
-    process.off("SIGINT", onAbortSignal);
-    process.off("SIGTERM", onAbortSignal);
-    await cleanupState();
+    // so zurück, wie er ihn vorgefunden hat. `schliesse` räumt im Normalweg auf und meldet den
+    // Schritt ab; nach Ctrl-C hat das Abbruch-Modul ihn schon gefahren und beendet den Prozess selbst.
+    await zustand.schliesse();
+    if (istAbgebrochen()) return;
     cdp.close();
   }
 
