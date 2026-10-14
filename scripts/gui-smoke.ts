@@ -1318,8 +1318,89 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     rendered ? `${rendered.colors} Farbtöne · ${rendered.width}px breit` : await describeScene(cdp),
   );
   if (!rendered) {
-    skipIds(["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12"], "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
+    skipIds(["B2", "B3", "B4", "B5", "B6", "B6b", "B6c", "B7", "B8", "B9", "B10", "B11", "B12"], "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
     return;
+  }
+
+  // --- B6b/B6c. Layout auf EINER Instanz: ein bewegter Blick bleibt (B6b, nach B6), ein nicht bewegter wird neu eingepasst (B6c, vor B2) ----
+  // Der Schutz in `viewport.ts` (`RefitTracker`, core/refit-policy.ts): ein Blick, den der Nutzer per Orbit/Pan/Zoom bewegt hat, bleibt bei
+  // einer Groessenaenderung stehen; ein nicht bewegter wird eingepasst. Der Zwang ist die Breite des Bühnen-Elements (max-width auf
+  // Seitenverhaeltnis 0,5, derselbe Griff wie SH13), KEIN zweites Blatt: ein Split auf der geoeffneten Datei erzeugt eine zweite Instanz mit
+  // eigenem Erst-Fit (gemessen Welle 21) und misst dann deren Kamera. Dieser Entwurf loest die alte B6b ab (Task „GUI-Smoke B6b fehlt“):
+  // das Tor `layoutSettled` gibt es nicht mehr, der Schutz ist `userMoved`.
+  // Das Daempfen von OrbitControls laeuft nach einem Zug noch einige Sekunden nach (gemessen: Kamera driftet ~0,002 Einheiten, und ein Fit
+  // direkt danach wird von den Nachlauf-Aenderungen wieder als 'Nutzer hat bewegt' gewertet, Timeline '-MMMM…' nach applyView(null)).
+  // Beide Punkte warten deshalb, bis die Kamera steht, sonst messen sie den Nachlauf statt der Regel.
+  const SETTLE_CAM = `
+    const camPos = () => { const c = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get()?.host?.viewport?.camera; return c ? [c.position.x, c.position.y, c.position.z].map((x) => x.toFixed(6)).join(",") : ""; };
+    const settleCam = async () => {
+      let last = null, steady = 0;
+      for (let i = 0; i < 80 && steady < 10; i++) { await new Promise((r) => setTimeout(r, 100)); const k = camPos(); steady = k === last ? steady + 1 : 0; last = k; }
+      return steady >= 10;
+    };
+  `;
+  const narrowProbe = `
+    ${SETTLE_CAM}
+    // Wie B2: ein Klick ohne Bewegung weckt den Controller (ohne ihn gibt es keinen Blick zu lesen), bewegt aber nichts.
+    const wake = ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 0, 0)};
+    ${SETTLE_VIEW}
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    const canvas = document.querySelector(".tdcb-block canvas");
+    if (!controller || !canvas || !canvas.parentElement) return { error: "kein Controller/Canvas" };
+    const stage = canvas.parentElement;
+    // Erst das Layout beruhigen lassen: nach B6 (Split schliessen) waechst der Viewport noch; ein Zwang, der gegen eine wachsende
+    // Breite laeuft, aendert die Breite nicht und misst nichts.
+    let lastWidth = -1, steady = 0;
+    for (let i = 0; i < 40 && steady < 4; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      steady = canvas.clientWidth === lastWidth ? steady + 1 : 0;
+      lastWidth = canvas.clientWidth;
+    }
+    // Weltposition der Kamera: 'getView()' ist relativ zum Einpass-Abstand und aendert sich mit dem Seitenverhaeltnis, auch wenn die Kamera
+    // stehen bleibt (gemessen: Distanz 1 → 0.62 bei unverrueckter Kamera). Der Controller ist der BlockChild, 'host.viewport.camera' ist
+    // TypeScript-private, im Renderer aber lesbar.
+    const cam = () => { const c = controller.host?.viewport?.camera; return c ? [c.position.x, c.position.y, c.position.z] : null; };
+    await settleCam();
+    const before = await settleView(controller);
+    const posBefore = cam();
+    const cssBefore = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    let changed = false;
+    var target = 0;
+    try {
+      target = Math.round(Math.min(height * 0.5, cssBefore * 0.6));
+      stage.style.maxWidth = target + "px";
+      for (let i = 0; i < 60 && canvas.clientWidth > cssBefore * 0.7; i++) await new Promise((r) => setTimeout(r, 100));
+      changed = canvas.clientWidth <= cssBefore * 0.7;
+      var after = await settleView(controller);
+      var posAfter = cam();
+    } finally {
+      stage.style.maxWidth = "";
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    return { before, after, posBefore, posAfter: typeof posAfter === "undefined" ? null : posAfter, cssBefore, cssAfter: target, changed, error: null };
+  `;
+  interface NarrowResult { before: ViewValues | null; after: ViewValues | null; posBefore: number[] | null; posAfter: number[] | null; cssBefore: number; cssAfter: number; changed: boolean; error: string | null }
+
+  // B6c (vor B2, solange der Blick unberuehrt ist): der frisch eingepasste Blick wird bei schmalerem Viewport NEU eingepasst. Ein Doppelklick-Reset
+  // nach einem Orbit taugt dafuer nicht: gemessen bleibt 'userMoved' danach nicht false (Timeline '-MMMM…' 100 ms nach dem Reset, auch nach
+  // applyView(null) und nach Warten auf eine stehende Kamera, Befund an den Master, Welle 22). Der Gegenstueck-Beleg zu B6b ist so: ohne
+  // dass resize() neu einpasst, wuerde B6b auch gruen (CORE-TEST-08), B6c zeigt, dass der Weg die Stelle erreicht.
+  const wakeError = await cdp.evaluate<string | null>(`return ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 0, 0)};`);
+  await pollUntil(cdp, `const c = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get(); return c && c.getView() ? 1 : 0;`, 6000);
+  const unmovedNarrow = await cdp.evaluate<NarrowResult>(narrowProbe);
+  if (unmovedNarrow.error != null || !unmovedNarrow.changed || !unmovedNarrow.before || !unmovedNarrow.after) {
+    nothingMeasured("B6c. Ein nicht bewegter Blick wird neu eingepasst, wenn der Viewport schmaler wird", (unmovedNarrow.error ?? "die Breite hat sich nicht geaendert (kein Layout-Wechsel erreicht)") + ` · Weck-Zug: ${wakeError ?? "ok"} · ${await describeScene(cdp)}`);
+  } else {
+    const refit = unmovedNarrow.posBefore && unmovedNarrow.posAfter ? Math.hypot(...unmovedNarrow.posBefore.map((x, i) => x - (unmovedNarrow.posAfter?.[i] ?? 0))) : null;
+    if (refit === null) nothingMeasured("B6c. Ein nicht bewegter Blick wird neu eingepasst, wenn der Viewport schmaler wird", "die Kamera ist nicht lesbar (host.viewport.camera)");
+    else {
+      record(
+        "B6c. Ein nicht bewegter Blick wird neu eingepasst, wenn der Viewport schmaler wird",
+        refit > 0.05,
+        `Kameraposition bewegt sich um ${refit.toFixed(3)} (Distanz im Blick ${unmovedNarrow.before.distance} → ${unmovedNarrow.after.distance}) bei Breite ${unmovedNarrow.cssBefore}→${unmovedNarrow.cssAfter}px`,
+      );
+    }
   }
 
   // --- B2. Orbit ----------------------------------------------------------
@@ -1476,6 +1557,32 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     `CSS ${layout.beforeCss}→${layout.afterCss}px · Puffer ${layout.beforeBuffer}→${layout.afterBuffer}px`,
   );
 
+  // B6b: erst echter Orbit (der Blick gilt als bewegt), dann schmal.
+  // Zweimal ziehen wie B2 (der erste Zug weckt den Block, falls er noch als Standbild steht); gueltig ist der Punkt nur, wenn der Blick
+  // danach wirklich ein anderer ist (CORE-TEST-22: sonst misst er den Einpass-Zustand und sieht aus wie ein Befund).
+  const dragResult = await cdp.evaluate<{ error: string | null; fit: ViewValues | null; moved: ViewValues | null }>(`
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    const fit = controller ? controller.getView() : null;
+    let error = await ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 0, 0)};
+    error = error ?? await ${dragCanvas(`document.querySelector(".tdcb-block canvas")`, 120, 36)};
+    return { error, fit, moved: controller ? controller.getView() : null };
+  `);
+  const dragError = dragResult.error ?? (dragResult.fit && dragResult.moved && !near(dragResult.fit, dragResult.moved) ? null : "der Orbit hat den Blick nicht veraendert");
+  const movedNarrow = await cdp.evaluate<NarrowResult>(narrowProbe);
+  if (dragError != null || movedNarrow.error != null || !movedNarrow.changed) {
+    nothingMeasured("B6b. Ein bewegter Blick bleibt, wenn der Viewport schmaler wird", dragError ?? movedNarrow.error ?? `die Breite hat sich nicht geaendert (kein Layout-Wechsel erreicht): ${JSON.stringify(movedNarrow)}`);
+  } else {
+    const fmt = (v: number[] | null): string => (v ? `[${v.map((x) => x.toFixed(3)).join(", ")}]` : "?");
+    const moved = movedNarrow.posBefore && movedNarrow.posAfter ? Math.hypot(...movedNarrow.posBefore.map((x, i) => x - (movedNarrow.posAfter?.[i] ?? 0))) : null;
+    if (moved === null) nothingMeasured("B6b. Ein bewegter Blick bleibt, wenn der Viewport schmaler wird", "die Kamera ist nicht lesbar (host.viewport.camera)");
+    else {
+      record(
+        "B6b. Ein bewegter Blick bleibt, wenn der Viewport schmaler wird",
+        moved < 0.05,
+        `Kameraposition ${fmt(movedNarrow.posBefore)} → ${fmt(movedNarrow.posAfter)} (Abweichung ${moved.toFixed(4)}) bei Breite ${movedNarrow.cssBefore}→${movedNarrow.cssAfter}px`,
+      );
+    }
+  }
   // --- B7. Theme ----------------------------------------------------------
   // Über die Body-Klassen, NICHT über `app.changeTheme`: der API-Aufruf schreibt nach
   // `.obsidian/appearance.json` und macht aus einem system-folgenden Vault einen fest
@@ -5508,6 +5615,8 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "B4. Pan (rechte Maustaste) verschiebt das Bild",
     "B5. Doppelklick setzt die Ansicht auf den Einpass-Zustand zurück",
     "B6. Im Split schrumpft der Viewport mit — auch der Renderer-Puffer",
+    "B6b. Ein bewegter Blick bleibt, wenn der Viewport schmaler wird",
+    "B6c. Ein nicht bewegter Blick wird neu eingepasst, wenn der Viewport schmaler wird",
     "B7. Der Viewport folgt dem Theme (hell ≠ dunkel)",
     "B8. Eine extern neu erzeugte Datei erneuert die Ansicht ohne Neustart",
     "B9. Achtmal im Block getippt hinterlässt keine verwaisten Canvas",

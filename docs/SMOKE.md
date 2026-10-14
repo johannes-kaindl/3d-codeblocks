@@ -32,6 +32,7 @@ Draco-komprimierte GLB (z. B. mit `gltf-transform draco in.glb out.glb`).
 > | 4. Regenerierung | B8 (Datei extern verändert → Bild folgt ohne Neustart) |
 > | 5. Theme | B7 (Hintergrund folgt hell↔dunkel — am Pixel gemessen) |
 > | 6. Layout | B6 (Notiz im Split → CSS-Breite **und** Renderer-Puffer schrumpfen) |
+> | 6. Layout, Kamera-Fit | B6b (ein per Orbit bewegter Blick bleibt, wenn der Viewport schmaler wird — Kameraposition unverändert) · B6c (ein nicht bewegter Blick wird neu eingepasst — Gegenstück, sonst wäre B6b auch bei fehlendem Refit grün). Der Zwang ist `max-width` auf der Bühne (Seitenverhältnis 0,5) auf EINER Instanz, kein zweites Blatt (ein Split auf der geöffneten Datei erzeugt eine zweite Instanz mit eigenem Erst-Fit). Gegenprobe: `userMoved` ignoriert → B6b rot (Kamera springt um 30 Einheiten); Refit stillgelegt → B6c rot |
 > | 7. Kein Leck | B9 (achtmal im Block getippt, keine verwaisten Canvas) |
 > | 8. Klick-Modus | **bewusst nicht doppelt** — Abschnitt „aktiver Block" deckt ihn mit 1–3 ab |
 > | 9. Fehlerfälle | B13 (fehlende Datei) · B14 (falsche Endung) · B15 (Tippfehler-Schlüssel: Hinweis, Modell bleibt) · B19 (Draco-GLB: Grund und Ausweg, kein Modell; der Treiber legt einen Container an, der Draco als Pflicht-Erweiterung deklariert, ohne Nutzlast — gemessen wird die Vorab-Erkennung, nicht der Decoder) |
