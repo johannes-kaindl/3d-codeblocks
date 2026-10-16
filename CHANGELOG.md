@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Gemma 4 no longer shows its thinking as the answer.** With Gemma 4 in LM Studio the thinking used to appear in the prompt panel's answer area (and, with "Thinking" off, was part of the reply); it now goes into the collapsible thinking block and the answer area shows only the model's answer.
+- **Gemma 4 on LM Studio cannot be switched off completely.** "Thinking: off" sends the lowest level there, because LM Studio ignores "none" for this model; the model still thinks a little (a few tokens, a little time).
+- **A model backend or family this version does not know yet** no longer breaks the request; it is sent as unknown.
+
 ### Fixed
 
 - **After resetting the view (double-click or the fit button), a later size change refits the view again.** Previously the reset view counted as "moved by you" again a moment later, so showing or hiding the sidebar left the picture at its old size.

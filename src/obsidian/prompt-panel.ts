@@ -356,7 +356,15 @@ export class PromptPanelView extends ItemView {
       this.area.appendReasoning(t);
     };
 
-    const r = await this.deps.llm.complete({ messages }, { onToken, onReasoning, signal: ctrl.signal });
+    // Gemma 4 schreibt sein Denken ohne Oeffner in den Inhalt; der Kit-Client erkennt es am Kanalende und meldet, dass der
+    // bisherige Inhalt Denken war. Ohne diesen Rueckruf bliebe es bis zum Ende im Antwortbereich stehen.
+    const onContentReset = (): void => {
+      if (this.controller !== ctrl) return;
+      raw = "";
+      this.area.setTail("");
+    };
+
+    const r = await this.deps.llm.complete({ messages }, { onToken, onReasoning, onContentReset, signal: ctrl.signal });
     if (this.controller !== ctrl) return;
     // Abgebrochen heisst abgebrochen, auch wenn das Ergebnis noch „ok“ ankam.
     if (ctrl.signal.aborted) {
