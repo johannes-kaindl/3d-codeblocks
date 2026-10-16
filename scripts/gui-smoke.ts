@@ -5713,6 +5713,14 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       const GEDANKE = "Ich wäge erst die Maße ab und rechne dann die Beine nach.";
       const antwort = ppStreamAnswer(6);
       const dritt = Math.ceil(antwort.length / 3);
+      // Das Modell der Ersatz-Zeile heisst hier wie Gemma 4: der Kit-Client erkennt das Kanalformat am Modellnamen.
+      const setzeModell = (m: string): Promise<unknown> => cdp.evaluate(`
+        const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+        plugin.settings.endpoints = plugin.settings.endpoints.map((e) => (e.id === ${JSON.stringify(PP_ENDPOINT_ID)} ? { ...e, model: ${JSON.stringify(m)} } : e));
+        plugin.llm.invalidate();
+        return true;`);
+      await setzeModell("google/gemma-4-e4b");
+      try {
       if (!(await ppOpenFresh(cdp))) {
         ppNothing("PP18", T.PP18, "das Panel öffnete nicht");
       } else {
@@ -5723,6 +5731,13 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           const t = document.querySelector(".tdcb-prompt .okit-stream-tail")?.textContent ?? "";
           return t.includes('"parts"') && !t.includes('"Teil-6"') ? t : null;`, 20_000, 50);
         const reasoning = await cdp.evaluate<string>(`return document.querySelector(".tdcb-prompt .okit-stream-reasoning > pre")?.textContent ?? "";`);
+        // Sichtbare Folge (Regel 12): mit SMOKE_SHOT_DIR schreibt der Punkt den Antwortbereich mit dem Denkblock als PNG.
+        const shotDir = process.env.SMOKE_SHOT_DIR;
+        if (shotDir && typeof mid === "string") {
+          const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
+          const box = await boxOf(cdp, ".tdcb-prompt .tdcb-prompt-stream", 12);
+          if (box) { mkdirSync(shotDir, { recursive: true }); writeFileSync(join(shotDir, "pp18-gemma-denkblock.png"), await capture(cdp, box, 2)); }
+        }
         const run = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
         ppRecord(
           "PP18",
@@ -5730,6 +5745,9 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           clicked && typeof mid === "string" && !mid.includes("wäge") && !mid.includes("channel") && reasoning.includes("wäge") && run.state?.phase === "ok",
           `mitten im Strom „${String(mid ?? "").slice(0, 50)}“ · Denkblock „${reasoning.slice(0, 40)}“ · Status ${run.state?.phase ?? "?"}: „${run.state?.status ?? ""}“`,
         );
+      }
+      } finally {
+        await setzeModell(PP_MODEL);
       }
     }
 
