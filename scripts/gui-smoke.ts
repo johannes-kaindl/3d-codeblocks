@@ -4788,7 +4788,7 @@ const PP_TITEL = {
   PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
   PP17: "Wiederaufnahme: steht der Nutzer nach dem Hochscrollen wieder unten, folgt der Strom wieder",
   PP18: "Gemma 4 ohne Öffner: der Denktext steht im Denkblock, nicht im Antwortbereich, und die Antwort wird gelesen",
-  PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
+  PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
@@ -4813,6 +4813,8 @@ interface Substitute {
   url: string;
   /** Wahr: nach dem ersten Stück schweigen (PP6) — die Verbindung bleibt offen, bis der Client sie schliesst. */
   hang: boolean;
+  /** Nicht leer: jede Chat-Antwort traegt diesen Denk-Text (PP11: langer Denkblock ueber einer langen „Done“-Zeile). */
+  reasoning: string;
   requests: { kind: "create" | "refine" | "models" | "unknown"; stream: boolean }[];
   /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
   clientClosed: number;
@@ -4837,17 +4839,19 @@ async function startSubstitute(answers: { create: string; refine: string }): Pro
     const system = (a.json as { messages?: { role?: string; content?: unknown }[] } | null)?.messages?.find((m) => m.role === "system")?.content;
     return typeof system === "string" && system.includes("Du änderst") ? "refine" : "create";
   };
-  const state = { hang: false };
+  const state = { hang: false, reasoning: "" };
   const stub = await startLlmStub({
     models: [PP_MODEL],
     takt: PP_CHUNK_DELAY_MS,
     teile: 3,
-    antwort: (a) => ({ text: kindOf(a) === "refine" ? answers.refine : answers.create, ...(state.hang ? { haengtNach: 1 } : {}) }),
+    antwort: (a) => ({ text: kindOf(a) === "refine" ? answers.refine : answers.create, ...(state.hang ? { haengtNach: 1 } : {}), ...(state.reasoning !== "" ? { reasoning: state.reasoning } : {}) }),
   });
   return {
     url: stub.urlV1,
     get hang() { return state.hang; },
     set hang(v: boolean) { state.hang = v; },
+    get reasoning() { return state.reasoning; },
+    set reasoning(v: string) { state.reasoning = v; },
     get requests() { return stub.anfragen().map((a) => ({ kind: kindOf(a), stream: a.stream === true })); },
     get clientClosed() { return stub.zaehler().clientGeschlossen; },
     get unterwegs() { return stub.zaehler().unterwegs; },
@@ -5607,12 +5611,16 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     if (!opened11) {
       ppNothing("PP11", T.PP11, "das Panel öffnete nicht");
     } else {
+      // Ein echtes Modell denkt lang (gemessen mit Gemma 4: 3 700 Zeichen): der offene Denkblock fuellt den Stream bis zur Obergrenze, und
+      // die Statuszeile „Done — …“ (zwei Zeilen im schmalen Panel) ragte aus der Box ueber „Preview of round 1“ (Bild der Modell-Runde Welle 23).
+      sub.reasoning = PP_STREAM_REASONING.repeat(8);
       await ppType(cdp, PP_CREATE_PROMPT);
       const clickedCreate = await ppClick(cdp, ".tdcb-prompt-send");
       const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
       await ppType(cdp, PP_REFINE_PROMPT);
       const clickedRefine = first.reached ? await ppClick(cdp, ".tdcb-prompt-send") : false;
       const second = await pollState<PpState>(cdp, PP_READ, (s) => (s.phase === "ok" || s.phase === "error") && s.rounds === 2 && s.diff.length > 0, 40_000, 300);
+      sub.reasoning = "";
       await sleepMs(600);
       // Das Panel ist erst bei knapper Hoehe „voll“ (Gegenprobe 2026-10-04: mit dem alten styles.css blieb PP11 bei
       // Fenster 1024x800 gruen, weil die Zeilen noch passten): Fenster fuer die Messung auf 640 px Hoehe, danach zurueck.
@@ -5623,6 +5631,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         panel: { top: number; bottom: number };
         statusRect: number[];
         captionRect: number[];
+        streamRect: number[];
         streamH: number;
         sticky: string;
         scrollable: boolean;
@@ -5639,11 +5648,21 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           panel: { top: pr.top, bottom: pr.bottom },
           statusRect: r(root.querySelector(".tdcb-prompt-status")),
           captionRect: r(root.querySelector(".tdcb-prompt-preview-caption")),
+          streamRect: r(root.querySelector(".tdcb-prompt-stream")),
           streamH: root.querySelector(".tdcb-prompt-stream").getBoundingClientRect().height,
           sticky: getComputedStyle(root.querySelector(".tdcb-prompt-end")).position,
           scrollable: panel.scrollHeight > panel.clientHeight + 1,
         };
       `);
+      // Sichtbare Folge (Regel 12): mit SMOKE_SHOT_DIR schreibt der Punkt die Endlage (Denkblock, lange Done-Zeile, Vorschau) als PNG.
+      const shotDir11 = process.env.SMOKE_SHOT_DIR;
+      if (shotDir11 && geo !== null) {
+        const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
+        // Die Stelle zeigen, um die es geht: Statuszeile und Beschriftung in der Mitte des (scrollenden) Rumpfs.
+        await cdp.evaluate(`document.querySelector(".tdcb-prompt .tdcb-prompt-status")?.scrollIntoView({ block: "center" }); await new Promise((r) => setTimeout(r, 400)); return true;`);
+        const box = await boxOf(cdp, ".tdcb-prompt", 4);
+        if (box) { mkdirSync(shotDir11, { recursive: true }); writeFileSync(join(shotDir11, "pp11-endlage.png"), await capture(cdp, box, 2)); }
+      }
       if (sizeBefore) await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); w.setSize(${sizeBefore[0] ?? 1024}, ${sizeBefore[1] ?? 800}); await new Promise((r) => setTimeout(r, 700)); return true;`).catch(() => undefined);
       if (geo === null || !second.reached) {
         ppRecord("PP11", T.PP11, false, `Vorbereitung unvollständig: Erzeugen ${clickedCreate ? (first.reached ? "ok" : "ohne zweite Vorbedingung") : "Klick fehlt"}, Verfeinern ${clickedRefine ? (second.reached ? "ok" : `nicht fertig (Runden ${second.state?.rounds ?? "?"}, Diff ${second.state?.diff.length ?? "?"}, Status „${second.state?.status ?? ""}“)`) : "Klick fehlt"}, Geometrie ${geo ? "gelesen" : "nicht lesbar"}`);
@@ -5653,18 +5672,20 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const [sl, st, sr, sb] = geo.statusRect as [number, number, number, number];
         const [cl, ct, cr, cb] = geo.captionRect as [number, number, number, number];
         const overlap = sl < cr && cl < sr && st < cb && ct < sb;
+        // Die Statuszeile bleibt in der Box des Streams (sonst ragt sie in die Nachbarn, auch wenn die Beschriftung gerade frei ist).
+        const statusInStream = sb <= (geo.streamRect[3] ?? 0) + 1;
         ppRecord(
           "PP11",
           T.PP11,
-          inWindow && inPanel && !overlap && geo.streamH > 60,
-          `Fensterhöhe ${geo.innerH} px · ${geo.buttons.map((b) => `${b.name} ${b.top.toFixed(0)}–${b.bottom.toFixed(0)}`).join(", ")} (Rumpf sichtbar ${geo.panel.top.toFixed(0)}–${geo.panel.bottom.toFixed(0)}; im Fenster: ${inWindow}, im Rumpf: ${inPanel}) · Knopfzeile ${geo.sticky} · Rumpf scrollbar: ${geo.scrollable} · Statuszeile ${[st, sb].map((v) => v.toFixed(0)).join("–")} gegen Beschriftung ${[ct, cb].map((v) => v.toFixed(0)).join("–")}: ${overlap ? "ÜBERLAGERT" : "getrennt"} · Stream ${geo.streamH.toFixed(0)} px (erwartet > 60) · Runden ${second.state?.rounds}, Diff-Zeilen ${second.state?.diff.length}`,
+          inWindow && inPanel && !overlap && statusInStream && geo.streamH > 60,
+          `Fensterhöhe ${geo.innerH} px · ${geo.buttons.map((b) => `${b.name} ${b.top.toFixed(0)}–${b.bottom.toFixed(0)}`).join(", ")} (Rumpf sichtbar ${geo.panel.top.toFixed(0)}–${geo.panel.bottom.toFixed(0)}; im Fenster: ${inWindow}, im Rumpf: ${inPanel}) · Knopfzeile ${geo.sticky} · Rumpf scrollbar: ${geo.scrollable} · Statuszeile ${[st, sb].map((v) => v.toFixed(0)).join("–")} gegen Beschriftung ${[ct, cb].map((v) => v.toFixed(0)).join("–")}: ${overlap ? "ÜBERLAGERT" : "getrennt"} · in der Box des Streams (Unterkante ${geo.streamRect[3]?.toFixed(0)}): ${statusInStream} · Stream ${geo.streamH.toFixed(0)} px (erwartet > 60) · Runden ${second.state?.rounds}, Diff-Zeilen ${second.state?.diff.length}`,
         );
       }
     }
 
     // --- PP13–PP17. Stream-Bereich im Prompt-Panel: Folge-Regel, Kontrolle, Denkblock live, Wiederaufnahme --------------------
     // Gemessen mit `messeFolge` der Bruecke (README § Folge-Messung): der scrollende Rumpf (`.okit-stream-body`) ist durch
-    // `.tdcb-prompt-stream { max-height: 14em }` begrenzt. Die Gueltigkeit steht im Urteil der Bruecke (Ueberlauf >= 80 px, mindestens
+    // `.tdcb-prompt-stream .okit-stream-body { max-height: 14em }` begrenzt. Die Gueltigkeit steht im Urteil der Bruecke (Ueberlauf >= 80 px, mindestens
     // 3 Staende, Vorbedingung „Bereich folgte vor der Stoerung“); sonst „nichts gemessen“ (CORE-TEST-22).
     {
       const namen = { PP14: T.PP14, PP16: T.PP16, PP13: T.PP13, PP17: T.PP17 };

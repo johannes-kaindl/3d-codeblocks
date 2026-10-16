@@ -551,7 +551,11 @@
 .tdcb-prompt > .okit-hub-content .okit-hub-panel,
 .tdcb-prompt-versions { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-2); }
 .tdcb-prompt .okit-hub-panel.is-hidden { display: none; }
-.tdcb-prompt-stream { flex: 0 1 auto; max-height: 14em; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
+/* Die Obergrenze liegt am Antwort-Rumpf (14em) und am Denkblock (12em, Kit), nicht an der Box: eine Box mit fester Obergrenze
+   (vorher `max-height: 14em`) lief bei offenem Denkblock ueber, und die Statuszeile „Done — …“ ragte unten heraus und ueberlagerte
+   „Preview of round N“ (gemessen mit Gemma 4, Modell-Runde Welle 23; derselbe Fehler schon in 0.10.1). */
+.tdcb-prompt-stream { flex: 0 1 auto; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
+.tdcb-prompt-stream .okit-stream-body { max-height: 14em; }
 /* Ursache des zusammengefallenen Stream-Bereichs und der halb abgeschnittenen Knoepfe: der Hub-Panel-Rumpf ist ein
    Flex-Container fester Hoehe (height: 100% aus dem Kit), alle Kinder ausser dem Stream tragen `flex: 0 0 auto`;
    der Stream (`flex: 0 1 auto`, Kit-`.okit-stream { min-height: 0 }`, Body `flex: 1 1 auto; min-height: 0`) ist das

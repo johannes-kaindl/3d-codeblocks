@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The status line in the prompt panel no longer overlaps "Preview of round N".** With a model that thinks at length (Gemma 4: several thousand characters) the open thinking block filled the answer area, and the two-line "Done — check the preview, …" line stuck out below the box and was drawn over the preview caption. The height limit now sits on the answer text and the thinking block instead of the whole box. Present since 0.10.0 (checked on 0.10.1).
+
 ## [0.10.2] — 2026-10-16
 
 ### Changed
