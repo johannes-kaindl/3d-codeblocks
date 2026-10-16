@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **After resetting the view (double-click or the fit button), a later size change refits the view again.** Previously the reset view counted as "moved by you" again a moment later, so showing or hiding the sidebar left the picture at its old size.
+
 ## [0.10.1] — 2026-10-14
 
 ### Security

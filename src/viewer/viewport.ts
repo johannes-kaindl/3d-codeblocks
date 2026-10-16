@@ -317,6 +317,13 @@ export class Viewport {
       beide Wege (gerechnete Ansicht und Datei-Kamera) zusammenlaufen. */
   private applyFit(fit: CameraFit): void {
     this.applyingFit = true;
+    // Den Rest der Daempfung VOR dem Setzen abraeumen: Mit `enableDamping` rechnet OrbitControls den
+    // Restschwung eines vorigen Zugs ueber mehrere Bilder weiter und feuert dabei `change` mit
+    // `applyingFit === false` — der frisch eingepasste Blick gaelte 100 ms nach Reset/Fit-Knopf wieder
+    // als „vom Nutzer bewegt“. Ohne Daempfung wendet `update()` den Rest vollstaendig an und nullt ihn.
+    this.controls.enableDamping = false;
+    this.controls.update();
+    this.controls.enableDamping = true;
     this.camera.position.set(fit.position.x, fit.position.y, fit.position.z);
     this.camera.near = fit.near;
     this.camera.far = fit.far;

@@ -1319,7 +1319,7 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     rendered ? `${rendered.colors} Farbtöne · ${rendered.width}px breit` : await describeScene(cdp),
   );
   if (!rendered) {
-    skipIds(["B2", "B3", "B4", "B5", "B6", "B6b", "B6c", "B7", "B8", "B9", "B10", "B11", "B12"], "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
+    skipIds(["B2", "B3", "B4", "B5", "B5b", "B6", "B6b", "B6c", "B7", "B8", "B9", "B10", "B11", "B12"], "ohne gerendertes Modell ist keiner der Folgepunkte aussagekräftig");
     return;
   }
 
@@ -1514,6 +1514,20 @@ async function sectionBasics(cdp: Cdp, model: string): Promise<void> {
     reset.error === null && near(orbit.before, reset.after),
     reset.error ?? `${JSON.stringify(orbit.before)} (Start) → ${JSON.stringify(reset.after)}`,
   );
+
+  // --- B5b. Nach dem Reset bleibt `userMoved` false ------------------------
+  // Gemessen Welle 22: nach einem Orbit und Doppelklick-Reset stand `refit.userMoved()` 100 ms spaeter wieder auf true (Daempfungs-Rest
+  // des Orbits feuerte `change` ausserhalb von `applyFit`). Gegenprobe: ohne die Daempfungs-Raeumung in `applyFit()` ist dieser Punkt rot.
+  const movedAfterReset = await cdp.evaluate<{ timeline: string; error: string | null }>(`
+    const controller = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].active.get();
+    const refit = controller?.host?.viewport?.refit;
+    if (!refit || typeof refit.userMoved !== "function") return { timeline: "", error: "host.viewport.refit.userMoved nicht lesbar" };
+    let tl = "";
+    for (let i = 0; i < 15; i++) { tl += refit.userMoved() ? "M" : "-"; await new Promise((r) => setTimeout(r, 100)); }
+    return { timeline: tl, error: null };
+  `);
+  if (movedAfterReset.error) nothingMeasured("B5b. Nach dem Reset gilt der Blick nicht als vom Nutzer bewegt", movedAfterReset.error);
+  else record("B5b. Nach dem Reset gilt der Blick nicht als vom Nutzer bewegt", !movedAfterReset.timeline.includes("M"), `Timeline 1,5 s (je 100 ms, '-' = nicht bewegt): ${movedAfterReset.timeline}`);
 
   // --- B6. Layout: die Notiz im Split ------------------------------------
   // Nicht das CSS anfassen, sondern die Pane wirklich teilen: der `ResizeObserver` in
@@ -5778,6 +5792,7 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "B3. Das Mausrad ändert die Distanz",
     "B4. Pan (rechte Maustaste) verschiebt das Bild",
     "B5. Doppelklick setzt die Ansicht auf den Einpass-Zustand zurück",
+    "B5b. Nach dem Reset gilt der Blick nicht als vom Nutzer bewegt",
     "B6. Im Split schrumpft der Viewport mit — auch der Renderer-Puffer",
     "B6b. Ein bewegter Blick bleibt, wenn der Viewport schmaler wird",
     "B6c. Ein nicht bewegter Blick wird neu eingepasst, wenn der Viewport schmaler wird",
