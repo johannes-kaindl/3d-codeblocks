@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-10-16
+
 ### Changed
 
 - **Gemma 4 no longer shows its thinking as the answer.** With Gemma 4 in LM Studio the thinking used to appear in the prompt panel's answer area (and, with "Thinking" off, was part of the reply); it now goes into the collapsible thinking block and the answer area shows only the model's answer.
