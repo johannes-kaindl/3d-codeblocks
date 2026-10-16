@@ -4769,7 +4769,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4787,6 +4787,7 @@ const PP_TITEL = {
   PP15: "Denkblock live: der Denk-Text ist während des Stroms sichtbar und wächst",
   PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
   PP17: "Wiederaufnahme: steht der Nutzer nach dem Hochscrollen wieder unten, folgt der Strom wieder",
+  PP18: "Gemma 4 ohne Öffner: der Denktext steht im Denkblock, nicht im Antwortbereich, und die Antwort wird gelesen",
   PP11: "Panel mit zwei Runden und Diff-Liste: Apply/Discard erreichbar, Statuszeile überlagert nichts, Stream nicht zusammengefallen",
 } as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
@@ -5700,6 +5701,35 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       else {
         eintragen("PP13", "folge", disturbed.ergebnis);
         eintragen("PP17", "wiederaufnahme", disturbed.ergebnis);
+      }
+    }
+
+    // --- PP18. Gemma 4 ohne Öffner (Welle 23, Gegenprobe zu `onContentReset`) -----------------------------------------
+    // Gemma 4 auf LM Studio schreibt das Denken OHNE Öffner in `content` und beendet es mit `<channel|>`; die Antwort folgt. Der Stub
+    // streamt genau das. Gemessen wird der Antwortbereich MITTEN im Strom (am Ende setzt das Ergebnis den Text neu) und der Ausgang:
+    // auf dem alten Pin (code-kit 0.27.1) kennt der Trenner das Kanalende nicht, die Antwort bleibt Denktext + JSON und das Panel meldet
+    // einen Fehler; mit 0.27.2 ohne `onContentReset` bliebe der Denktext bis zum Ende im Antwortbereich stehen.
+    {
+      const GEDANKE = "Ich wäge erst die Maße ab und rechne dann die Beine nach.";
+      const antwort = ppStreamAnswer(6);
+      const dritt = Math.ceil(antwort.length / 3);
+      if (!(await ppOpenFresh(cdp))) {
+        ppNothing("PP18", T.PP18, "das Panel öffnete nicht");
+      } else {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        sub.queue({ stuecke: [GEDANKE.slice(0, 20), GEDANKE.slice(20) + "<channel|>", antwort.slice(0, dritt), antwort.slice(dritt, 2 * dritt), antwort.slice(2 * dritt)], takt: 700 });
+        const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+        const mid = await pollUntil<string>(cdp, `
+          const t = document.querySelector(".tdcb-prompt .okit-stream-tail")?.textContent ?? "";
+          return t.includes('"parts"') && !t.includes('"Teil-6"') ? t : null;`, 20_000, 50);
+        const reasoning = await cdp.evaluate<string>(`return document.querySelector(".tdcb-prompt .okit-stream-reasoning > pre")?.textContent ?? "";`);
+        const run = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
+        ppRecord(
+          "PP18",
+          T.PP18,
+          clicked && typeof mid === "string" && !mid.includes("wäge") && !mid.includes("channel") && reasoning.includes("wäge") && run.state?.phase === "ok",
+          `mitten im Strom „${String(mid ?? "").slice(0, 50)}“ · Denkblock „${reasoning.slice(0, 40)}“ · Status ${run.state?.phase ?? "?"}: „${run.state?.status ?? ""}“`,
+        );
       }
     }
 
