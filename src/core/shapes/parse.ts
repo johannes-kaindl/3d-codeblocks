@@ -1,5 +1,6 @@
 // shapes-Text → Kopf, Teile, Fehler. Pure. Fehler gelten JE ZEILE: eine kaputte Zeile
 // kostet nur ihr Teil, der Rest rendert (Spec § 3.3).
+import { parseBlockLines } from "../../vendor/kit/block-lines";
 import { parseView, VIEW_NAMES } from "../view-spec";
 import {
   KEYWORDS,
@@ -13,8 +14,6 @@ import {
   type Vec3,
 } from "./types";
 
-// Dasselbe Muster wie `block-config.ts` — eine Kopfzeile sieht hier aus wie dort.
-const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:(.*)$/;
 const NAME = /^[\p{L}\p{N}_-]+$/u;
 const HEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const HEADER_KEYS = ["title", "height", "view"];
@@ -165,35 +164,40 @@ export function parseShapes(source: string): ParsedShapes {
   const names = new Set<string>();
   let seenPart = false;
 
-  source.split(/\r?\n/).forEach((raw, index) => {
-    const lineNo = index + 1;
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) return;
+  // Kopfzeilen (`key: value`) und Teile-Zeilen trennt das Kit (`block-lines`); hier laufen beide wieder in Quellreihenfolge,
+  // weil eine Kopfzeile nach dem ersten Teil ein Fehler ist.
+  const { entries, loose } = parseBlockLines(source);
+  const lines = [
+    ...entries.map((entry) => ({ lineNo: entry.line, entry, text: "" })),
+    ...loose.map((l) => ({ lineNo: l.line, entry: null, text: l.text })),
+  ].sort((x, y) => x.lineNo - y.lineNo);
 
-    const key = KEY_LINE.exec(line);
-    if (key) {
+  for (const item of lines) {
+    const lineNo = item.lineNo;
+    if (item.entry !== null) {
       if (seenPart) {
         errors.push({ line: lineNo, message: "Header lines (`key: value`) must come before the first part" });
-        return;
+        continue;
       }
-      applyHeader(key[1], key[2], lineNo, header, errors, warnings);
-      return;
+      applyHeader(item.entry.rawKey, item.entry.rawValue, lineNo, header, errors, warnings);
+      continue;
     }
+    const line = item.text;
 
     seenPart = true;
     const result = parsePartLine(line, lineNo);
     if ("error" in result) {
       errors.push({ line: lineNo, message: result.error });
-      return;
+      continue;
     }
     warnings.push(...result.warnings);
     if (names.has(result.part.name)) {
       errors.push({ line: lineNo, message: `Duplicate name \`${result.part.name}\`` });
-      return;
+      continue;
     }
     names.add(result.part.name);
     parts.push(result.part);
-  });
+  }
 
   return { header, parts, errors, warnings };
 }

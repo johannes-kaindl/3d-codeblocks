@@ -13,7 +13,6 @@ All notable changes to this project are documented here. The format follows
 - **The request section of the settings warns before a request would load another model in LM Studio.** If the model you send is not loaded but others are, a line names the loaded ones: the request loads it on demand and can unload a running one ("Model unloaded.").
 - **At the note "Model family recognized", a button "Set family in the manager" opens the LLM Endpoint Manager settings.** The family itself is still set there, never learned from the answer.
 - **A connection type the plugin does not support (for example the manager's Claude API endpoint) is now reported as such**, instead of as a general configuration error.
-
 - **References inside a glTF file are checked with the shared path rules.** A back slash in a reference (`tex\\a.png`) now counts as a separator, as in the browser, so it can no longer hide a `..\\`; a reference with a NUL byte is refused (listed as "this kind of reference cannot be read"), and a `..` padded with white space (`".. "`) counts as `..`. Nothing changes for ordinary references.
 
 ### Fixed

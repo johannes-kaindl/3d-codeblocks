@@ -4,6 +4,7 @@
 //   `key: value`  — nur wenn die Zeile `^[A-Za-z][A-Za-z0-9_-]*\s*:` erfuellt
 //   alles andere  — Pfad-Kurzform (deshalb ueberlebt `some folder/odd:name.glb`)
 
+import { parseBlockLines, unquote } from "../vendor/kit/block-lines";
 import { VIEW_NAMES, parseView, type ViewRef } from "./view-spec";
 
 export interface BlockConfig {
@@ -22,16 +23,7 @@ export interface ParseResult {
   warnings: string[];
 }
 
-const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:(.*)$/;
 const KNOWN_KEYS = ["file", "height", "title", "view"] as const;
-
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  const quoted =
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"));
-  return quoted && trimmed.length >= 2 ? trimmed.slice(1, -1).trim() : trimmed;
-}
 
 export function parseBlockConfig(source: string): ParseResult {
   const warnings: string[] = [];
@@ -41,23 +33,28 @@ export function parseBlockConfig(source: string): ParseResult {
   let view: ViewRef | undefined;
   let fileSeen = 0;
 
-  for (const rawLine of source.split("\n")) {
-    const line = rawLine.trim();
-    if (line === "" || line.startsWith("#")) continue;
+  // Zeilen, Kommentare, Anfuehrungszeichen und das `key: value`-Muster liest das Kit (`block-lines`); was die Schluessel
+  // bedeuten und die Pfad-Kurzform (eine Zeile ohne Schluessel ist `file:`) bleibt hier. Beides in Quellreihenfolge,
+  // damit bei zwei Pfaden der letzte gewinnt.
+  const { entries, loose } = parseBlockLines(source);
+  const lines = [
+    ...entries.map((entry) => ({ line: entry.line, entry })),
+    ...loose.map((l) => ({ line: l.line, entry: null, text: l.text })),
+  ].sort((x, y) => x.line - y.line);
 
-    const match = KEY_LINE.exec(line);
-    if (!match) {
+  for (const item of lines) {
+    if (item.entry === null) {
       // Pfad-Kurzform.
-      file = stripQuotes(line);
+      file = unquote(item.text);
       fileSeen += 1;
       continue;
     }
 
-    const key = match[1].toLowerCase();
-    const value = stripQuotes(match[2]);
+    const key = item.entry.key;
+    const value = item.entry.value;
 
     if (!(KNOWN_KEYS as readonly string[]).includes(key)) {
-      warnings.push(`Unknown key: \`${match[1]}\``);
+      warnings.push(`Unknown key: \`${item.entry.rawKey}\``);
       continue;
     }
 
