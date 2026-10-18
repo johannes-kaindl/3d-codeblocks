@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-18
+
 ### Changed
 
 - **The thinking block in the prompt panel has a copy button.** It copies the model's thinking as plain text; it appears once the block has text, stays usable after the answer ends, and clicking it does not fold the block. (Kit: obsidian-kit 0.63.0; the long-line fix below comes with it.)
