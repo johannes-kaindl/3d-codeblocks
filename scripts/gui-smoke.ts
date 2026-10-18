@@ -4769,7 +4769,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4788,6 +4788,7 @@ const PP_TITEL = {
   PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
   PP17: "Wiederaufnahme: steht der Nutzer nach dem Hochscrollen wieder unten, folgt der Strom wieder",
   PP18: "Gemma 4 ohne Öffner: der Denktext steht im Denkblock, nicht im Antwortbereich, und die Antwort wird gelesen",
+  PP20: "Denkblock kopierbar: der Kopier-Knopf erscheint erst mit Denk-Text, kopiert ihn in die Zwischenablage, quittiert am Knopf und klappt den Block nicht um",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
@@ -5809,6 +5810,58 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
         if (!clicked || wide === null) ppNothing("PP19", T.PP19, clicked ? "die lange Zeile erschien nie im Tail" : "Klick auf Erzeugen fehlt");
         else ppRecord("PP19", T.PP19, wide.over <= 1 && wide.scrollX <= 1, `Zeile von ${LANG.length} Zeichen im Tail · ragt ${wide.over.toFixed(0)} px über die Box${wide.over > 1 ? ` (${wide.worst})` : ""} · waagerechter Überlauf des Rumpfs ${wide.scrollX} px`);
+      }
+    }
+
+    // --- PP20. Denkblock kopierbar (obsidian-kit 0.63.0, Task „Denkblock kopierbar“) ----------------------------------
+    // Gegenprobe VOR dem Denken: ohne Denk-Text gibt es keinen Knopf. Danach streamt der Stub einen Denk-Text mit Marke; gemessen werden
+    // Knopf (aria-label), Zwischenablage (Electron-Clipboard, der vorherige Inhalt wird zurueckgeschrieben), Quittung am Knopf (`is-copied`)
+    // und der Zustand des `<details>` vor/nach dem Klick (der Klick darf den Block nicht umklappen).
+    {
+      const MARKE = "Kopierprobe-W24";
+      const DENKEN = `${MARKE}: erst die Platte, dann vier Beine, dann die Masse nachrechnen.`;
+      if (!(await ppOpenFresh(cdp))) {
+        ppNothing("PP20", T.PP20, "das Panel öffnete nicht");
+      } else {
+        const vorher = await cdp.evaluate<number>(`return document.querySelectorAll(".tdcb-prompt .okit-stream-reasoning-copy").length;`);
+        sub.reasoning = DENKEN;
+        await ppType(cdp, PP_CREATE_PROMPT);
+        const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+        // Gueltig ist die Messung, sobald der Denk-Text im Block steht; fehlt der Knopf DANN, ist das der Befund (rot), nicht „nichts gemessen“.
+        const knopf = await pollUntil<{ label: string | null; offen: boolean }>(cdp, `
+          const d = document.querySelector(".tdcb-prompt .okit-stream-reasoning");
+          if (!d || !(d.querySelector("pre")?.textContent ?? "").includes(${JSON.stringify(MARKE)})) return null;
+          const b = d.querySelector(".okit-stream-reasoning-copy");
+          return { label: b ? (b.getAttribute("aria-label") ?? "") : null, offen: d.open };`, 20_000, 100);
+        await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
+        sub.reasoning = "";
+        if (!clicked || knopf === null) {
+          ppNothing("PP20", T.PP20, clicked ? "der Denk-Text erschien nicht im Block" : "Klick auf Erzeugen fehlt");
+        } else if (knopf.label === null) {
+          ppRecord("PP20", T.PP20, false, `Knöpfe vor dem Denken: ${vorher} · der Denk-Text steht im Block, aber es gibt keinen Kopier-Knopf`);
+        } else {
+          const gelesen = await cdp.evaluate<{ davor: string; danach: string; quittiert: boolean; offenDanach: boolean }>(`
+            const cb = window.require("electron").clipboard;
+            const davor = cb.readText();
+            cb.writeText("");
+            const b = document.querySelector(".tdcb-prompt .okit-stream-reasoning-copy");
+            const d = document.querySelector(".tdcb-prompt .okit-stream-reasoning");
+            const offenVorher = d.open;
+            b.click();
+            let danach = "";
+            for (let i = 0; i < 40 && danach === ""; i++) { await new Promise((r) => setTimeout(r, 50)); danach = cb.readText(); }
+            await new Promise((r) => setTimeout(r, 100));
+            const quittiert = b.classList.contains("is-copied");
+            cb.writeText(davor);
+            return { davor, danach, quittiert, offenDanach: d.open === offenVorher };`);
+          const kopiert = gelesen.danach.includes(MARKE);
+          ppRecord(
+            "PP20",
+            T.PP20,
+            vorher === 0 && knopf.label !== "" && kopiert && gelesen.quittiert && gelesen.offenDanach,
+            `Knöpfe vor dem Denken: ${vorher} (erwartet 0) · aria-label „${knopf.label}“ · Zwischenablage trägt die Marke: ${kopiert} („${gelesen.danach.slice(0, 40)}“) · Quittung is-copied: ${gelesen.quittiert} · Block unverändert offen/zu: ${gelesen.offenDanach}`,
+          );
+        }
       }
     }
 
