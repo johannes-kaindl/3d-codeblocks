@@ -75,6 +75,7 @@ import {
 } from "../../tools/obsidian-cdp/cdp.js";
 import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
 import { messeFolge, zeichneFolge } from "../../tools/obsidian-cdp/folge.js";
+import { gegenprobeErreichbarkeit, gegenprobeFokus, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
 import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
 import { startLlmStub, type Antwort, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
 
@@ -4769,7 +4770,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4788,6 +4789,11 @@ const PP_TITEL = {
   PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
   PP17: "Wiederaufnahme: steht der Nutzer nach dem Hochscrollen wieder unten, folgt der Strom wieder",
   PP18: "Gemma 4 ohne Öffner: der Denktext steht im Denkblock, nicht im Antwortbereich, und die Antwort wird gelesen",
+  PP21: "Pflicht (a): ein Tipp-Feld des Panels behält den Fokus, wenn ein Neuzeichnen ausgelöst wird",
+  PP22: "Pflicht (a), Gegenprobe: ein Neuzeichnen mit Fokusverlust macht PP21 rot",
+  PP23: "Pflicht (b): jedes Bedienelement des Panels ist erreichbar (natürliche Höhe, Rumpf mit Inhalt gefüllt)",
+  PP24: "Pflicht (b): jedes Bedienelement ist auch im kurzen Panel erreichbar (420 px)",
+  PP25: "Pflicht (b), Gegenprobe: ohne Rollbalken wird etwas unerreichbar",
   PP20: "Denkblock kopierbar: der Kopier-Knopf erscheint erst mit Denk-Text, kopiert ihn in die Zwischenablage, quittiert am Knopf und klappt den Block nicht um",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
@@ -5861,6 +5867,46 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
             vorher === 0 && knopf.label !== "" && kopiert && gelesen.quittiert && gelesen.offenDanach,
             `Knöpfe vor dem Denken: ${vorher} (erwartet 0) · aria-label „${knopf.label}“ · Zwischenablage trägt die Marke: ${kopiert} („${gelesen.danach.slice(0, 40)}“) · Quittung is-copied: ${gelesen.quittiert} · Block unverändert offen/zu: ${gelesen.offenDanach}`,
           );
+        }
+      }
+    }
+
+    // --- PP21–PP25. Pflichtpunkte § 3a (Baustein `pflichtpunkte` der Bruecke, Vorbild lingotuner) --------------------
+    // (a) Fokus-Erhalt, (b) Erreichbarkeit. Das Panel braucht fuer (b) eine Runde (Apply/Discard sind sonst `disabled`, aber vorhanden; der
+    // Stop-Knopf ist im Ruhezustand versteckt und steht deshalb nicht in der Liste). Der Ueberlauf-Rumpf ist der Hub-Panel-Rumpf; gefuellt
+    // wird die Diff-Liste (normaler Fluss, laesst den Rumpf wachsen). Ob die Gegenprobe in DIESEM Layout rot werden kann, entscheidet die Messung.
+    {
+      const pflicht = (id: (typeof PP_IDS)[number], u: PflichtTeilurteil): void =>
+        zeichnePflicht({ record: (_n, ok, d) => ppRecord(id, T[id], ok, d ?? ""), unmeasured: (_n, why) => ppNothing(id, T[id], why) }, T[id], u);
+      if (!(await ppOpenFresh(cdp))) {
+        for (const id of ["PP21", "PP22", "PP23", "PP24", "PP25"] as const) ppNothing(id, T[id], "das Panel öffnete nicht");
+      } else {
+        const FELD = ".tdcb-prompt-input";
+        pflicht("PP21", await messeFokusErhalt(cdp, { selector: FELD }));
+        pflicht("PP22", await gegenprobeFokus(cdp, { selector: FELD }));
+        await ppType(cdp, PP_CREATE_PROMPT);
+        await ppClick(cdp, ".tdcb-prompt-send");
+        const runde = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" && st.rounds === 1, 40_000, 300);
+        if (!runde.reached) {
+          for (const id of ["PP23", "PP24", "PP25"] as const) ppNothing(id, T[id], "die Vorbedingung (eine fertige Runde im Panel) kam nicht zustande");
+        } else {
+          const rumpf = ".tdcb-prompt .okit-hub-panel:not(.is-hidden)";
+          const opts = {
+            selektoren: [".tdcb-prompt-input", ".tdcb-prompt-send", ".tdcb-prompt-apply", ".tdcb-prompt-discard", ".tdcb-prompt-new"],
+            fuelle: { in: ".tdcb-prompt-diff" },
+            ueberlauf: rumpf,
+            erforderlich: [".tdcb-prompt-input", ".tdcb-prompt-send", ".tdcb-prompt-apply", ".tdcb-prompt-discard"],
+          };
+          pflicht("PP23", await messeErreichbarkeit(cdp, opts));
+          pflicht("PP24", await mitHoehe<PflichtTeilurteil>(cdp, { element: ".workspace-leaf", enthaelt: ".tdcb-prompt", hoehe: 420 }, () => messeErreichbarkeit(cdp, opts)));
+          const gegen = await gegenprobeErreichbarkeit(cdp, { selektoren: opts.selektoren, rollbereich: rumpf, fuelle: opts.fuelle });
+          // Gemessen (Welle 24): in diesem Layout sitzen Eingabe, Senden und Neu oben im Rumpf und Apply/Discard in der Knopfzeile, die unten
+          // klebt (`position: sticky`). Ohne Rollbalken bleibt jedes erreichbar, die Gegenprobe kann hier nie rot werden — „nicht anwendbar“ (skipped),
+          // nicht gruen; PP23/PP24 tragen die Erreichbarkeit, die Fuelle belegt der Ueberlauf (Rumpf 3829 px in 685 px).
+          if (gegen.urteil === "rot" && gegen.detail.startsWith("overflow:hidden, aber alle")) {
+            ppDone.add("PP25");
+            skipped(`PP25. ${T.PP25}`, `in dieser Lage nicht anwendbar: Bedienelemente stehen oben bzw. in der klebenden Knopfzeile, ohne Rollbalken bleiben alle erreichbar (${gegen.detail})`);
+          } else pflicht("PP25", gegen);
         }
       }
     }
