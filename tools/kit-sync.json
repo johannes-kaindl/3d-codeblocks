@@ -1,7 +1,7 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.61.0" },
-    "code-kit": { "ref": "0.28.0" }
+    "obsidian-kit": { "ref": "0.63.0" },
+    "code-kit": { "ref": "0.31.0" }
   },
   "targets": [
     {
@@ -15,7 +15,7 @@
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook"],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "anthropic-wire", "override-guard"],
       "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {
@@ -24,7 +24,7 @@
         "confirm", "folder-suggest", "settings_walker", "help-setting",
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
-        "clock", "stream-area", "hub", "version-list", "endpoint-plumbing", "embedding-connection", "endpoint-status-text"
+        "clock", "stream-area", "hub", "version-list", "endpoint-plumbing", "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport"
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },

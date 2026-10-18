@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The thinking block in the prompt panel has a copy button.** It copies the model's thinking as plain text; it appears once the block has text, stays usable after the answer ends, and clicking it does not fold the block. (Kit: obsidian-kit 0.63.0; the long-line fix below comes with it.)
+- **With LM Studio, whether a model thinks or reads images now comes from the model's own metadata instead of only its name.** The thinking toggle can therefore appear for more models, and a model whose name gave no hint is no longer treated as text-only.
+- **The request section of the settings warns before a request would load another model in LM Studio.** If the model you send is not loaded but others are, a line names the loaded ones: the request loads it on demand and can unload a running one ("Model unloaded.").
+- **At the note "Model family recognized", a button "Set family in the manager" opens the LLM Endpoint Manager settings.** The family itself is still set there, never learned from the answer.
+- **A connection type the plugin does not support (for example the manager's Claude API endpoint) is now reported as such**, instead of as a general configuration error.
+
 ### Fixed
 
 - **A long unbroken line in the prompt panel's answer no longer runs off to the right.** The model's JSON answer is one line without spaces; the answer area now wraps it instead of cutting it off at the panel edge.
