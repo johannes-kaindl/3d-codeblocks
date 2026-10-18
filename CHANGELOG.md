@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format follows
 - **At the note "Model family recognized", a button "Set family in the manager" opens the LLM Endpoint Manager settings.** The family itself is still set there, never learned from the answer.
 - **A connection type the plugin does not support (for example the manager's Claude API endpoint) is now reported as such**, instead of as a general configuration error.
 
+- **References inside a glTF file are checked with the shared path rules.** A back slash in a reference (`tex\\a.png`) now counts as a separator, as in the browser, so it can no longer hide a `..\\`; a reference with a NUL byte is refused (listed as "this kind of reference cannot be read"), and a `..` padded with white space (`".. "`) counts as `..`. Nothing changes for ordinary references.
+
 ### Fixed
 
 - **A long unbroken line in the prompt panel's answer no longer runs off to the right.** The model's JSON answer is one line without spaces; the answer area now wraps it instead of cutting it off at the panel edge.

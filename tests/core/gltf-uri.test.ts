@@ -57,6 +57,16 @@ describe("classifyUri", () => {
     });
   });
 
+  it("reads a back slash as a separator, like the kit's rel-path (so `..\\` cannot hide a climb)", () => {
+    expect(classifyUri("tex\\a.png", "models")).toEqual({ kind: "vault", path: "models/tex/a.png" });
+    expect(classifyUri("..\\..\\x.png", "models")).toEqual({ kind: "rejected", reason: "outside-vault" });
+  });
+
+  it("refuses a NUL byte and a `..` padded with white space", () => {
+    expect(classifyUri("a\0b.png", "models")).toEqual({ kind: "rejected", reason: "scheme" });
+    expect(classifyUri("../.. /x.png", "models")).toEqual({ kind: "rejected", reason: "outside-vault" });
+  });
+
   it("handles a model that sits in the vault root", () => {
     expect(classifyUri("scene.bin", "")).toEqual({ kind: "vault", path: "scene.bin" });
   });

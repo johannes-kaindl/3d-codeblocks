@@ -13,6 +13,8 @@ export type UriClass =
   | { kind: "external"; url: string }
   | { kind: "rejected"; reason: "empty" | "scheme" | "outside-vault" };
 
+import { resolveRelPath } from "../vendor/kit/rel-path";
+
 const SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 
 /** Wie der URL-Parser des Browsers (WHATWG), BEVOR er das Schema liest: Tabulator und Zeilenumbruch fallen ueberall weg (`ht<TAB>tps://x` ist
@@ -55,19 +57,13 @@ export function classifyUri(uri: string, baseDir: string): UriClass {
     decoded = trimmed;
   }
 
-  const segments: string[] = baseDir === "" ? [] : baseDir.split("/").filter((s) => s !== "");
-  for (const segment of decoded.split("/")) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") {
-      if (segments.length === 0) return { kind: "rejected", reason: "outside-vault" };
-      segments.pop();
-      continue;
-    }
-    segments.push(segment);
-  }
-
-  if (segments.length === 0) return { kind: "rejected", reason: "empty" };
-  return { kind: "vault", path: segments.join("/") };
+  // Segmentregeln aus dem Kit (`rel-path`): `..` steigt hoechstens bis zur Vault-Wurzel, `\\` ist Trenner, NUL ist verboten,
+  // ein `..` mit Leerraum (`".. "`) gilt als `..`; `/a` liest der Aufruf unterhalb des Modellordners, ein Wurzel-Ergebnis ist `empty`.
+  const resolved = resolveRelPath(baseDir, decoded, { absolute: "strip" });
+  if (resolved.ok) return { kind: "vault", path: resolved.path };
+  if (resolved.problem === "traversal") return { kind: "rejected", reason: "outside-vault" };
+  if (resolved.problem === "empty") return { kind: "rejected", reason: "empty" };
+  return { kind: "rejected", reason: "scheme" };
 }
 
 /** Warum eine Referenz nicht geladen wurde. Der Datentyp liegt hier, weil der Text dazu

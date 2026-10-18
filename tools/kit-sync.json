@@ -10,7 +10,7 @@
         "num", "settings_schema", "secrets", "redact", "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context"
+        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "rel-path"
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
