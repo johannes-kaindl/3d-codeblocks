@@ -4769,7 +4769,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4788,6 +4788,7 @@ const PP_TITEL = {
   PP16: "Kontrolle mit absatzgroßen Stücken: der Strom folgt auch dann bis zum Ende",
   PP17: "Wiederaufnahme: steht der Nutzer nach dem Hochscrollen wieder unten, folgt der Strom wieder",
   PP18: "Gemma 4 ohne Öffner: der Denktext steht im Denkblock, nicht im Antwortbereich, und die Antwort wird gelesen",
+  PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
@@ -5769,6 +5770,45 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       }
       } finally {
         await setzeModell(PP_MODEL);
+      }
+    }
+
+    // --- PP19. Lange Zeile im Antwortbereich (Task „lange JSON-Zeile im Antwort-Tail wird rechts abgeschnitten“) ------
+    // Bild pp11-endlage (Welle 23): die JSON-Antwort lief rechts aus dem Panel. Der Strom traegt eine Zeile ohne Leerzeichen
+    // (mehr als die Panelbreite); gemessen wird MITTEN im Strom im Tail: jeder Nachfahre des Streams endet in dessen Box, der Rumpf
+    // hat keinen waagerechten Ueberlauf. Ohne lange Zeile im Tail ist der Punkt „nichts gemessen“ (CORE-TEST-22).
+    {
+      const LANG = "L".repeat(400);
+      const antwort = ppStreamAnswer(6);
+      const haelfte = Math.ceil(antwort.length / 2);
+      if (!(await ppOpenFresh(cdp))) {
+        ppNothing("PP19", T.PP19, "das Panel öffnete nicht");
+      } else {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        sub.queue({ stuecke: [antwort.slice(0, haelfte), LANG, antwort.slice(haelfte)], takt: 900 });
+        const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+        const wide = await pollUntil<{ over: number; scrollX: number; worst: string }>(cdp, `
+          const stream = document.querySelector(".tdcb-prompt .tdcb-prompt-stream");
+          const tail = stream?.querySelector(".okit-stream-tail");
+          if (!stream || !tail || !(tail.textContent || "").includes(${JSON.stringify(LANG)})) return null;
+          const sr = stream.getBoundingClientRect();
+          let over = 0, worst = "";
+          for (const el of stream.querySelectorAll("*")) {
+            const b = el.getBoundingClientRect();
+            if (b.width === 0 && b.height === 0) continue;
+            if (b.right - sr.right > over) { over = b.right - sr.right; worst = String(el.className || el.tagName); }
+          }
+          const body = stream.querySelector(".okit-stream-body");
+          return { over, scrollX: body ? body.scrollWidth - body.clientWidth : -1, worst };`, 20_000, 50);
+        const shotDir19 = process.env.SMOKE_SHOT_DIR;
+        if (shotDir19 && wide !== null) {
+          const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
+          const box = await boxOf(cdp, ".tdcb-prompt .tdcb-prompt-stream", 12);
+          if (box) { mkdirSync(shotDir19, { recursive: true }); writeFileSync(join(shotDir19, "pp19-lange-zeile.png"), await capture(cdp, box, 2)); }
+        }
+        await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
+        if (!clicked || wide === null) ppNothing("PP19", T.PP19, clicked ? "die lange Zeile erschien nie im Tail" : "Klick auf Erzeugen fehlt");
+        else ppRecord("PP19", T.PP19, wide.over <= 1 && wide.scrollX <= 1, `Zeile von ${LANG.length} Zeichen im Tail · ragt ${wide.over.toFixed(0)} px über die Box${wide.over > 1 ? ` (${wide.worst})` : ""} · waagerechter Überlauf des Rumpfs ${wide.scrollX} px`);
       }
     }
 

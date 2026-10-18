@@ -556,6 +556,9 @@
    „Preview of round N“ (gemessen mit Gemma 4, Modell-Runde Welle 23; derselbe Fehler schon in 0.10.1). */
 .tdcb-prompt-stream { flex: 0 1 auto; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
 .tdcb-prompt-stream .okit-stream-body { max-height: 14em; }
+/* Die Antwort ist eine JSON-Zeile ohne Leerzeichen: `white-space: pre-wrap` (Kit-Tail) bricht nur an Leerzeichen, die Zeile lief rechts aus
+   dem Panel (Bild pp11-endlage, Welle 23). Der Umbruch gilt fuer Tail und gerenderten Block, das Kit-CSS bleibt wortgleich. */
+.tdcb-prompt-stream .okit-stream-tail, .tdcb-prompt-stream .okit-stream-block { overflow-wrap: anywhere; }
 /* Ursache des zusammengefallenen Stream-Bereichs und der halb abgeschnittenen Knoepfe: der Hub-Panel-Rumpf ist ein
    Flex-Container fester Hoehe (height: 100% aus dem Kit), alle Kinder ausser dem Stream tragen `flex: 0 0 auto`;
    der Stream (`flex: 0 1 auto`, Kit-`.okit-stream { min-height: 0 }`, Body `flex: 1 1 auto; min-height: 0`) ist das

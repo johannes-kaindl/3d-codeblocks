@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A long unbroken line in the prompt panel's answer no longer runs off to the right.** The model's JSON answer is one line without spaces; the answer area now wraps it instead of cutting it off at the panel edge.
+
 ## [0.10.3] — 2026-10-16
 
 ### Fixed
