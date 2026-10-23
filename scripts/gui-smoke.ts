@@ -71,11 +71,12 @@ import {
   pollUntil,
   reopenNote,
   requireVisible,
+  schliesseEinstellungen,
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
 import { messeFolge, zeichneFolge } from "../../tools/obsidian-cdp/folge.js";
-import { gegenprobeErreichbarkeit, gegenprobeFokus, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
+import { gegenprobeErreichbarkeit, gegenprobeFokus, messeDenkblockKopierbar, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichneDenkblock, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
 import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
 import { startLlmStub, type Antwort, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
 
@@ -2668,10 +2669,9 @@ async function sectionFiles(cdp: Cdp, model: string): Promise<void> {
       helpButton: rows[0]?.querySelector("button")?.textContent ?? "",
       helpBug: !!rows[0]?.querySelector(".extra-setting-button"),
     };
-    app.setting.close();
-    await new Promise((r) => setTimeout(r, 300));
     return result;
   `);
+  await schliesseEinstellungen(cdp);
   record(
     "F8. 'Maximum live 3D views' ist ein Slider von 0 bis 12",
     slider.found && slider.type === "range" && slider.min === "0" && slider.max === "12",
@@ -4770,7 +4770,7 @@ const PP_MODEL = "smoke-model";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4795,6 +4795,7 @@ const PP_TITEL = {
   PP24: "Pflicht (b): jedes Bedienelement ist auch im kurzen Panel erreichbar (420 px)",
   PP25: "Pflicht (b), Gegenprobe: ohne Rollbalken wird etwas unerreichbar",
   PP20: "Denkblock kopierbar: der Kopier-Knopf erscheint erst mit Denk-Text, kopiert ihn in die Zwischenablage, quittiert am Knopf und klappt den Block nicht um",
+  PP26: "Denkblock kopierbar, Gegenprobe: lehnt die Zwischenablage das Schreiben ab, quittiert der Knopf nicht",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
@@ -4999,7 +5000,7 @@ async function ppCleanup(cdp: Cdp): Promise<void> {
   if (sub) await sub.close().catch(() => undefined);
   if (ppSettingsOpened) {
     ppSettingsOpened = false;
-    await cdp.evaluate(`app.setting.close(); return true;`).catch(() => undefined);
+    await schliesseEinstellungen(cdp).catch(() => undefined);
   }
   await cdp.evaluate(PP_RESET).catch(() => undefined);
   if (ppOriginalAcceptAs !== null) {
@@ -5843,29 +5844,28 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         sub.reasoning = "";
         if (!clicked || knopf === null) {
           ppNothing("PP20", T.PP20, clicked ? "der Denk-Text erschien nicht im Block" : "Klick auf Erzeugen fehlt");
-        } else if (knopf.label === null) {
-          ppRecord("PP20", T.PP20, false, `Knöpfe vor dem Denken: ${vorher} · der Denk-Text steht im Block, aber es gibt keinen Kopier-Knopf`);
         } else {
-          const gelesen = await cdp.evaluate<{ davor: string; danach: string; quittiert: boolean; offenDanach: boolean }>(`
-            const cb = window.require("electron").clipboard;
-            const davor = cb.readText();
-            cb.writeText("");
-            const b = document.querySelector(".tdcb-prompt .okit-stream-reasoning-copy");
-            const d = document.querySelector(".tdcb-prompt .okit-stream-reasoning");
-            const offenVorher = d.open;
-            b.click();
-            let danach = "";
-            for (let i = 0; i < 40 && danach === ""; i++) { await new Promise((r) => setTimeout(r, 50)); danach = cb.readText(); }
-            await new Promise((r) => setTimeout(r, 100));
-            const quittiert = b.classList.contains("is-copied");
-            cb.writeText(davor);
-            return { davor, danach, quittiert, offenDanach: d.open === offenVorher };`);
-          const kopiert = gelesen.danach.includes(MARKE);
-          ppRecord(
-            "PP20",
-            T.PP20,
-            vorher === 0 && knopf.label !== "" && kopiert && gelesen.quittiert && gelesen.offenDanach,
-            `Knöpfe vor dem Denken: ${vorher} (erwartet 0) · aria-label „${knopf.label}“ · Zwischenablage trägt die Marke: ${kopiert} („${gelesen.danach.slice(0, 40)}“) · Quittung is-copied: ${gelesen.quittiert} · Block unverändert offen/zu: ${gelesen.offenDanach}`,
+          // Die Messung selbst ist die der Brücke (`messeDenkblockKopierbar`, seit Welle 25 zentral, vorher hier lokal): genau ein writeText, der Kopierte ist der Anfang
+          // des Blocks und enthält die Marke, der Block klappt nicht um, der Knopf quittiert und trägt ein aria-label, und die Gegenprobe (writeText abgelehnt, keine
+          // Quittung). Neu: aria-label ist Pflicht; die Gegenprobe steht als PP26. Lokal bleibt die Vorbedingung „vor dem Denken kein Knopf“.
+          // Das Hauptfenster muss das aktive Dokument sein: gemessen 2026-10-23, `activeDocument !== document` ließ die Aufzeichnung an `navigator.clipboard` ins Leere laufen (0× writeText bei quittierendem Knopf).
+          await schliesseEinstellungen(cdp);
+          const u = await messeDenkblockKopierbar(cdp, { block: ".tdcb-prompt .okit-stream-reasoning", knopf: ".tdcb-prompt .okit-stream-reasoning-copy", enthaelt: MARKE, erwartetKnopf: true });
+          if (u.kopie.urteil !== "gruen") {
+            const diag = await cdp.evaluate<string>(`
+              const c = navigator.clipboard;
+              const knoepfe = document.querySelectorAll(".okit-stream-reasoning-copy").length;
+              const bloecke = document.querySelectorAll(".okit-stream-reasoning").length;
+              const k = document.querySelector(".tdcb-prompt .okit-stream-reasoning-copy");
+              return JSON.stringify({ eigene: Object.getOwnPropertyNames(c), activeGleich: typeof activeWindow !== "undefined" && activeWindow.navigator.clipboard === c, knoepfe, bloecke, knopfImPanel: !!k, docGleich: typeof activeDocument !== "undefined" && activeDocument === document });`).catch((e: Error) => `Diagnose fehlgeschlagen: ${e.message}`);
+            u.kopie = { urteil: u.kopie.urteil, detail: `${u.kopie.detail} · Diagnose ${diag}` };
+          }
+          if (u.kopie.urteil === "gruen" && vorher !== 0) u.kopie = { urteil: "rot", detail: `Knöpfe vor dem Denken: ${vorher} (erwartet 0) · ${u.kopie.detail}` };
+          else if (u.kopie.urteil === "gruen") u.kopie = { urteil: "gruen", detail: `Knöpfe vor dem Denken: ${vorher} · ${u.kopie.detail}` };
+          zeichneDenkblock(
+            { record: (n, ok, d) => ppRecord(n === T.PP26 ? "PP26" : "PP20", n, ok, d ?? ""), unmeasured: (n, why) => ppNothing(n === T.PP26 ? "PP26" : "PP20", n, why) },
+            { kopie: T.PP20, gegen: T.PP26 },
+            u,
           );
         }
       }
