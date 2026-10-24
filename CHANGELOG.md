@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A Claude entry of the LLM Endpoint Manager can now serve the prompt panel.** The plugin opts in to the Anthropic transport; without it a Claude entry stayed invisible here. Streaming, the thinking block and the shapes answer work as with a local model. **What changes for you:** under "automatic (first reachable)" the first reachable, enabled chat entry in the manager's list is used, so a Claude entry above your local one wins, and then your prompt (and, for a change, the current parts of the model) goes to Anthropic. Put the local entry first, or pick it in the **Endpoint** setting, to keep it on your machine. For Claude the request sends no `temperature`/`top_p`, and "thinking off" is sent as low effort.
+
 ### Changed
 
 - **The version list in a narrow sidebar keeps the label.** The meta column ("3 days ago · 14 changes") used to be rigid and pushed the label out ("Run…"); it is now capped at 45 % of the row and cut with an ellipsis, the label shrinks below its content, and both carry their full text as a tooltip. In a wide sidebar nothing changes. (Kit: obsidian-kit 0.65.0; `styles.css` carries the new rules.)

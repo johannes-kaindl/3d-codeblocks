@@ -195,6 +195,14 @@ describe("LLM connection wiring", () => {
     spy.mockRestore();
   });
 
+  it("opts in to the Anthropic transport (a Claude entry of the manager is offered to the prompt panel)", async () => {
+    const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
+    const spy = vi.spyOn(mod, "createLlmConnection");
+    await load();
+    expect(spy.mock.calls[0]![0].transports?.anthropic).toBe(true);
+    spy.mockRestore();
+  });
+
   it("persist applies the patch synchronously, before saving", async () => {
     const mod = await import("../../src/vendor/kit-obsidian/llm-connection");
     const spy = vi.spyOn(mod, "createLlmConnection");

@@ -73,6 +73,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       caller: "3d-codeblocks",
       capability: "chat",
       mode: "structured",
+      // Opt-in fuer den Anthropic-Transport: ohne ihn bleibt ein Claude-Eintrag des Managers fuer dieses Plugin unsichtbar. Mit ihm
+      // geht der Prompt des Panels an Anthropic, sobald der Manager einen Claude-Eintrag zuerst liefert (Auswahl "Automatisch").
+      transports: { anthropic: true },
       // Die Antwort traegt JSON in `content` (partsFromLlm): ein geschwaerzter, mehrzeiliger Wert muss
       // JSON-escapt zurueckkommen, sonst bricht der Parser (MIGRATION 0.51.2).
       restoreContent: "json",

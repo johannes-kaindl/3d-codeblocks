@@ -157,7 +157,7 @@ The command **Export shapes model as glTF** turns a model into an ordinary `.glt
 
 Instead of writing the lines yourself you can describe a model in words and let a language model write them. This is optional: it needs a language model that you set up first (see [Setting up a language model](#setting-up-a-language-model)), and everything else in this guide works without one.
 
-Only the endpoint you configure receives your request: your description and, for a change, the current parts of the model as JSON. The result is always the plain shapes text described in this guide, so you can read it, edit it and keep it like any other shapes model.
+Only the endpoint that is used receives your request: your description and, for a change, the current parts of the model as JSON. If the LLM Endpoint Manager offers a Claude entry and it is the one used, that request goes to Anthropic (see [Setting up a language model](#setting-up-a-language-model)). The result is always the plain shapes text described in this guide, so you can read it, edit it and keep it like any other shapes model.
 
 ### Open the panel
 
@@ -224,4 +224,4 @@ Open Settings → 3D Codeblocks. In the group **Model by prompt**, the **Languag
 
 The central setup guide explains how to run a local model and which one to pick: [LLM setup guide](https://uplink.jkaindl.de/llm-setup).
 
-If the plugin **LLM Endpoint Manager** is installed, it supplies the endpoints and models instead of the list in the settings. It is optional; this plugin works with its own list on its own.
+If the plugin **LLM Endpoint Manager** is installed, it supplies the endpoints and models instead of the list in the settings. It is optional; this plugin works with its own list on its own. The manager may also list a **Claude** entry (the Anthropic API); this plugin accepts it. Under "automatic (first reachable)" the first reachable, enabled chat entry in the manager's list is used, so a Claude entry above your local one is used first, and your prompt then goes to Anthropic. Put the local entry first, or pick it in the **Endpoint** setting, if the prompt should stay on your machine.

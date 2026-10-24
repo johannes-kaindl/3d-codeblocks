@@ -35,7 +35,7 @@ die Notiz zu verlassen. 3D-Dateien verhalten sich wie PDFs: klicken zum Öffnen,
 ## Voraussetzungen
 
 - **Obsidian 1.11.4** oder neuer.
-- Optional, für *Modell per Prompt*: ein OpenAI-kompatibler Sprachmodell-Endpunkt (siehe [Einrichtungsanleitung](https://uplink.jkaindl.de/llm-setup)). Alles andere braucht keinen.
+- Optional, für *Modell per Prompt*: ein OpenAI-kompatibler Sprachmodell-Endpunkt (siehe [Einrichtungsanleitung](https://uplink.jkaindl.de/llm-setup)) oder ein Claude-Eintrag des LLM Endpoint Managers. Mit einem Claude-Eintrag geht dein Prompt (bei einer Änderung auch die aktuellen Teile des Modells) an Anthropic. Bei „automatisch (erster erreichbarer)“ gewinnt der erste erreichbare, aktivierte Eintrag in der Liste des Managers; steht ein Claude-Eintrag vor deinem lokalen, wird er zuerst genommen. Alles andere braucht kein Modell.
 - WebGL-Unterstützung im Renderer — auf dem Desktop Standard. Auf Mobilgeräten
   funktioniert es, aber große Modelle sind langsam und das Browser-Limit für
   gleichzeitige 3D-Ansichten ist früher erreicht.
