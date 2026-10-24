@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The version list in a narrow sidebar keeps the label.** The meta column ("3 days ago · 14 changes") used to be rigid and pushed the label out ("Run…"); it is now capped at 45 % of the row and cut with an ellipsis, the label shrinks below its content, and both carry their full text as a tooltip. In a wide sidebar nothing changes. (Kit: obsidian-kit 0.65.0; `styles.css` carries the new rules.)
+- **Claude models are recognised by name.** A model whose id starts with `claude-` counts as one that reads images, and the Claude models of the sampling profile `claude` count as models that always think (the thinking toggle cannot switch them off). A local model that only carries the word in its name (`qwen3.6-claude-opus-distill`) does not count. (Kit: code-kit 0.33.0.)
+- **The thinking block is built by a shared routine.** Same look, same copy button; no visible difference. (Kit: obsidian-kit 0.65.0.)
+- **Kit pins raised to obsidian-kit 0.69.1 and code-kit 0.36.0.** The other changes in between touch modules this plugin does not vendor or have no visible effect here (the role "used for search — does not write" in the endpoint list, 0.67.0, is only shown when a plugin sets it).
+
 ## [0.11.0] — 2026-10-18
 
 ### Changed
