@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-24
+
 ### Added
 
 - **A Claude entry of the LLM Endpoint Manager can now serve the prompt panel.** The plugin opts in to the Anthropic transport; without it a Claude entry stayed invisible here. Streaming, the thinking block and the shapes answer work as with a local model. **What changes for you:** under "automatic (first reachable)" the first reachable, enabled chat entry in the manager's list is used, so a Claude entry above your local one wins, and then your prompt (and, for a change, the current parts of the model) goes to Anthropic. Put the local entry first, or pick it in the **Endpoint** setting, to keep it on your machine. For Claude the request sends no `temperature`/`top_p`, and "thinking off" is sent as low effort.
