@@ -64,6 +64,8 @@ import {
   bereiteInstanzVor,
   clickReal,
   closeExtraLeaves,
+  entferneFakeManager,
+  installFakeManager,
   istAbgebrochen,
   ladePluginNeu,
   notices,
@@ -5961,6 +5963,136 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
   }
 }
 
+// --- CL1–CL3. Claude (Anthropic API) über den LLM Endpoint Manager (Welle 26, Opt-in `transports.anthropic`) --------------------------
+// Eigener Abschnitt (`--section claude`). Gegenstelle: der zentrale LLM-Stub im Anthropic-Modus (Messages-API, geprüft: `x-api-key`,
+// `anthropic-version`, Pflichtfelder `model`/`max_tokens`/`messages`), kein Aufruf an api.anthropic.com. Der Manager ist der Fake der Brücke
+// (`installFakeManager`, `transport: "anthropic"`). **Der Fake prüft den Filter, nicht die Verdrahtung:** `list()` liefert den Claude-Eintrag nur auf Opt-in;
+// dass DIESES Plugin den Opt-in setzt, belegt erst `plugin.llm.source()` nach `invalidate()` und `resolve({ force: true })` (CL1).
+// Der Abschnitt `promptpanel` verweigert die Messung, wenn ein Manager im Vault aktiv ist: der Fake kommt deshalb in `finally` UND im
+// Abbruch-Handler (`clCleanup`) wieder raus (CORE-TEST-21).
+const CL_IDS = ["CL1", "CL2", "CL3"] as const;
+const CL_TITEL = {
+  CL1: "Fake-Manager mit Claude-Eintrag: der Eintrag kommt nur mit Opt-in, das Plugin wählt ihn (Backend anthropic, Familie claude)",
+  CL2: "Lauf gegen den Claude-Stub bis zur Form: Messages-API mit Schlüssel, ohne temperature/top_p, Denken im Denkblock",
+  CL3: "Fehler mitten im Strom: das Panel zeigt den Fehler der API, der Teiltext bleibt im Antwortbereich",
+} as const;
+const CL_MODELL = "claude-haiku-5-5";
+const CL_SCHLUESSEL = "sk-ant-smoke-3d-codeblocks";
+const CL_MANAGER_ID = "llm-endpoint-manager";
+const CL_GEDANKE = "Ich prüfe erst die Maße der Platte und rechne dann die Beine nach. ";
+let clStub: Awaited<ReturnType<typeof startLlmStub>> | null = null;
+let clManager = false;
+
+/** Fake-Manager und Claude-Stub abbauen, Panel schließen. Wirft nie. */
+async function clCleanup(cdp: Cdp): Promise<void> {
+  const stub = clStub;
+  clStub = null;
+  if (clManager) {
+    clManager = false;
+    await entferneFakeManager(cdp, { pluginId: CL_MANAGER_ID, invalidiere: [PLUGIN_ID] }).catch(() => undefined);
+  }
+  await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); return true;`).catch(() => undefined);
+  if (stub) await stub.stop().catch(() => undefined);
+}
+
+async function sectionClaude(cdp: Cdp, _model: string): Promise<void> {
+  const done = new Set<string>();
+  const rec = (id: (typeof CL_IDS)[number], passed: boolean, detail: string): void => {
+    done.add(id);
+    record(`${id}. ${CL_TITEL[id]}`, passed, detail);
+  };
+  const nothing = (id: (typeof CL_IDS)[number], reason: string): void => {
+    done.add(id);
+    nothingMeasured(`${id}. ${CL_TITEL[id]}`, reason);
+  };
+  const nothingFor = (reason: string): void => {
+    for (const id of CL_IDS) if (!done.has(id)) nothing(id, reason);
+  };
+  try {
+    // Voraussetzung: kein echter Manager im Vault (ein Rest-Fake eines abgebrochenen Laufs wird vom Einbau ersetzt).
+    const real = await cdp.evaluate<boolean>(`const m = app.plugins.plugins[${JSON.stringify(CL_MANAGER_ID)}]; return !!m && !m.__fakeManager;`);
+    if (real) {
+      nothingFor("das echte Plugin llm-endpoint-manager ist im Vault aktiv — der Fake würde es ersetzen");
+      return;
+    }
+    clStub = await startLlmStub({
+      anbieter: "anthropic",
+      schluessel: CL_SCHLUESSEL,
+      models: [{ id: CL_MODELL, capabilities: { effort: { supported: true }, thinking: { types: { adaptive: { supported: true } } } } }],
+      takt: 400,
+      teile: 3,
+      standard: { reasoning: CL_GEDANKE, text: ppStreamAnswer(6), model: CL_MODELL },
+    });
+    const stub = clStub;
+    await installFakeManager(cdp, {
+      pluginId: CL_MANAGER_ID,
+      endpunkte: [{
+        id: "cl-claude", label: "Claude API", url: stub.url, models: [CL_MODELL], defaultModel: CL_MODELL, configModel: "default",
+        provider: "anthropic", backend: "anthropic", apiKey: CL_SCHLUESSEL, hasSecret: true, transport: "anthropic",
+      }],
+      invalidiere: [PLUGIN_ID],
+    });
+    clManager = true;
+
+    // --- CL1. Opt-in und Wahl ----------------------------------------------------------------------------
+    const sicht = await cdp.evaluate<{ ohne: number; mit: number; quelle: string; modell: string; familie: string | null; backend: string }>(`
+      const api = app.plugins.plugins[${JSON.stringify(CL_MANAGER_ID)}].api;
+      const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+      p.llm.invalidate();
+      await p.llm.resolve({ force: true });
+      const src = p.llm.source();
+      return {
+        ohne: api.list({ capability: "chat" }).length,
+        mit: api.list({ capability: "chat", transports: ["http", "anthropic"] }).length,
+        quelle: src.backendSource, modell: src.model, familie: src.family, backend: src.backend,
+      };
+    `);
+    rec("CL1", sicht.ohne === 0 && sicht.mit === 1 && sicht.quelle === "manager" && sicht.modell === CL_MODELL && sicht.backend === "anthropic" && sicht.familie === "claude",
+      `Kontrolle am Fake: list() ohne transports ${sicht.ohne}, mit ["http","anthropic"] ${sicht.mit} · Plugin nach resolve: Backend ${sicht.backend} (Quelle ${sicht.quelle}), Familie ${sicht.familie}, Modell ${sicht.modell}`);
+
+    // --- CL2. Lauf bis zur Form ----------------------------------------------------------------------------
+    if (!(await ppOpenFresh(cdp))) {
+      nothing("CL2", "das Panel öffnete nicht");
+      nothing("CL3", "das Panel öffnete nicht");
+      return;
+    }
+    await ppType(cdp, PP_CREATE_PROMPT);
+    const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+    const imBlock = await pollUntil<string>(cdp, `
+      const pre = document.querySelector(".tdcb-prompt .okit-stream-reasoning > pre");
+      return pre && (pre.textContent ?? "").includes("Maße") ? pre.textContent : null;`, 30_000, 100);
+    const lauf = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
+    const anfragen = stub.anfragen().filter((a) => a.route === "messages");
+    const letzte = anfragen.at(-1);
+    const body = (letzte?.json ?? {}) as Record<string, unknown>;
+    const kopf = letzte?.header ?? {};
+    const verbotene = ["temperature", "top_p", "top_k", "min_p", "presence_penalty"].filter((k) => k in body);
+    const z = stub.zaehler();
+    const draht = anfragen.length > 0 && kopf["x-api-key"] === CL_SCHLUESSEL && typeof kopf["anthropic-version"] === "string"
+      && typeof body.max_tokens === "number" && body.model === CL_MODELL && verbotene.length === 0 && z.abgelehnt === 0 && z.chat === 0;
+    rec("CL2", clicked && imBlock !== null && lauf.state?.phase === "ok" && draht,
+      `Senden ${clicked ? "geklickt" : "NICHT geklickt"} · Denkblock im Strom: ${imBlock !== null ? "ja" : "nein"} · Status ${lauf.state?.phase ?? "?"}: „${(lauf.state?.status ?? "").slice(0, 50)}“ · ${anfragen.length}× POST /v1/messages (OpenAI-Pfad ${z.chat}×, abgelehnt ${z.abgelehnt}×) · x-api-key ${kopf["x-api-key"] === CL_SCHLUESSEL ? "ok" : "FALSCH"} · anthropic-version ${String(kopf["anthropic-version"] ?? "fehlt")} · max_tokens ${String(body.max_tokens)} · model ${String(body.model)} · verbotene Sampling-Felder ${verbotene.length === 0 ? "keine" : verbotene.join(",")}`);
+
+    // --- CL3. Fehler mitten im Strom -------------------------------------------------------------------------
+    if (!(await ppOpenFresh(cdp))) {
+      nothing("CL3", "das Panel öffnete nicht");
+      return;
+    }
+    stub.antworten([{ text: ppStreamAnswer(6), laenge: 40, model: CL_MODELL, stromFehler: { nach: 3, typ: "overloaded_error", meldung: "Overloaded" } }]);
+    await ppType(cdp, PP_CREATE_PROMPT);
+    const geklickt = await ppClick(cdp, ".tdcb-prompt-send");
+    const fertig = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
+    const st = fertig.state;
+    rec("CL3", geklickt && st?.phase === "error" && /overload/i.test(st.status) && st.tail.includes(`"parts"`),
+      `Senden ${geklickt ? "geklickt" : "NICHT geklickt"} · Status ${st?.phase ?? "nie fertig"}: „${(st?.status ?? "").slice(0, 80)}“ · Antwortbereich beginnt „${(st?.tail ?? "").slice(0, 30)}“ (${(st?.tail ?? "").length} Zeichen)`);
+  } catch (e) {
+    nothingFor(`Messung abgebrochen: ${(e as Error).message}`);
+  } finally {
+    await clCleanup(cdp);
+    nothingFor("der Abschnitt endete, bevor dieser Punkt lief");
+  }
+}
+
 /** Soll-Liste (Nenner der Bilanz): jeder Punktname, den ein Abschnitt aufzeichnen kann, nach Abschnitt. Bei `--section` ist die
  *  Teilmenge das Soll; ein Name ausserhalb wirft in `createBilanz`. Jeder Punkt hat GENAU EINEN Namen (Erfolg, Fehlschlag und
  *  Uebersprungen zeichnen dieselbe Zeile auf) — Sammelnamen wie „B2-B12“ gibt es nicht, `skipIds` verbucht jede Kennung einzeln. */
@@ -6095,6 +6227,7 @@ const PUNKTE_JE_SECTION: Record<string, readonly string[]> = {
     "R3. Positivkontrolle: Press/Release-Split (clickReal, 15ms Haltezeit) verliert Treffer im selben Sturm",
   ],
   promptpanel: PP_IDS.map((id) => `${id}. ${PP_TITEL[id]}`),
+  claude: CL_IDS.map((id) => `${id}. ${CL_TITEL[id]}`),
 };
 
 const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => Promise<void> }[] = [
@@ -6104,6 +6237,7 @@ const SECTIONS: { key: string; title: string; run: (cdp: Cdp, model: string) => 
   { key: "files", title: "Datei-nativer Ausbau (SMOKE.md 2026-07-24)", run: sectionFiles },
   { key: "shapesfile", title: "shapes-Dateiansicht und Umwandeln (SMOKE.md 2026-10-03)", run: sectionShapesFile },
   { key: "promptpanel", title: "Prompt-Panel gegen Ersatz-Endpunkt (SMOKE.md 2026-10-03)", run: sectionPromptPanel },
+  { key: "claude", title: "Claude über den LLM Endpoint Manager (SMOKE.md 2026-10-25)", run: sectionClaude },
   { key: "edit", title: "Edit mode (SMOKE.md 2026-07-26)", run: sectionEditMode },
   { key: "cameras", title: "Kameras aus der Datei (SMOKE.md 2026-09-02)", run: sectionCameras },
   { key: "clickrace", title: "Klick-Sturm-Probe (Task 'clickReal misst am ersetzten DOM womoeglich vorbei')", run: sectionClickRace },
@@ -6206,6 +6340,7 @@ async function main(): Promise<void> {
     // Prompt-Panel-Abschnitt: Ersatz-Endpunkt aus den Einstellungen, Panel-Blatt zu, Server zu. Nach der
     // Wiederherstellung oben, weil ein Schnappschuss aus einem abgebrochenen Vorlauf den Ersatz mitbringen kann.
     await ppCleanup(cdp);
+    await clCleanup(cdp);
     if (!keep && shapesFileOwned) {
       // Nur Weissliste (siehe sectionShapesFile); Ansichten zuerst schliessen, sonst legt ihr
       // Schlusssichern eine geloeschte Datei neu an.

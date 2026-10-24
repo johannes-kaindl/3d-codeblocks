@@ -1157,6 +1157,20 @@ Die Bilanz hat seit diesem Abschnitt vier Zustände (grün · rot · übersprung
 - Die Aktionsleiste eines Blocks entsteht erst mit dem lebenden Viewport; ein Block im Standbild (`.tdcb-play`) hat keine, der Treiber aktiviert ihn zuerst.
 - Das Schließen des Panels klappt die Seitenleiste ein und verbreitert die Hauptfläche; ein Block, der dabei neu rendert, verliert Aktivierung und Leiste — das Panel wird deshalb vor dem Öffnen der Block-Notiz geschlossen.
 
+## Claude über den LLM Endpoint Manager (2026-10-25)
+
+> [!info] Automatisiert — `npm run smoke:gui -- --section claude` (Punkte CL1–CL3, eigener Abschnitt)
+
+Seit dem Opt-in `transports: { anthropic: true }` in `src/main.ts` sieht das Plugin einen Claude-Eintrag des Managers. Der Abschnitt stellt die Gegenstelle nach, ohne ein Modell und ohne Netz: der zentrale LLM-Stub im Anthropic-Modus (`tools/obsidian-cdp/llm-stub.ts`, `anbieter: "anthropic"`, Messages-API mit geprüften Kopfzeilen und Pflichtfeldern) und der Fake-Manager der Brücke (`installFakeManager`, `transport: "anthropic"`). Der Fake kommt in `finally` und im Abbruch-Handler wieder raus, weil der Abschnitt `promptpanel` die Messung verweigert, solange ein Manager im Vault aktiv ist.
+
+| Punkt | Was gemessen wird |
+|---|---|
+| CL1 | Kontrolle am Fake: `list({ capability: "chat" })` ohne `transports` liefert 0 Einträge, mit `["http","anthropic"]` einen (das misst nur den Filter des Fakes). Die Verdrahtung beweist das Plugin: nach `llm.invalidate()` und `resolve({ force: true })` meldet `llm.source()` Quelle `manager`, Backend `anthropic`, Familie `claude` und das Modell des Eintrags |
+| CL2 | Lauf über das Prompt-Panel bis zur Form (Stub-Strom mit Denken und Text): genau eine Anfrage `POST /v1/messages`, `x-api-key` gleich dem Schlüssel des Stubs, `anthropic-version`, `max_tokens` und `model` gesetzt, **kein** `temperature`/`top_p`/`top_k`/`min_p`/`presence_penalty` im Body, kein Aufruf des OpenAI-Pfads, keine vom Stub abgelehnte Anfrage; der Denk-Text steht während des Stroms in `.okit-stream-reasoning`, das Panel endet mit Status `is-ok` |
+| CL3 | Fehler mitten im Strom (`event: error`, `overloaded_error` nach drei Deltas): Status `is-error` mit der Meldung der API („Overloaded“), der Teiltext (`{"parts":…`) bleibt im Antwortbereich |
+
+**Gegenprobe (2026-10-25):** mit auskommentiertem `transports: { anthropic: true }` im gebauten `main.js` werden alle drei Punkte rot (CL1: Backend `unknown`, Quelle `none`; CL2 und CL3: „No language model is set up yet.“, keine Anfrage am Stub); mit dem Opt-in 4 grün (Vorlauf-Punkt und CL1 bis CL3). Nicht einzeln gegengeprobt ist die Liste der verbotenen Sampling-Felder in CL2: sie ist ein `key in body`-Vergleich, die Stub-Seite lehnt sie nicht ab.
+
 ## Befunde
 
 _Hier notieren, was auffällt._
