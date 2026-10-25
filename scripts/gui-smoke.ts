@@ -50,6 +50,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { loadavg } from "node:os";
 import { join } from "node:path";
 import { cwd } from "node:process";
 
@@ -5121,6 +5122,25 @@ async function ppEnsureVisible(cdp: Cdp): Promise<string> {
   return later ? "war hidden, geholt" : "bleibt hidden";
 }
 
+/** Der Zustand, in dem der Klick auf den Aktionsknopf fällt (CORE-TEST-22: eine Messung nennt ihre Gültigkeit). Sichtbarkeit,
+ *  Fenster- und Blattgröße, Blöcke und Standbilder, Aktionsleiste und Knopf, Seitenleisten und die Last des Treiber-Rechners
+ *  stehen im Log und in der Begründung, wenn der Knopf nicht klickbar ist — dann trennt die Tabelle der Läufe, was rot war. */
+async function ppVorbedingung(cdp: Cdp): Promise<string> {
+  const page = await cdp.evaluate<string>(`
+    const root = document.querySelector(".workspace-leaf-content[data-type='markdown']");
+    const rect = (e) => { const r = e?.getBoundingClientRect(); return r ? Math.round(r.width) + "x" + Math.round(r.height) : null; };
+    const bar = root?.querySelector(".tdcb-toolbar");
+    const btn = [...(root?.querySelectorAll(".tdcb-toolbar-button") ?? [])].find((b) => b.getAttribute("aria-label") === ${JSON.stringify(PP_EDIT_LABEL)});
+    return JSON.stringify({
+      visible: document.visibilityState, focus: document.hasFocus(), win: innerWidth + "x" + innerHeight,
+      leaf: rect(root), blocks: root?.querySelectorAll(".tdcb-block").length ?? null, poster: root?.querySelectorAll(".tdcb-play").length ?? null,
+      bar: bar ? getComputedStyle(bar).display + "/" + rect(bar) : null, button: btn ? getComputedStyle(btn).display + "/" + rect(btn) : null,
+      left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed,
+    });
+  `);
+  return `${page} · Last ${loadavg()[0].toFixed(2)}`;
+}
+
 /** Eine Notiz mit Tisch-Block im Lesemodus öffnen und warten, bis der Block samt Aktionsleiste steht.
  *  `null` = der Block rendert nicht (Umgebung, nicht Befund).
  *
@@ -5238,9 +5258,11 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
       await activateBlock(cdp, 0);
       await sleepMs(500);
     }
+    const vorbedingung = await ppVorbedingung(cdp);
+    console.log(`  PP-Vorbedingung vor dem Klick (${path}): ${vorbedingung}`);
     if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) {
       const where = await cdp.evaluate<string>(`const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); const bs = [...(root?.querySelectorAll(".tdcb-toolbar-button") ?? [])].map((b) => (b.getAttribute("aria-label") ?? "?") + ":" + Math.round(b.getBoundingClientRect().width)); const bar = root?.querySelector(".tdcb-toolbar"); const r = root?.getBoundingClientRect(); return JSON.stringify({ win: [innerWidth, innerHeight], leaf: r ? [Math.round(r.width), Math.round(r.height)] : null, left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed, poster: root?.querySelectorAll(".tdcb-play").length, live: root?.querySelectorAll(".tdcb-block canvas").length, buttons: bs, barDisplay: bar ? getComputedStyle(bar).display + "/" + getComputedStyle(bar).opacity : null });`);
-      return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · ${where}`, round: null, buttons };
+      return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · Vorbedingung ${vorbedingung} · ${where}`, round: null, buttons };
     }
     step = "Panel mit Ziel abwarten";
     const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
