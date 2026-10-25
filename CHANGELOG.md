@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-25
+
 ### Added
 
 - **The prompt panel has a thinking control.** The **Thinking** button sits in the model row (with "Level picker in chat" on under Settings → Request it becomes a dropdown with the four levels). It sets how much the model may think before it answers, for the shapes prompt only; the choice is kept like the other request settings. Measured against a test endpoint: with thinking on, the request carries the matching thinking field (`reasoning_effort`) and the sampling values of that level; off is the default.
