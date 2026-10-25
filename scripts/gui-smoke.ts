@@ -5136,6 +5136,9 @@ async function ppVorbedingung(cdp: Cdp): Promise<string> {
       leaf: rect(root), blocks: root?.querySelectorAll(".tdcb-block").length ?? null, poster: root?.querySelectorAll(".tdcb-play").length ?? null,
       bar: bar ? getComputedStyle(bar).display + "/" + rect(bar) : null, button: btn ? getComputedStyle(btn).display + "/" + rect(btn) : null,
       left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed,
+      // Bilder je 400 ms (rAF) und WebGL: ein verdecktes oder gedrosseltes Fenster meldet "visible", zeichnet aber nicht; ohne WebGL gibt es kein Standbild.
+      raf: await new Promise((done) => { let n = 0; const stop = performance.now() + 400; const tick = () => { n++; if (performance.now() < stop) requestAnimationFrame(tick); else done(n); }; requestAnimationFrame(tick); setTimeout(() => done(n), 700); }),
+      gl: !!document.createElement("canvas").getContext("webgl2"),
     });
   `);
   return `${page} · Last ${loadavg()[0].toFixed(2)}`;
@@ -5230,7 +5233,7 @@ const ppBlockNote = (title: string, bodySuffix = ""): string =>
 const nonBlank = (text: string): string[] => text.split("\n").filter((l) => l.trim() !== "");
 
 /** Panel für eine Notiz mit Block öffnen, Wunsch senden und auf das Ende der Runde warten (PP5, PP8, PP9). */
-async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ ready: boolean; reason: string; round: PpState | null; buttons: { label: string; svg: boolean; children: number }[] }> {
+async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ ready: boolean; clicked: boolean; reason: string; round: PpState | null; buttons: { label: string; svg: boolean; children: number }[] }> {
   let step = "Notiz öffnen";
   let buttons: { label: string; svg: boolean; children: number }[] = [];
   try {
@@ -5240,7 +5243,7 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 1200)); return true;`);
     step = "Notiz öffnen";
     const note = await ppOpenBlockNote(cdp, path, body);
-    if (note === null) return { ready: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
+    if (note === null) return { ready: false, clicked: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
     buttons = note.buttons;
     step = "Aktionsknopf klicken";
     // Das Schließen des Panels klappt die Seitenleiste ein, die Hauptfläche wird breiter, der Block rendert neu
@@ -5258,15 +5261,37 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
       await activateBlock(cdp, 0);
       await sleepMs(500);
     }
-    const vorbedingung = await ppVorbedingung(cdp);
+    let vorbedingung = await ppVorbedingung(cdp);
     console.log(`  PP-Vorbedingung vor dem Klick (${path}): ${vorbedingung}`);
-    if (!(await ppClickActionButton(cdp, PP_EDIT_LABEL))) {
-      const where = await cdp.evaluate<string>(`const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); const bs = [...(root?.querySelectorAll(".tdcb-toolbar-button") ?? [])].map((b) => (b.getAttribute("aria-label") ?? "?") + ":" + Math.round(b.getBoundingClientRect().width)); const bar = root?.querySelector(".tdcb-toolbar"); const r = root?.getBoundingClientRect(); return JSON.stringify({ win: [innerWidth, innerHeight], leaf: r ? [Math.round(r.width), Math.round(r.height)] : null, left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed, poster: root?.querySelectorAll(".tdcb-play").length, live: root?.querySelectorAll(".tdcb-block canvas").length, buttons: bs, barDisplay: bar ? getComputedStyle(bar).display + "/" + getComputedStyle(bar).opacity : null });`);
-      return { ready: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · Vorbedingung ${vorbedingung} · ${where}`, round: null, buttons };
+    let clicked = await ppClickActionButton(cdp, PP_EDIT_LABEL);
+    if (!clicked) {
+      // Herstellbarer Ausgangszustand (gemessen 2026-10-25: in 3 von 14 frischen Läufen stand vor dem Klick 1 Block mit 0 Standbildern statt 2 und 1;
+      // Ursache des Blockzustands ungeklärt): einmal neu rendern lassen und aktivieren, erst danach heißt es „nicht klickbar“. Die Zeile bleibt im
+      // Log, damit die Häufigkeit sichtbar bleibt und nicht in der Wiederholung verschwindet.
+      step = "Block neu rendern";
+      await ppEnsureVisible(cdp);
+      await cdp.evaluate(`app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view?.previewMode?.rerender?.(true); return true;`);
+      await sleepMs(800);
+      await activateBlock(cdp, 0);
+      await pollState<{ w: number }>(
+        cdp,
+        `const b = [...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar-button")].filter((x) => x.getAttribute("aria-label") === ${JSON.stringify(PP_EDIT_LABEL)}).find((x) => x.getBoundingClientRect().width > 0); return { w: b ? Math.round(b.getBoundingClientRect().width) : 0 };`,
+        (s2) => s2.w > 0,
+        6_000,
+        300,
+      );
+      clicked = await ppClickActionButton(cdp, PP_EDIT_LABEL);
+      const nach = await ppVorbedingung(cdp);
+      console.log(`  PP-Wiederherstellung (${path}): ${clicked ? "nach erneutem Rendern klickbar" : "auch nach erneutem Rendern nicht klickbar"} · Vorbedingung danach ${nach}`);
+      if (!clicked) vorbedingung = `${vorbedingung} → nach erneutem Rendern ${nach}`;
+    }
+    if (!clicked) {
+      const where = await cdp.evaluate<string>(`const root = document.querySelector(".workspace-leaf-content[data-type='markdown']"); const bs = [...(root?.querySelectorAll(".tdcb-toolbar-button") ?? [])].map((b) => (b.getAttribute("aria-label") ?? "") + ":" + Math.round(b.getBoundingClientRect().width)); return JSON.stringify({ win: [innerWidth, innerHeight], leaf: root ? [Math.round(root.getBoundingClientRect().width), Math.round(root.getBoundingClientRect().height)] : null, left: app.workspace.leftSplit.collapsed, right: app.workspace.rightSplit.collapsed, poster: root?.querySelectorAll(".tdcb-play").length ?? null, live: root?.querySelectorAll(".tdcb-block").length ?? null, buttons: bs });`);
+      return { ready: false, clicked: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · Vorbedingung ${vorbedingung} · ${where}`, round: null, buttons };
     }
     step = "Panel mit Ziel abwarten";
     const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
-    if (!up.reached) return { ready: false, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons };
+    if (!up.reached) return { ready: false, clicked: true, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons };
     step = "Panel stehen lassen";
     await ppWaitPanelInside(cdp);
     step = "Wunsch senden";
@@ -5274,11 +5299,11 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     await ppClick(cdp, ".tdcb-prompt-send");
     step = "Ende der Runde abwarten";
     const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
-    return { ready: done.reached && done.state?.phase === "ok", reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons };
+    return { ready: done.reached && done.state?.phase === "ok", clicked: true, reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons };
   } catch (error) {
     // Ein Abbruch (Ctrl-C) ist kein Renderer-Fehler: weiterwerfen, sonst steht er als Befund in der Bilanz.
     if (error instanceof AbbruchAusnahme) throw error;
-    return { ready: false, reason: `Renderer-Fehler im Schritt „${step}“: ${error instanceof Error ? error.message : String(error)}`, round: null, buttons };
+    return { ready: false, clicked: false, reason: `Renderer-Fehler im Schritt „${step}“: ${error instanceof Error ? error.message : String(error)}`, round: null, buttons };
   }
 }
 
@@ -5503,6 +5528,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     // PP7 zuerst: Icons und Öffnen des Panels sind eigene Punkte, auch wenn der Wunsch danach scheitert.
     if (edit.buttons.length === 0) {
       ppNothing("PP7", T.PP7, edit.reason);
+    } else if (!edit.clicked) {
+      // Rot heißt: der Klick erfolgte und es entstand kein Panelblatt. Ohne Klick ist die zweite Hälfte des Punktes nicht gemessen (CORE-TEST-19),
+      // auch wenn die Icons der Knöpfe schon gelesen sind.
+      ppNothing("PP7", T.PP7, `${edit.reason} · gelesen vor dem Klick: ${edit.buttons.map((b) => `${b.label || "(ohne Beschriftung)"}: ${b.svg ? `svg, ${b.children} Formen` : "KEIN svg"}`).join(" · ")}`);
     } else {
       const panelLeaves = await cdp.evaluate<number>(`return app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}).length;`);
       const icons = edit.buttons.map((b) => `${b.label || "(ohne Beschriftung)"}: ${b.svg ? `svg, ${b.children} Formen` : "KEIN svg"}`);
