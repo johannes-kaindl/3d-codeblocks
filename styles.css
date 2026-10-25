@@ -560,7 +560,7 @@
 
 /* Prompt-Panel (src/obsidian/prompt-panel.ts): nur Theme-Variablen. */
 .tdcb-prompt .is-hidden { display: none; }
-.tdcb-prompt-top, .tdcb-prompt-model, .tdcb-prompt-actions {
+.tdcb-prompt-top, .tdcb-prompt-actions {
   display: flex; align-items: center; gap: var(--size-4-2); flex: 0 0 auto;
 }
 .tdcb-prompt-hint, .tdcb-prompt-quality, .tdcb-prompt-preview-caption, .tdcb-prompt-diff-heading {
@@ -568,7 +568,7 @@
 }
 .tdcb-prompt-hint:empty { display: none; }
 .tdcb-prompt-target { flex: 1 1 auto; min-width: 0; font-weight: var(--font-semibold); overflow-wrap: anywhere; }
-.tdcb-prompt-model select { flex: 1 1 auto; min-width: 0; }
+.tdcb-prompt > .okit-hub-content .okit-model-bar { flex: 0 0 auto; }
 .tdcb-prompt-input { width: 100%; resize: vertical; flex: 0 0 auto; }
 .tdcb-prompt > .okit-hub-content .okit-hub-panel,
 .tdcb-prompt-versions { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-2); }

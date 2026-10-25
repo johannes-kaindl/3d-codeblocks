@@ -6,7 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The prompt panel has a thinking control.** The **Thinking** button sits in the model row (with "Level picker in chat" on under Settings → Request it becomes a dropdown with the four levels). It sets how much the model may think before it answers, for the shapes prompt only; the choice is kept like the other request settings. Measured against a test endpoint: with thinking on, the request carries the matching thinking field (`reasoning_effort`) and the sampling values of that level; off is the default.
+
 ### Changed
+
+- **The prompt panel's model row is the shared model row.** One row above the quality line: the model dropdown (labelled "Prompt"), a "Reload models" button that says how many models it found, and the thinking button. **Automatic** is now selectable (the old dropdown ignored it); a model you chose that is no longer listed stays chosen and is marked "(saved)"; a warning sign says when the endpoint does not answer; with the LLM Endpoint Manager installed the last entry "Other endpoint …" opens the manager's settings. The row is locked while a request or **Apply** is running, and a failed model switch or list is shown in the status line.
 
 - **Vendored `obsidian-kit` 0.70.0 (was 0.69.1) and `code-kit` 0.37.5 (was 0.36.0).** You will notice one repair: a value the plugin masked before sending (a key or token) comes back byte-exact when it sits in the model's JSON answer; before, a PEM key whose line breaks were written as backslash and `n` returned with a doubled backslash (kit 0.70.0, `restoreContent: "json"`). The other changes of these kit releases (chat window, link guard, the Anthropic context limit) are not used here.
 

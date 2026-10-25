@@ -22,13 +22,16 @@ function answer(content: string): Complete {
 }
 
 function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
+  const chosen = { model: MODEL };
+  const think = { level: "off" as string, family: null as string | null, picker: false };
   const loadModel = vi.fn().mockResolvedValue({ object: {}, cameras: [] });
   const llm = {
     complete: vi.fn(complete),
     models: vi.fn(async () => ({ models: [MODEL], reachable: true })),
     invalidate: vi.fn(),
-    setModel: vi.fn(async (_m: string) => {}),
-    source: vi.fn(() => ({ family: null, familySource: "none", backend: "unknown", backendSource: "none", model: MODEL, sentModel: MODEL })),
+    setModel: vi.fn(async (m: string) => { chosen.model = m; }),
+    modelInUse: vi.fn(() => chosen.model),
+    source: vi.fn(() => ({ family: null, familySource: "none", backend: "unknown", backendSource: "none", model: chosen.model, sentModel: chosen.model })),
   };
   const deps = {
     settings: () => DEFAULT_SETTINGS,
@@ -43,6 +46,13 @@ function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
     loadModel,
     readColors: () => ({ background: "#000", material: "#888", grid: "#444" }),
     llm,
+    thinking: {
+      family: () => think.family,
+      current: () => think.level,
+      onLevel: () => "low",
+      setLevel: vi.fn(async (l: string) => { think.level = l; }),
+      levelPicker: () => think.picker,
+    },
     readTargetText: vi.fn(async (): Promise<string | null> => null),
     accept: vi.fn(async () => ({ ok: false, message: "not wired" })),
     openSettings: vi.fn(),
@@ -51,7 +61,7 @@ function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
     ...extra,
   };
   const view = new PromptPanelView({ app: undefined } as never, deps as never);
-  return { view, deps, llm, loadModel };
+  return { view, deps, llm, loadModel, chosen, think };
 }
 
 /** Der Attrappen-Baum hat kein querySelector — Elemente ueber ihre Klasse suchen. */
@@ -477,22 +487,143 @@ describe("PromptPanelView", () => {
     expect(view.state().rounds.rounds).toHaveLength(0);
   });
 
-  it("the model choice goes to the connection (setModel), nothing else is stored", async () => {
-    const { view, llm } = makeView(answer("{}"));
-    await view.onOpen();
-    await (view as any).chooseModel("qwen-x");
-    expect(llm.setModel).toHaveBeenCalledWith("qwen-x");
-    await (view as any).chooseModel("");
-    expect(llm.setModel).toHaveBeenCalledTimes(1);
-  });
+  describe("model row (kit model-bar)", () => {
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+    const pick = async (view: PromptPanelView, value: string): Promise<void> => {
+      const sel = one(view, "okit-model-bar-select");
+      sel.value = value;
+      (sel._listeners["change"] ?? []).forEach((cb: () => void) => cb());
+      await tick();
+    };
 
-  it("survives a rejecting model list and a rejecting setModel", async () => {
-    const { view, llm } = makeView(answer("{}"));
-    llm.setModel.mockRejectedValue(new Error("save failed"));
-    llm.models.mockRejectedValue(new Error("offline"));
-    await view.onOpen();
-    await vi.waitFor(() => expect(statusText(view)).toContain("offline"));
-    await (view as any).chooseModel("x");
-    expect(statusText(view)).toContain("save failed");
+    it("one row above the quality line: the models of the endpoint, Automatic, the chosen one; the home-made row is gone", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      llm.models.mockResolvedValue({ models: ["a", "b"], reachable: true });
+      await view.onOpen();
+      await tick();
+      expect(findAll((view as any).contentEl, "okit-model-bar")).toHaveLength(1);
+      const texts = (one(view, "okit-model-bar-select").children as any[]).map((o) => o.textContent);
+      expect(texts).toEqual(expect.arrayContaining(["Automatic", "a", "b"]));
+      expect(findAll((view as any).contentEl, "tdcb-prompt-model")).toHaveLength(0);
+      expect(findAll((view as any).contentEl, "tdcb-prompt-refresh")).toHaveLength(0);
+    });
+
+    it("the model choice goes to the connection (setModel), nothing else is stored, \"Automatic\" is allowed", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      llm.models.mockResolvedValue({ models: ["qwen-x"], reachable: true });
+      await view.onOpen();
+      await tick();
+      await pick(view, "qwen-x");
+      expect(llm.setModel).toHaveBeenCalledWith("qwen-x");
+      await pick(view, "");
+      expect(llm.setModel).toHaveBeenLastCalledWith("");
+    });
+
+    it("a change redraws the header: the quality line follows the model", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      llm.models.mockResolvedValue({ models: ["qwen/qwen3.8-27b", "other"], reachable: true });
+      await view.onOpen();
+      await tick();
+      const before = one(view, "tdcb-prompt-quality-label").textContent;
+      await pick(view, "qwen/qwen3.8-27b");
+      expect(one(view, "tdcb-prompt-quality-label").textContent).not.toBe(before);
+    });
+
+    it("survives a rejecting model list and a rejecting setModel: both are shown, not swallowed", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      llm.setModel.mockRejectedValue(new Error("save failed"));
+      llm.models.mockRejectedValue(new Error("offline"));
+      await view.onOpen();
+      await vi.waitFor(() => expect(statusText(view)).toContain("offline"));
+      await pick(view, "x");
+      expect(statusText(view)).toContain("save failed");
+    });
+
+    it("the row is locked while a request runs and while Apply runs, free again afterwards", async () => {
+      let during: boolean | null = null;
+      let view!: PromptPanelView;
+      const made = makeView(async (_req, h) => {
+        during = one(view, "okit-model-bar-select").disabled === true && one(view, "okit-model-bar-refresh").disabled === true;
+        return answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}')(_req, h);
+      });
+      view = made.view;
+      await view.onOpen();
+      await tick();
+      expect(one(view, "okit-model-bar-select").disabled).toBe(false);
+      await send(view, "a box");
+      expect(during).toBe(true);
+      expect(one(view, "okit-model-bar-select").disabled).toBe(false);
+      // Apply: gesperrt, solange accept noch laeuft
+      let release: () => void = () => {};
+      const gate = new Promise<void>((r) => { release = r; });
+      let lockedInApply: boolean | null = null;
+      made.deps.accept.mockImplementation(async () => {
+        lockedInApply = one(view, "okit-model-bar-select").disabled === true;
+        await gate;
+        return { ok: true, message: "ok" };
+      });
+      one(view, "tdcb-prompt-apply").click();
+      await tick();
+      release();
+      await view.settled();
+      await tick();
+      expect(lockedInApply).toBe(true);
+    });
+
+    it("reloading the list resets an earlier \"no endpoint\": the empty state is hidden again", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      await view.onOpen();
+      await tick();
+      (view as any).noEndpoint = true;
+      (view as any).renderControls();
+      expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(false);
+      llm.models.mockClear();
+      one(view, "okit-model-bar-refresh").click();
+      await tick();
+      expect(llm.models).toHaveBeenCalledWith({ force: true });
+      expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(true);
+    });
+
+    it("update() redraws the row from the state (model changed in the settings) without a request", async () => {
+      const { view, llm, chosen } = makeView(answer("{}"));
+      llm.models.mockResolvedValue({ models: ["a", "b"], reachable: true });
+      await view.onOpen();
+      await tick();
+      llm.models.mockClear();
+      chosen.model = "b";
+      view.refreshModelBar();
+      expect(one(view, "okit-model-bar-select").value).toBe("b");
+      expect(llm.models).not.toHaveBeenCalled();
+    });
+
+    it("onClose unregisters the row: a late list does not draw and the root is gone", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      await view.onOpen();
+      await tick();
+      const sel = one(view, "okit-model-bar-select");
+      const before = (sel.children as any[]).map((o) => o.textContent);
+      let finish: (r: { models: string[]; reachable: boolean }) => void = () => {};
+      llm.models.mockImplementation(() => new Promise((r) => { finish = r; }));
+      one(view, "okit-model-bar-refresh").click();
+      await view.onClose();
+      finish({ models: ["late"], reachable: true });
+      await tick();
+      expect((sel.children as any[]).map((o) => o.textContent)).toEqual(before);
+      expect(findAll((view as any).contentEl, "okit-model-bar")).toHaveLength(0);
+    });
+
+    it("the thinking control stands IN the row and switches through deps.thinking.setLevel", async () => {
+      const { view, deps, think } = makeView(answer("{}"));
+      think.family = "qwen3.8";
+      await view.onOpen();
+      await tick();
+      const bar = one(view, "okit-model-bar");
+      const toggles = findAll(bar, "okit-thinking-toggle");
+      expect(toggles).toHaveLength(1);
+      expect(findAll((view as any).contentEl, "okit-thinking-toggle")).toHaveLength(1);
+      toggles[0].click();
+      await tick();
+      expect(deps.thinking.setLevel).toHaveBeenCalledWith("low");
+    });
   });
 });

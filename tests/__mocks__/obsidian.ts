@@ -18,6 +18,11 @@ export function makeFakeEl(): any {
     setAttribute: (name: string, value: string) => {
       attrs[name] = value;
     },
+    removeAttribute: (name: string) => {
+      delete attrs[name];
+    },
+    // Die Handler stehen offen: ein Test loest "change" an einem Dropdown damit aus, ohne einen Browser.
+    _listeners: handlers,
     getAttr: (name: string) => (name in attrs ? attrs[name] : null),
     createDiv: (opts?: any) => {
       const child = makeFakeEl();
@@ -37,6 +42,13 @@ export function makeFakeEl(): any {
       child.tagName = tag.toUpperCase();
       if (opts?.text) child.textContent = opts.text;
       if (opts?.cls) child.className = opts.cls;
+      // `attr` wie bei Obsidians createEl; `value` ist beim echten option/select eine Eigenschaft.
+      if (opts?.attr) {
+        for (const [k, v] of Object.entries(opts.attr as Record<string, string>)) {
+          child.setAttribute(k, String(v));
+          if (k === "value") child.value = String(v);
+        }
+      }
       return child;
     },
     createSpan: (opts?: any) => el.createEl("span", opts),
@@ -74,6 +86,8 @@ export function makeFakeEl(): any {
       (handlers[type] ??= []).push(fn);
     }),
     removeEventListener: vi.fn(),
+    // Nur das, was ein Baustein des Kits braucht: Selektorliste mit "," und Nachfahren-Kette aus ".klasse" und "tag" (kein Attribut, keine Pseudoklasse).
+    querySelectorAll: (selector: string) => selectAll(el, selector),
     appendChild: (child: any) => {
       setParent(child, el);
       children.push(child);
@@ -105,6 +119,32 @@ export function makeFakeEl(): any {
   // diese Tests mit "Converting circular structure to JSON" abstuerzen.
   Object.defineProperty(el, "parentEl", { value: null, writable: true, enumerable: false });
   return el;
+}
+
+function matchesSimple(node: any, simple: string): boolean {
+  const parts = simple.match(/\.[^.#\s]+|^[a-zA-Z][a-zA-Z0-9-]*/g) ?? [];
+  if (parts.length === 0) return false;
+  const classes = String(node.className ?? "").split(/\s+/).filter(Boolean);
+  return parts.every((p) => (p.startsWith(".") ? classes.includes(p.slice(1)) : String(node.tagName ?? "").toLowerCase() === p.toLowerCase()));
+}
+
+function selectAll(root: any, selector: string): any[] {
+  const out: any[] = [];
+  const chains = selector.split(",").map((c) => c.trim().split(/\s+/).filter(Boolean)).filter((c) => c.length > 0);
+  const walk = (node: any, ancestors: any[]): void => {
+    for (const child of node.children ?? []) {
+      const path = [...ancestors, child];
+      if (chains.some((chain) => {
+        if (!matchesSimple(child, chain[chain.length - 1]!)) return false;
+        let idx = chain.length - 2;
+        for (let i = path.length - 2; i >= 0 && idx >= 0; i--) if (matchesSimple(path[i], chain[idx]!)) idx--;
+        return idx < 0;
+      })) out.push(child);
+      walk(child, path);
+    }
+  };
+  walk(root, []);
+  return out;
 }
 
 function setParent(el: any, parent: any): void {

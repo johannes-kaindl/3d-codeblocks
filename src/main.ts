@@ -13,7 +13,8 @@ import type { PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
 import { fillMissingRowModels } from "./vendor/kit/endpoint_config";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
-import { findEndpointManager } from "./vendor/kit-obsidian/endpoint-source";
+import { findEndpointManager, onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
+import { onLevelFor, thinkingFor, withThinkingLevel, type ThinkingLevel } from "./vendor/kit/sampling-profiles";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
 import { ContextManager } from "./obsidian/context-manager";
@@ -73,6 +74,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       caller: "3d-codeblocks",
       capability: "chat",
       mode: "structured",
+      // Das Panel zeigt die Stufenwahl in der Modellzeile (Denk-Steuerung, UI-STANDARD §8): der Schalter wirkt hier.
+      levelPicker: true,
       // Opt-in fuer den Anthropic-Transport: ohne ihn bleibt ein Claude-Eintrag des Managers fuer dieses Plugin unsichtbar. Mit ihm
       // geht der Prompt des Panels an Anthropic, sobald der Manager einen Claude-Eintrag zuerst liefert (Auswahl "Automatisch").
       transports: { anthropic: true },
@@ -89,12 +92,23 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         if (patch.endpoints !== undefined) this.settings.endpoints = patch.endpoints;
         if (patch.choice !== undefined) this.settings.endpointChoice = patch.choice;
         if (patch.request !== undefined) this.settings.request = patch.request;
+        // Modell, Endpunkt oder Denkstufe haben sich geaendert (auch im Einstellungen-Tab): die Modellzeile des Panels zieht nach.
+        this.refreshPromptPanels();
         // Unverpackt zurueckgeben: das Kit macht aus einem abgelehnten Speichern eine Notice
         // (MIGRATION 0.49.0 Schritt 2); ein Catch hier liesse einen Schreibfehler wie Erfolg aussehen.
         return this.saveSettings();
       },
     });
     this.addSettingTab(new SettingsTab(this.app, this));
+    // Der Manager kommt, geht oder wechselt den Endpunkt: frisch aufloesen, die Modellzeile eines offenen Panels laedt ihre Liste neu.
+    this.register(onEndpointManagerChanged(this.app, () => {
+      this.llm.invalidate();
+      void this.llm.resolve().catch(() => undefined).then(() => {
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
+          if (leaf.view instanceof PromptPanelView) leaf.view.reloadModels();
+        }
+      });
+    }));
 
     // `active` gehoert seit Task 12 mit dazu — Embed und FileView brauchen es, um sich
     // bei Interaktion als aktiven Viewport zu melden; ModelBlock/GltfBlock nehmen
@@ -253,6 +267,19 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         new PromptPanelView(leaf, {
           ...hostDeps,
           llm: this.llm,
+          thinking: {
+            family: () => this.llm.source().family,
+            backend: () => this.llm.source().backend,
+            current: () => thinkingFor(this.settings.request, "structured"),
+            onLevel: () => onLevelFor(this.settings.request, "structured"),
+            levelPicker: () => this.settings.request.levelPickerInChat,
+            // Dieselbe Schreibregel wie die Einstellungen (Kit `withThinkingLevel`): die Stufe wird auch als Ein-Stufe gemerkt.
+            setLevel: async (level: ThinkingLevel) => {
+              this.settings.request = withThinkingLevel(this.settings.request, "structured", level);
+              await this.saveSettings();
+              this.refreshPromptPanels();
+            },
+          },
           readTargetText: (t) => readTargetText(this.acceptEnv(), t),
           accept: (state) => acceptPanel(this.acceptEnv(), state),
           openSettings: () => {
@@ -510,6 +537,13 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
 
   /** Das Prompt-Panel in der rechten Leiste oeffnen (oder zeigen) und ihm das Ziel geben. Solange die View
    *  nicht registriert ist (Task 6), meldet das eine Notice statt ein leeres Blatt anzulegen. */
+  /** Zeichnet die Modellzeile jedes offenen Prompt-Panels aus dem Zustand neu (ohne Abruf). */
+  private refreshPromptPanels(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
+      if (leaf.view instanceof PromptPanelView) leaf.view.refreshModelBar();
+    }
+  }
+
   async openPromptPanel(target: PanelTarget): Promise<void> {
     const workspace = this.app.workspace;
     const unavailable = () => new Notice("The prompt panel is not available");

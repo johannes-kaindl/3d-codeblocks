@@ -4770,10 +4770,12 @@ const SMOKE_NOTE_PP_BLANK = "_tdcb-gui-smoke-pp-blank.md";
 const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK];
 const PP_ENDPOINT_ID = "tdcb-smoke-ep";
 const PP_MODEL = "smoke-model";
+/** Zweites Modell des Ersatz-Endpunkts (Modellzeile, PP27–PP30). Der Name trägt die Familie qwen3.8, damit die Denk-Steuerung einen Zustand hat, der den Body ändert. */
+const PP_MODEL_B = "qwen3.8-smoke-b";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4799,6 +4801,10 @@ const PP_TITEL = {
   PP25: "Pflicht (b), Gegenprobe: ohne Rollbalken wird etwas unerreichbar",
   PP20: "Denkblock kopierbar: der Kopier-Knopf erscheint erst mit Denk-Text, kopiert ihn in die Zwischenablage, quittiert am Knopf und klappt den Block nicht um",
   PP26: "Denkblock kopierbar, Gegenprobe: lehnt die Zwischenablage das Schreiben ab, quittiert der Knopf nicht",
+  PP27: "Modellzeile: eine Zeile im Panel, das Dropdown trägt „Automatic“ und BEIDE Modelle des Endpunkts, hat einen Namen, Neu laden sagt die Zahl an",
+  PP28: "Modellzeile: der Wechsel wirkt, die nächste Anfrage am Endpunkt trägt das gewählte Modell",
+  PP29: "Modellzeile: die Denk-Steuerung steht IN der Zeile, schaltet um, und der gesendete Body ändert sich (Wirkung am Stub)",
+  PP30: "Modellzeile: während einer Anfrage gesperrt (Dropdown und Neu laden), danach wieder frei",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
@@ -4828,6 +4834,8 @@ interface Substitute {
   /** Nicht leer: jede Chat-Antwort traegt diesen Denk-Text (PP11: langer Denkblock ueber einer langen „Done“-Zeile). */
   reasoning: string;
   requests: { kind: "create" | "refine" | "models" | "unknown"; stream: boolean }[];
+  /** Die Bodies der Chat-Anfragen in der Reihenfolge des Eingangs. */
+  bodies: Record<string, unknown>[];
   /** Chat-Verbindungen, die der Client schloss, bevor der Server fertig war. */
   clientClosed: number;
   /** Laufende Generierungen (der Strom ist noch offen). */
@@ -4853,7 +4861,7 @@ async function startSubstitute(answers: { create: string; refine: string }): Pro
   };
   const state = { hang: false, reasoning: "" };
   const stub = await startLlmStub({
-    models: [PP_MODEL],
+    models: [PP_MODEL, PP_MODEL_B],
     takt: PP_CHUNK_DELAY_MS,
     teile: 3,
     antwort: (a) => ({ text: kindOf(a) === "refine" ? answers.refine : answers.create, ...(state.hang ? { haengtNach: 1 } : {}), ...(state.reasoning !== "" ? { reasoning: state.reasoning } : {}) }),
@@ -4865,6 +4873,7 @@ async function startSubstitute(answers: { create: string; refine: string }): Pro
     get reasoning() { return state.reasoning; },
     set reasoning(v: string) { state.reasoning = v; },
     get requests() { return stub.anfragen().map((a) => ({ kind: kindOf(a), stream: a.stream === true })); },
+    get bodies() { return stub.anfragen().filter((a) => a.route === "chat").map((a) => (a.json ?? {}) as Record<string, unknown>); },
     get clientClosed() { return stub.zaehler().clientGeschlossen; },
     get unterwegs() { return stub.zaehler().unterwegs; },
     get unknownPaths() { return stub.anfragen().filter((a) => kindOf(a) === "unknown").map((a) => `${a.methode} ${a.pfad}`); },
@@ -5961,6 +5970,125 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
             skipped(`PP25. ${T.PP25}`, `in dieser Lage nicht anwendbar: Bedienelemente stehen oben bzw. in der klebenden Knopfzeile, ohne Rollbalken bleiben alle erreichbar (${gegen.detail})`);
           } else pflicht("PP25", gegen);
         }
+      }
+    }
+
+    // --- PP27–PP30. Modellzeile (Kit model-bar, Welle 27) ----------------------------------------------------
+    // Der Ersatz-Endpunkt nennt zwei Modelle. Gemessen wird am echten DOM des Panels, nicht an der View.
+    {
+      const readBar = (): Promise<{ bars: number; options: string[]; value: string; label: string | null; announce: string; selDisabled: boolean; refreshDisabled: boolean; toggles: number; toggleInBar: number }> =>
+        cdp.evaluate(`
+          const root = document.querySelector(".tdcb-prompt");
+          const bars = root ? [...root.querySelectorAll(".okit-model-bar")] : [];
+          const sel = bars[0]?.querySelector("select");
+          return {
+            bars: bars.length,
+            options: sel ? [...sel.options].map((o) => o.textContent ?? "") : [],
+            value: sel?.value ?? "",
+            label: sel?.getAttribute("aria-label") ?? null,
+            announce: bars[0]?.querySelector(".okit-model-bar-status")?.textContent ?? "",
+            selDisabled: !!sel?.disabled,
+            refreshDisabled: !!bars[0]?.querySelector(".okit-model-bar-refresh")?.disabled,
+            toggles: root?.querySelectorAll(".okit-thinking-toggle").length ?? 0,
+            toggleInBar: bars[0]?.querySelectorAll(".okit-thinking-toggle").length ?? 0,
+          };
+        `);
+      const choose = (value: string): Promise<boolean> =>
+        cdp.evaluate<boolean>(`
+          const sel = document.querySelector(".tdcb-prompt .okit-model-bar select");
+          if (!sel) return false;
+          sel.value = ${JSON.stringify(value)};
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        `);
+      const withoutMessages = (b: Record<string, unknown> | undefined): string => JSON.stringify(Object.fromEntries(Object.entries(b ?? {}).filter(([k]) => k !== "messages")));
+      const vorherThinking = await cdp.evaluate<string>(`return JSON.stringify(app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings.request);`);
+      try {
+        await cdp.evaluate(`await app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].llm.setModel(${JSON.stringify(PP_MODEL)}); return true;`);
+        if (!(await ppOpenFresh(cdp))) {
+          for (const id of ["PP27", "PP28", "PP29", "PP30"] as const) ppNothing(id, T[id], "das Panel öffnete nicht");
+        } else {
+          // PP27 — vor dem Klick gibt es keine Ansage (Gegenprobe: die Zahl kommt vom Klick, nicht von einem alten Stand).
+          const before = await readBar();
+          await pollState(cdp, `const s = document.querySelector(".tdcb-prompt .okit-model-bar select"); return { n: s ? [...s.options].filter((o) => (o.textContent ?? "").startsWith("smoke-") || (o.textContent ?? "").startsWith("qwen3.8-smoke")).length : 0 };`, (x: { n: number }) => x.n >= 2, 8_000, 250);
+          await ppClick(cdp, ".okit-model-bar-refresh");
+          await pollState(cdp, `const z = document.querySelector(".tdcb-prompt .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models? loaded/.test(x.t), 6_000, 250);
+          const bar = await readBar();
+          const modelOptions = bar.options.filter((o) => o === PP_MODEL || o === PP_MODEL_B);
+          ppRecord(
+            "PP27",
+            T.PP27,
+            bar.bars === 1 && modelOptions.length === 2 && bar.options.some((o) => /^Automatic/.test(o)) && !!bar.label && /^2 models loaded/.test(bar.announce.trim()) && before.announce.trim() === "",
+            `${bar.bars} Zeile, Einträge ${JSON.stringify(bar.options)}, Name „${bar.label ?? ""}“, Ansage nach dem Klick „${bar.announce.trim()}“ (davor „${before.announce.trim()}“, Gegenprobe: leer)`,
+          );
+
+          // PP28 — Anfrage mit dem Zeilen-Modell A, Wechsel auf B, Anfrage mit B (der Stub schneidet den Body mit).
+          const n0 = sub.bodies.length;
+          await ppType(cdp, PP_CREATE_PROMPT);
+          await ppClick(cdp, ".tdcb-prompt-send");
+          await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 30_000, 400);
+          const modelA = (sub.bodies[n0] as { model?: string } | undefined)?.model;
+          await choose(PP_MODEL_B);
+          const inUse = await pollState(cdp, `const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return { m: p.llm.modelInUse() };`, (x: { m: string }) => x.m === PP_MODEL_B, 6_000, 250);
+          const n1 = sub.bodies.length;
+          await ppType(cdp, PP_CREATE_PROMPT);
+          await ppClick(cdp, ".tdcb-prompt-send");
+          await pollState<PpState>(cdp, PP_READ, (st) => (st.phase === "ok" || st.phase === "error") && sub.bodies.length > n1, 30_000, 400);
+          const modelB = (sub.bodies[n1] as { model?: string } | undefined)?.model;
+          ppRecord(
+            "PP28",
+            T.PP28,
+            inUse.reached && modelA === PP_MODEL && modelB === PP_MODEL_B,
+            `Anfrage vor dem Wechsel „${modelA ?? "keine"}“ (Gegenprobe: Modell A „${PP_MODEL}“), nach dem Wechsel „${modelB ?? "keine"}“ (erwartet „${PP_MODEL_B}“); modelInUse ${inUse.reached ? "gewechselt" : "NICHT gewechselt"}`,
+          );
+
+          // PP29 — Denk-Steuerung in der Zeile; ein Klick schaltet, und der nächste Body unterscheidet sich vom vorigen (nur Denk-Felder dürfen es sein).
+          const barT = await readBar();
+          const level0 = await cdp.evaluate<string>(`const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return p.settings.request.thinking?.structured ?? "off";`);
+          const clickedToggle = await clickReal(cdp, `document.querySelector(".tdcb-prompt .okit-model-bar .okit-thinking-toggle")`);
+          const level1 = (await pollState(cdp, `const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return { l: p.settings.request.thinking?.structured ?? "off" };`, (x: { l: string }) => x.l !== level0, 5_000, 250)).state?.l;
+          const n2 = sub.bodies.length;
+          await ppType(cdp, PP_CREATE_PROMPT);
+          await ppClick(cdp, ".tdcb-prompt-send");
+          await pollState<PpState>(cdp, PP_READ, (st) => (st.phase === "ok" || st.phase === "error") && sub.bodies.length > n2, 30_000, 400);
+          const bodyOff = withoutMessages(sub.bodies[n1]);
+          const bodyOn = withoutMessages(sub.bodies[n2]);
+          ppRecord(
+            "PP29",
+            T.PP29,
+            barT.toggleInBar === 1 && barT.toggles === 1 && clickedToggle && level1 !== undefined && level1 !== level0 && bodyOn !== bodyOff,
+            `Denk-Knopf in der Zeile ${barT.toggleInBar}, im Panel insgesamt ${barT.toggles}; Stufe ${level0} → ${level1 ?? "unverändert"}; Body ohne messages vorher ${bodyOff} · nachher ${bodyOn}`,
+          );
+
+          // PP30 — Sperre: eine hängende Anfrage hält das Panel im Lauf.
+          const free = await readBar();
+          sub.hang = true;
+          try {
+            await ppType(cdp, PP_CREATE_PROMPT);
+            await ppClick(cdp, ".tdcb-prompt-send");
+            const running = await pollState<PpState>(cdp, PP_READ, (st) => st.tail.length > 0 && st.stopVisible, 15_000, 250);
+            const locked = await readBar();
+            if (running.reached) await ppClick(cdp, ".tdcb-prompt-stop");
+            await pollState<PpState>(cdp, PP_READ, (st) => !st.stopVisible, 10_000, 250);
+            const after = await readBar();
+            ppRecord(
+              "PP30",
+              T.PP30,
+              running.reached && !free.selDisabled && !free.refreshDisabled && locked.selDisabled && locked.refreshDisabled && !after.selDisabled && !after.refreshDisabled,
+              `gesperrt (Dropdown/Neu laden): davor ${free.selDisabled}/${free.refreshDisabled} (Gegenprobe: frei), während der Anfrage ${locked.selDisabled}/${locked.refreshDisabled}${running.reached ? "" : " (Anfrage lief nicht an)"}, danach ${after.selDisabled}/${after.refreshDisabled}`,
+            );
+          } finally {
+            sub.hang = false;
+          }
+        }
+      } finally {
+        await cdp.evaluate(`
+          const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
+          p.settings.request = JSON.parse(${JSON.stringify(vorherThinking)});
+          await p.saveSettings();
+          await p.llm.setModel(${JSON.stringify(PP_MODEL)});
+          return true;
+        `).catch(() => undefined);
       }
     }
 

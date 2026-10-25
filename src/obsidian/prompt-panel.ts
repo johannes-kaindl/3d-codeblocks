@@ -21,6 +21,8 @@ import { failureHint, qualityLine, type QualityTask } from "../core/shapes/quali
 import { clearRounds, pushRound, selectRound } from "../vendor/kit/rounds";
 import { buildHubInto, type HubController, type HubPanel } from "../vendor/kit-obsidian/hub";
 import type { LlmConnection } from "../vendor/kit-obsidian/llm-connection";
+import { buildModelBar, type ModelBar, type ModelBarConnection } from "../vendor/kit-obsidian/model-bar";
+import { thinkingOffTexts, type ThinkingControlOptions } from "../vendor/kit-obsidian/thinking-control";
 import { buildStreamArea, type StreamArea } from "../vendor/kit-obsidian/stream-area";
 import { buildVersionList } from "../vendor/kit-obsidian/version-list";
 import { VIEW_TYPE_PROMPT } from "./prompt-panel-id";
@@ -31,6 +33,8 @@ export { VIEW_TYPE_PROMPT };
 
 export interface PromptPanelDeps extends HostBaseDeps {
   llm: LlmConnection;
+  /** Zustand und Schalter der Denk-Steuerung in der Modellzeile (ohne Texte). */
+  thinking: Pick<ThinkingControlOptions, "family" | "backend" | "current" | "onLevel" | "setLevel" | "levelPicker">;
   /** Aktueller Text des Ziels; `null` = das Modell ist weg (oder Ziel `new`/`other`). */
   readTargetText(t: PanelTarget): Promise<string | null>;
   accept(state: PanelState): Promise<{ ok: boolean; message: string }>;
@@ -47,8 +51,6 @@ const PHASE_ICON: Record<Exclude<Phase, "idle">, string> = {
   warning: "alert-triangle",
 };
 const PHASES: Phase[] = ["checking", "ok", "error", "warning"];
-
-let selectSeq = 0;
 
 const encode = (text: string): ArrayBuffer => {
   const bytes = new TextEncoder().encode(text);
@@ -85,7 +87,8 @@ export class PromptPanelView extends ItemView {
 
   private targetEl!: HTMLElement;
   private hintEl!: HTMLElement;
-  private modelSelect!: HTMLSelectElement;
+  /** Die Kit-Modellzeile (Dropdown, Neu laden, Denk-Steuerung); `null` vor dem Aufbau und nach dem Schließen. */
+  private modelBar: ModelBar | null = null;
   private qualityEl!: HTMLElement;
   private qualityIcon!: HTMLElement;
   private qualityLabel!: HTMLElement;
@@ -179,7 +182,6 @@ export class PromptPanelView extends ItemView {
     };
     this.hub = buildHubInto(root, [prompt, versions], "prompt");
     this.renderAll();
-    void this.loadModels(false);
   }
 
   async onClose(): Promise<void> {
@@ -187,6 +189,8 @@ export class PromptPanelView extends ItemView {
     // onClose nicht) — „Discard“ ist der bewusste Weg.
     this.controller?.abort();
     this.controller = null;
+    this.modelBar?.destroy();
+    this.modelBar = null;
     this.hub?.destroy();
     this.hub = null;
     this.previewHost?.dispose();
@@ -200,15 +204,28 @@ export class PromptPanelView extends ItemView {
     this.newBtn.addEventListener("click", () => void this.startNew());
     this.hintEl = c.createDiv({ cls: "tdcb-prompt-hint" });
 
-    // Modellzeile: Beschriftung, Auswahl, Aktualisieren.
-    const modelRow = c.createDiv({ cls: "tdcb-prompt-model" });
-    const selectId = `tdcb-prompt-model-select-${++selectSeq}`;
-    modelRow.createEl("label", { text: PANEL_TEXTS.model, attr: { for: selectId } });
-    this.modelSelect = modelRow.createEl("select", { cls: "dropdown", attr: { id: selectId } });
-    this.modelSelect.addEventListener("change", () => void this.chooseModel(this.modelSelect.value));
-    const refresh = modelRow.createEl("button", { cls: "clickable-icon tdcb-prompt-refresh", attr: { type: "button", "aria-label": PANEL_TEXTS.refreshModels } });
-    setIcon(refresh, "refresh-cw");
-    refresh.addEventListener("click", () => void this.loadModels(true));
+    // Modellzeile (Kit model-bar): Dropdown, Neu laden und Denk-Steuerung in einer Zeile, über der Qualitätszeile.
+    this.modelBar?.destroy();
+    this.modelBar = buildModelBar({
+      app: this.app,
+      containerEl: c,
+      llm: this.modelBarLlm(),
+      label: PANEL_TEXTS.modelLabel,
+      // Sperre wie die des Sendens: während einer Anfrage und während Apply läuft ein Modellwechsel ins Leere.
+      disabled: () => this.controller !== null || this.applying,
+      onChange: () => this.renderHeader(),
+      // Würfe aus der Liste und aus setModel sind nie still; während einer Anfrage gehört die Statuszeile der Anfrage.
+      onError: (e) => { if (this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e)); },
+      thinking: {
+        ...this.deps.thinking,
+        strings: {
+          button: (level) => (level === "off" ? PANEL_TEXTS.thinkingOff : PANEL_TEXTS.thinkingOn(level)),
+          offNotPossible: thinkingOffTexts("en"),
+          level: (l) => PANEL_TEXTS.thinkingLevel(l),
+          pickerLabel: PANEL_TEXTS.thinkingPicker,
+        },
+      },
+    });
 
     this.qualityEl = c.createDiv({ cls: "tdcb-status tdcb-prompt-quality" });
     this.qualityIcon = this.qualityEl.createSpan({ cls: "tdcb-status-icon" });
@@ -495,36 +512,32 @@ export class PromptPanelView extends ItemView {
     this.renderAll();
   }
 
-  private async chooseModel(value: string): Promise<void> {
-    if (value === "") return;
-    try {
-      await this.deps.llm.setModel(value);
-    } catch (e) {
-      if (this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e));
-    }
+  /** Die Verbindung für die Modellzeile. Ein früher gemeldetes „kein Endpunkt“ gilt nicht für immer (die Einstellungen können sich
+   *  geändert haben): vor jedem Laden der Liste wird es zurückgesetzt, wie es das Laden des Eigenbaus tat. Die Zeile bietet dafür
+   *  keinen Rückruf; der Adapter ruft nur die echte Verbindung und löst nichts anderes aus. */
+  private modelBarLlm(): ModelBarConnection {
+    const { llm } = this.deps;
+    return {
+      models: (o) => {
+        this.noEndpoint = false;
+        this.renderControls();
+        return llm.models(o);
+      },
+      setModel: (m) => llm.setModel(m),
+      modelInUse: () => llm.modelInUse(),
+      source: () => llm.source(),
+    };
+  }
+
+  /** Zeichnet die Modellzeile samt Denk-Steuerung aus dem Zustand neu (Modell, Endpunkt oder Stufe haben sich außerhalb geändert). Ohne Abruf. */
+  refreshModelBar(): void {
+    this.modelBar?.update();
     this.renderHeader();
   }
 
-  private async loadModels(force: boolean): Promise<void> {
-    // Neu bewerten: ein frueher gemeldeter „kein Endpunkt“ gilt nicht fuer immer (Einstellungen koennen sich geaendert haben).
-    this.noEndpoint = false;
-    this.renderControls();
-    let r;
-    try {
-      r = await this.deps.llm.models({ force });
-    } catch (e) {
-      if (this.hub !== null && this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e));
-      return;
-    }
-    if (this.hub === null) return;
-    const current = this.model();
-    const names = r.models.includes(current) || current === "" ? r.models : [current, ...r.models];
-    this.modelSelect.empty();
-    for (const m of names) {
-      const o = this.modelSelect.createEl("option", { text: m });
-      o.value = m;
-    }
-    if (current !== "") this.modelSelect.value = current;
+  /** Lädt die Modell-Liste der Zeile neu (der Endpunkt oder der Manager haben gewechselt). */
+  reloadModels(): void {
+    void this.modelBar?.refresh();
   }
 
   // ---- Zeichnen -------------------------------------------------------------------------------
@@ -554,6 +567,7 @@ export class PromptPanelView extends ItemView {
   private renderControls(): void {
     if (!this.sendBtn) return;
     const running = this.controller !== null;
+    this.modelBar?.update();   // die Sperre der Modellzeile folgt demselben Zustand (Anfrage läuft, Apply läuft)
     this.sendBtn.disabled = !this.canSend();
     this.stopBtn.toggleClass("is-hidden", !running);
     const n = this.panel.rounds.rounds.length;
