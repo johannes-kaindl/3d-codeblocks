@@ -1,4 +1,4 @@
-// vendored from code-kit@0.36.0, src/ts/pure/block-lines.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.37.5, src/ts/pure/block-lines.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Reads the lines of a fenced code block that holds `key: value` settings — the part every plugin with such a block
  *  wrote the same way, and nothing of what the keys mean.
  *

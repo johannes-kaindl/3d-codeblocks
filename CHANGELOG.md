@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Vendored `obsidian-kit` 0.70.0 (was 0.69.1) and `code-kit` 0.37.5 (was 0.36.0).** You will notice one repair: a value the plugin masked before sending (a key or token) comes back byte-exact when it sits in the model's JSON answer; before, a PEM key whose line breaks were written as backslash and `n` returned with a doubled backslash (kit 0.70.0, `restoreContent: "json"`). The other changes of these kit releases (chat window, link guard, the Anthropic context limit) are not used here.
+
 ### Fixed
 
 - **When an answer could not be turned into a model, the hint no longer sends a Claude user to a "larger model".** With a Claude model the prompt panel now says only that the answer could not be used; the pointer to the best measured local model stays for local models.
