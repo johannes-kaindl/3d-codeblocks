@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **When an answer could not be turned into a model, the hint no longer sends a Claude user to a "larger model".** With a Claude model the prompt panel now says only that the answer could not be used; the pointer to the best measured local model stays for local models.
+
 ## [0.12.0] — 2026-10-24
 
 ### Added

@@ -6,6 +6,8 @@
 // dasselbe Sampling senden oder neu messen. `promptSha` bindet jede Zeile an den gemessenen Prompt
 // (Regel: tests/helpers/prompt-sha.ts); ändert sich der Prompt, wird die Zeile ungültig und gehört nach
 // docs/LAB.md in die Liste der zurückgezogenen Zeilen.
+import type { FamilyId } from "../../vendor/kit/sampling-profiles";
+
 export type QualityTask = "create" | "refine";
 
 export interface Measurement {
@@ -84,8 +86,10 @@ function best(task: QualityTask, table: readonly Measurement[]): Measurement | n
     .sort((a, b) => b.good / b.of - a.good / a.of || a.model.localeCompare(b.model))[0] ?? null;
 }
 
-export function failureHint(model: string, task: QualityTask = "create", table: readonly Measurement[] = MEASUREMENTS): string {
+export function failureHint(model: string, task: QualityTask = "create", table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): string {
   const base = task === "refine" ? "The change list could not be applied." : "The answer could not be turned into a model.";
+  // Die Tabelle misst lokale Modelle; „ein größeres Modell“ ist für ein Cloud-Modell kein Rat, den der Nutzer umsetzen kann.
+  if (opts?.family === "claude") return base;
   const noun = task === "refine" ? "test change requests applied correctly" : "test prompts plausible";
   const top = best(task, table);
   if (!top) return base;

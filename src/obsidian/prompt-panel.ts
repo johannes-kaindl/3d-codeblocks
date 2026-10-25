@@ -386,14 +386,14 @@ export class PromptPanelView extends ItemView {
     }
 
     if (r.truncated) {
-      this.setStatus("error", `${PANEL_TEXTS.cutOff} ${failureHint(model, kind)}`);
+      this.setStatus("error", `${PANEL_TEXTS.cutOff} ${failureHint(model, kind, undefined, { family: this.deps.llm.source().family })}`);
       return;
     }
     const content = r.content !== "" ? r.content : raw;
     const made = kind === "create" ? this.readCreate(content) : this.readRefine(content, base ?? "");
     if (!made.ok) {
       // Der Rohtext bleibt im Tail stehen; keine Runde.
-      this.setStatus("error", `${made.reason} ${failureHint(model, kind)}`);
+      this.setStatus("error", `${made.reason} ${failureHint(model, kind, undefined, { family: this.deps.llm.source().family })}`);
       return;
     }
     // Eine Runde gehoert zu dem Ziel, fuer das gefragt wurde.

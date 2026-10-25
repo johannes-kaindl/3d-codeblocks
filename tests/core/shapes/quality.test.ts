@@ -97,6 +97,21 @@ describe("quality", () => {
     );
   });
 
+  it("claude family: no pointer to a larger local model, only the bare sentence", () => {
+    expect(failureHint("claude-opus-5-5", "create", MEASUREMENTS, { family: "claude" })).toBe("The answer could not be turned into a model.");
+    expect(failureHint("claude-opus-5-5", "refine", MEASUREMENTS, { family: "claude" })).toBe("The change list could not be applied.");
+    // the family wins over a model name that happens to be in the table
+    expect(failureHint("qwen/qwen3.8-27b", "create", MEASUREMENTS, { family: "claude" })).toBe("The answer could not be turned into a model.");
+  });
+
+  it("no family, null family or a local family keep the text of today", () => {
+    const today = failureHint("verdigado-pro");
+    expect(failureHint("verdigado-pro", "create", MEASUREMENTS, {})).toBe(today);
+    expect(failureHint("verdigado-pro", "create", MEASUREMENTS, { family: null })).toBe(today);
+    expect(failureHint("verdigado-pro", "create", MEASUREMENTS, { family: "gemma4" })).toBe(today);
+    expect(today).toContain("A larger model may do better");
+  });
+
   it("falls back to the bare sentence with an empty table", async () => {
     vi.resetModules();
     vi.doMock("../../../src/core/shapes/quality", async () => {
