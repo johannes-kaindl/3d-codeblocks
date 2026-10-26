@@ -222,6 +222,6 @@ If you click **Create** or **Change** and no language model is set up, the panel
 
 Open Settings → 3D Codeblocks. In the group **Model by prompt**, the **Language model** section lists your endpoints: the address of an OpenAI-compatible server (a local one such as LM Studio, or a hosted provider), an optional API key and the model to use. The first reachable endpoint in the list is used. Keys are kept in Obsidian's secret storage, not in the plugin's data file. A collapsed **Request** section shows which model family and backend were recognised and which parameters are sent.
 
-The central setup guide explains how to run a local model and which one to pick: [LLM setup guide](https://uplink.jkaindl.de/llm-setup).
+The central setup guide explains how to run a local model and which one to pick: [LLM setup guide](https://jkaindl.de/uplink/llm-setup/).
 
 If the plugin **LLM Endpoint Manager** is installed, it supplies the endpoints and models instead of the list in the settings. It is optional; this plugin works with its own list on its own. The manager may also list a **Claude** entry (the Anthropic API); this plugin accepts it. Under "automatic (first reachable)" the first reachable, enabled chat entry in the manager's list is used, so a Claude entry above your local one is used first, and your prompt then goes to Anthropic. Put the local entry first, or pick it in the **Endpoint** setting, if the prompt should stay on your machine.

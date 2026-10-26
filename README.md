@@ -32,7 +32,7 @@ leaving your note. 3D files behave like PDFs: click to open, `![[…]]` to embed
 ## Requirements
 
 - Obsidian **1.11.4** or newer.
-- Optional, for *Model by prompt*: an OpenAI-compatible language model endpoint (see the [setup guide](https://uplink.jkaindl.de/llm-setup)) or a Claude entry of the LLM Endpoint Manager. With a Claude entry your prompt (and, for a change, the current parts of the model) goes to Anthropic. The first reachable, enabled entry in the manager's list wins under "automatic (first reachable)", so a Claude entry above your local one is used first. Nothing else needs a model.
+- Optional, for *Model by prompt*: an OpenAI-compatible language model endpoint (see the [setup guide](https://jkaindl.de/uplink/llm-setup/)) or a Claude entry of the LLM Endpoint Manager. With a Claude entry your prompt (and, for a change, the current parts of the model) goes to Anthropic. The first reachable, enabled entry in the manager's list wins under "automatic (first reachable)", so a Claude entry above your local one is used first. Nothing else needs a model.
 - WebGL support in the renderer — standard on desktop. Mobile works, but large models
   are slow and the browser's limit on simultaneous 3D views is reached sooner.
 - **No Draco compression.** Meshopt-compressed files work; Draco-compressed ones cannot be
