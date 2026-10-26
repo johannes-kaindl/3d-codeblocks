@@ -5446,7 +5446,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       ppRecord(
         "PP2",
         T.PP2,
-        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
+        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && /the one small model tested/.test(two.quality) && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
         `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
       );
     }
@@ -6149,11 +6149,12 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
 // dass DIESES Plugin den Opt-in setzt, belegt erst `plugin.llm.source()` nach `invalidate()` und `resolve({ force: true })` (CL1).
 // Der Abschnitt `promptpanel` verweigert die Messung, wenn ein Manager im Vault aktiv ist: der Fake kommt deshalb in `finally` UND im
 // Abbruch-Handler (`clCleanup`) wieder raus (CORE-TEST-21).
-const CL_IDS = ["CL1", "CL2", "CL3"] as const;
+const CL_IDS = ["CL1", "CL2", "CL3", "CL4"] as const;
 const CL_TITEL = {
   CL1: "Fake-Manager mit Claude-Eintrag: der Eintrag kommt nur mit Opt-in, das Plugin wählt ihn (Backend anthropic, Familie claude)",
   CL2: "Lauf gegen den Claude-Stub bis zur Form: Messages-API mit Schlüssel, ohne temperature/top_p, Denken im Denkblock",
   CL3: "Fehler mitten im Strom: das Panel zeigt den Fehler der API, der Teiltext bleibt im Antwortbereich",
+  CL4: "Qualitätszeile bei Claude: nur „Not measured for this model.“ (is-warning), kein Verweis auf das kleine lokale Modell, sofort beim Öffnen und nach dem Beruhigen",
 } as const;
 const CL_MODELL = "claude-haiku-5-5";
 const CL_SCHLUESSEL = "sk-ant-smoke-3d-codeblocks";
@@ -6228,6 +6229,22 @@ async function sectionClaude(cdp: Cdp, _model: string): Promise<void> {
     `);
     rec("CL1", sicht.ohne === 0 && sicht.mit === 1 && sicht.quelle === "manager" && sicht.modell === CL_MODELL && sicht.backend === "anthropic" && sicht.familie === "claude",
       `Kontrolle am Fake: list() ohne transports ${sicht.ohne}, mit ["http","anthropic"] ${sicht.mit} · Plugin nach resolve: Backend ${sicht.backend} (Quelle ${sicht.quelle}), Familie ${sicht.familie}, Modell ${sicht.modell}`);
+
+    // --- CL4. Qualitätszeile ---------------------------------------------------------------------------------
+    // Das Panel frisch öffnen und die Zeile zweimal lesen: gleich nach dem Öffnen und nach 1,5 s. Zeigte sie zuerst den Text für lokale Modelle
+    // (die Familie ist beim ersten Zeichnen noch nicht aufgelöst), stünde hier „the one small model tested“ und erst später der kurze Text.
+    if (!(await ppOpenFresh(cdp))) {
+      nothing("CL4", "das Panel öffnete nicht");
+    } else {
+      const liesZeile = (): Promise<{ text: string; warn: boolean }> => cdp.evaluate(`
+        const q = document.querySelector(".tdcb-prompt .tdcb-prompt-quality");
+        return { text: q?.textContent ?? "", warn: !!q && q.classList.contains("is-warning") };`);
+      const sofort = await liesZeile();
+      await new Promise((r) => setTimeout(r, 1500));
+      const spaeter = await liesZeile();
+      rec("CL4", sofort.text === "Not measured for this model." && sofort.warn && spaeter.text === sofort.text && spaeter.warn,
+        `sofort: „${sofort.text.slice(0, 90)}“ (${sofort.warn ? "is-warning" : "ohne is-warning"}) · nach 1,5 s: „${spaeter.text.slice(0, 90)}“ (${spaeter.warn ? "is-warning" : "ohne is-warning"})`);
+    }
 
     // --- CL2. Lauf bis zur Form ----------------------------------------------------------------------------
     if (!(await ppOpenFresh(cdp))) {
