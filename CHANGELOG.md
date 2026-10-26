@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Vendored `obsidian-kit` 0.72.0 (was 0.70.0) and `code-kit` 0.38.0 (was 0.37.5).** What you notice: a link the guard cut (`javascript:…`, an Obsidian link when those are off) in the prompt panel's answer now looks like text, without colour, underline, pointer and arrow, instead of looking like a link that does nothing (links with a target stay as they are); the thinking button is readable when it is locked because the model always thinks (contrast 1.8:1 light and 2.3:1 dark before, 4.4:1 and 5.5:1 now); with a Claude model and thinking off the button's tooltip names the reason once instead of adding a second sentence. The other changes of these kit releases (the Live-Indexer and `detectEol` in code-kit, a quieter linear-time test probe, the Anthropic wire moving into code-kit) touch modules this plugin does not use or have no visible effect here.
+- **Reloading the model list no longer clears an earlier "no endpoint" when the endpoint still does not answer.** The prompt panel reset that message before every reload; now it is reset when the reloaded list comes back reachable, so a reload against a dead endpoint leaves the empty state standing. (The row's new `onRefreshed` callback replaces the plugin's own wrapper around the connection; the quality line is redrawn at the same moment.)
+
 ### Fixed
 
 - **With a Claude model the quality line no longer points to a small local model; it only says that nothing is measured for this model.** The line used to quote the one small local model that was tested, which says nothing about a Claude model; for local models it reads as before.

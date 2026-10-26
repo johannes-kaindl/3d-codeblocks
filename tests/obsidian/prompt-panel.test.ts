@@ -584,6 +584,32 @@ describe("PromptPanelView", () => {
       expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(true);
     });
 
+    it("an unreachable endpoint leaves an earlier \"no endpoint\" standing (only a reachable list resets it)", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      await view.onOpen();
+      await tick();
+      (view as any).noEndpoint = true;
+      (view as any).renderControls();
+      llm.models.mockResolvedValue({ models: [], reachable: false });
+      one(view, "okit-model-bar-refresh").click();
+      await tick();
+      expect((view as any).noEndpoint).toBe(true);
+      expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(false);
+    });
+
+    it("a list that throws leaves an earlier \"no endpoint\" standing and reports the error", async () => {
+      const { view, llm } = makeView(answer("{}"));
+      await view.onOpen();
+      await tick();
+      (view as any).noEndpoint = true;
+      (view as any).renderControls();
+      llm.models.mockRejectedValue(new Error("boom"));
+      one(view, "okit-model-bar-refresh").click();
+      await tick();
+      expect((view as any).noEndpoint).toBe(true);
+      expect(hasClass(one(view, "tdcb-prompt-empty"), "is-hidden")).toBe(false);
+    });
+
     it("update() redraws the row from the state (model changed in the settings) without a request", async () => {
       const { view, llm, chosen } = makeView(answer("{}"));
       llm.models.mockResolvedValue({ models: ["a", "b"], reachable: true });

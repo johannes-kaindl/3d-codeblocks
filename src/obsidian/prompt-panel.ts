@@ -21,7 +21,7 @@ import { failureHint, qualityLine, type QualityTask } from "../core/shapes/quali
 import { clearRounds, pushRound, selectRound } from "../vendor/kit/rounds";
 import { buildHubInto, type HubController, type HubPanel } from "../vendor/kit-obsidian/hub";
 import type { LlmConnection } from "../vendor/kit-obsidian/llm-connection";
-import { buildModelBar, type ModelBar, type ModelBarConnection } from "../vendor/kit-obsidian/model-bar";
+import { buildModelBar, type ModelBar } from "../vendor/kit-obsidian/model-bar";
 import { thinkingOffTexts, type ThinkingControlOptions } from "../vendor/kit-obsidian/thinking-control";
 import { buildStreamArea, type StreamArea } from "../vendor/kit-obsidian/stream-area";
 import { buildVersionList } from "../vendor/kit-obsidian/version-list";
@@ -209,11 +209,15 @@ export class PromptPanelView extends ItemView {
     this.modelBar = buildModelBar({
       app: this.app,
       containerEl: c,
-      llm: this.modelBarLlm(),
+      llm: this.deps.llm,
       label: PANEL_TEXTS.modelLabel,
       // Sperre wie die des Sendens: während einer Anfrage und während Apply läuft ein Modellwechsel ins Leere.
       disabled: () => this.controller !== null || this.applying,
       onChange: () => this.renderHeader(),
+      // Nach jedem abgeschlossenen Laden der Liste (Aufbau, Neu laden): ein früher gemeldetes „kein Endpunkt“ gilt nicht für immer, denn die
+      // Einstellungen können sich geändert haben; eine erreichbare Liste nimmt es zurück, eine nicht erreichbare lässt es stehen. Die Familie des
+      // Endpunkts ist jetzt aufgelöst, also folgt auch die Qualitätszeile (renderHeader zeichnet die Steuerung mit).
+      onRefreshed: (r) => { if (r.reachable) this.noEndpoint = false; this.renderHeader(); },
       // Würfe aus der Liste und aus setModel sind nie still; während einer Anfrage gehört die Statuszeile der Anfrage.
       onError: (e) => { if (this.controller === null) this.setStatus("error", e instanceof Error ? e.message : String(e)); },
       thinking: {
@@ -510,23 +514,6 @@ export class PromptPanelView extends ItemView {
     this.offered = null;
     this.setStatus("idle", "");
     this.renderAll();
-  }
-
-  /** Die Verbindung für die Modellzeile. Ein früher gemeldetes „kein Endpunkt“ gilt nicht für immer (die Einstellungen können sich
-   *  geändert haben): vor jedem Laden der Liste wird es zurückgesetzt, wie es das Laden des Eigenbaus tat. Die Zeile bietet dafür
-   *  keinen Rückruf; der Adapter ruft nur die echte Verbindung und löst nichts anderes aus. */
-  private modelBarLlm(): ModelBarConnection {
-    const { llm } = this.deps;
-    return {
-      models: (o) => {
-        this.noEndpoint = false;
-        this.renderControls();
-        return llm.models(o);
-      },
-      setModel: (m) => llm.setModel(m),
-      modelInUse: () => llm.modelInUse(),
-      source: () => llm.source(),
-    };
   }
 
   /** Zeichnet die Modellzeile samt Denk-Steuerung aus dem Zustand neu (Modell, Endpunkt oder Stufe haben sich außerhalb geändert). Ohne Abruf. */
