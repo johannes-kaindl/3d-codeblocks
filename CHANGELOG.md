@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **With a Claude model the quality line no longer points to a small local model; it only says that nothing is measured for this model.** The line used to quote the one small local model that was tested, which says nothing about a Claude model; for local models it reads as before.
+
 ## [0.13.0] — 2026-10-25
 
 ### Added

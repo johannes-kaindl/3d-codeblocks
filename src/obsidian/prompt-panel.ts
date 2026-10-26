@@ -557,7 +557,7 @@ export class PromptPanelView extends ItemView {
     this.targetEl.setText(text);
     this.hintEl.setText(t.kind === "other" ? PANEL_TEXTS.unsupported(t.label) : "");
     const kind = this.kind();
-    const q = qualityLine(this.model(), kind);
+    const q = qualityLine(this.model(), kind, undefined, { family: this.deps.llm.source().family });
     paintStatus(this.qualityEl, this.qualityIcon, this.qualityLabel, q.measured ? "idle" : "warning", q.text);
     this.sendBtn.setText(kind === "create" ? PANEL_TEXTS.create : PANEL_TEXTS.refine);
     this.inputEl.setAttribute("placeholder", kind === "create" ? PANEL_TEXTS.placeholderCreate : PANEL_TEXTS.placeholderRefine);

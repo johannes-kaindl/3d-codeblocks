@@ -84,6 +84,23 @@ describe("quality", () => {
     expect(failureHint("x", "refine", [])).toBe("The change list could not be applied.");
   });
 
+  it("claude family: no pointer to the small local model, only that nothing is measured", () => {
+    const bare = { measured: false, text: "Not measured for this model." };
+    expect(qualityLine("claude-opus-5-5", "create", MEASUREMENTS, { family: "claude" })).toEqual(bare);
+    expect(qualityLine("claude-opus-5-5", "refine", MEASUREMENTS, { family: "claude" })).toEqual(bare);
+    // the family wins over a model name that happens to be in the table (same rule as failureHint)
+    expect(qualityLine("qwen/qwen3.8-27b", "create", MEASUREMENTS, { family: "claude" })).toEqual(bare);
+  });
+
+  it("quality line: no family, null family or a local family keep the text of today", () => {
+    const today = qualityLine("verdigado-pro", "create");
+    expect(qualityLine("verdigado-pro", "create", MEASUREMENTS, {})).toEqual(today);
+    expect(qualityLine("verdigado-pro", "create", MEASUREMENTS, { family: null })).toEqual(today);
+    expect(qualityLine("verdigado-pro", "create", MEASUREMENTS, { family: "gemma4" })).toEqual(today);
+    expect(today.text).toContain("the one small model tested");
+    expect(qualityLine("qwen/qwen3.8-27b", "create", MEASUREMENTS, { family: "gemma4" }).measured).toBe(true);
+  });
+
   it("points to a larger model when another model's answer fails", () => {
     const expected =
       "The answer could not be turned into a model. A larger model may do better — measured best: qwen/qwen3.8-27b, 9 of 10 test prompts plausible.";

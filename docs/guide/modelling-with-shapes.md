@@ -173,6 +173,7 @@ The model row (labelled **Prompt**) lists the models of your endpoint, plus **Au
 
 - `Measured: N of M test prompts gave a plausible 3D model (…, n=1 per prompt).` For a change it reads `N of M test change requests were applied correctly`. These numbers come from the plugin's own test runs, one attempt per test case, and exist only for the models that were tested.
 - `Not measured for this model — the one small model tested (…) got N of M …` means nobody has measured your model. Take it as a rough reference only: small models manage less, and a larger model may do better.
+- `Not measured for this model.` alone appears with a Claude model: the test numbers come from local models, so they say nothing about it.
 
 If an answer cannot be turned into a model, the panel says why and adds a hint based on the test results.
 

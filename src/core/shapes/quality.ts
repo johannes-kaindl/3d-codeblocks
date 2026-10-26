@@ -67,7 +67,9 @@ const NOUN: Record<QualityTask, { measured: string; plural: string }> = {
   refine: { measured: "test change requests were applied correctly", plural: "test change requests right" },
 };
 
-export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS): { measured: boolean; text: string } {
+export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): { measured: boolean; text: string } {
+  // Die Tabelle misst lokale Modelle; die Zahl des kleinen Referenzmodells sagt über ein Cloud-Modell nichts (wie bei `failureHint`: die Familie gewinnt).
+  if (opts?.family === "claude") return { measured: false, text: "Not measured for this model." };
   const m = findMeasurement(model, task, table);
   if (m) return { measured: true, text: `Measured: ${m.good} of ${m.of} ${NOUN[task].measured} (${m.model}, ${m.measuredAt}, n=1 per ${task === "refine" ? "request" : "prompt"}).` };
   // Bezugszahl nur aus derselben Aufgabe: eine Erstellen-Zahl sagt nichts über das Verfeinern.
