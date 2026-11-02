@@ -1,3 +1,12 @@
+// vendored from obsidian-kit@0.75.0, src/pure/block-writer.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// Herkunft: 3d-codeblocks `src/obsidian/block-writer.ts` (Kit-Kandidat seit 2026-07-25 laut
+// Dach-REGISTRY, gehoben 2026-11-02 ins Kit nach Bibliothek-ab-Eins fuer svg-studio). Inhalt
+// unveraendert uebernommen: kein obsidian-Import, die Obsidian-Seite steht in
+// `../obsidian/write-ports.ts`. Der Guard (Fingerabdruck von Rumpf und Fence statt Vertrauen
+// auf `getSectionInfo`) ist die Domaenen-Annahme dieses Moduls: Codeblock-Zeilen einer Notiz.
+// Einzige Abweichung: Indexzugriffe tragen `?? ""`, weil das Kit `noUncheckedIndexedAccess` setzt;
+// die Stellen sind durch die davor laufende Zeilenpruefung bereits im Bereich, das Verhalten bleibt.
+//
 // Schreibt den Rumpf eines Codeblocks zurueck in die Notiz — zweigleisig.
 //
 // 1. Notiz in einem sichtbaren Editor offen → `replaceRange`, damit Strg+Z wirkt.
@@ -97,7 +106,7 @@ function fenceLanguage(line: string | undefined): string | null {
   if (line === undefined) return null;
   const match = FENCE_LINE.exec(line);
   if (!match) return null;
-  return match[1].trim().split(/\s+/)[0];
+  return (match[1] ?? "").trim().split(/\s+/)[0] ?? "";
 }
 
 /** Steht an `loc.lineStart` wirklich eine Fence in der erwarteten Sprache? */
@@ -194,7 +203,7 @@ export async function writeBlockBody(
     editor.replaceRange(
       styledNextBody,
       { line: loc.lineStart + 1, ch: 0 },
-      { line: lastBodyLine, ch: lines[lastBodyLine].length },
+      { line: lastBodyLine, ch: (lines[lastBodyLine] ?? "").length },
     );
     return;
   }
@@ -250,11 +259,11 @@ export async function replaceLines(
     // Offsets stammen aus dem ROHEN Puffer (ein einzelnes \r mitten in der Zeile zaehlt
     // dort als Zeichen); nur das Zeilenend-\r der letzten Zeile bleibt stehen. Ein BOM
     // in Zeile 0 wird nicht ueberschrieben.
-    const startCh = from === 0 && lines[0].startsWith(BOM) ? 1 : 0;
+    const startCh = from === 0 && (lines[0] ?? "").startsWith(BOM) ? 1 : 0;
     editor.replaceRange(
       applyLineEndingStyle(replacement, style).replace(/\r$/, ""),
       { line: from, ch: startCh },
-      { line: to, ch: lines[to].replace(/\r$/, "").length },
+      { line: to, ch: (lines[to] ?? "").replace(/\r$/, "").length },
     );
     return;
   }
@@ -266,10 +275,10 @@ export async function replaceLines(
     const lines = current.split("\n");
     const next = applyLineEndingStyle(replacement, style).split("\n");
     // Letzte Zeile der Notiz ohne Zeilenende: kein \r anhaengen, ausser sie hatte eines.
-    if (to === lines.length - 1 && !lines[to].endsWith("\r")) {
-      next[next.length - 1] = next[next.length - 1].replace(/\r$/, "");
+    if (to === lines.length - 1 && !(lines[to] ?? "").endsWith("\r")) {
+      next[next.length - 1] = (next[next.length - 1] ?? "").replace(/\r$/, "");
     }
-    if (from === 0 && lines[0].startsWith(BOM)) next[0] = BOM + next[0];
+    if (from === 0 && (lines[0] ?? "").startsWith(BOM)) next[0] = BOM + (next[0] ?? "");
     return [...lines.slice(0, from), ...next, ...lines.slice(to + 1)].join("\n");
   });
 }

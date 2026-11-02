@@ -21,7 +21,7 @@ import {
   type ModelReference,
   type NoteText,
 } from "../core/shapes/references";
-import { BlockChangedError, replaceLines, type WritePorts } from "./block-writer";
+import { BlockChangedError, replaceLines, type WritePorts } from "../vendor/kit/block-writer";
 import { resolveModelPath } from "./file-source";
 import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
 

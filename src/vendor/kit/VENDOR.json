@@ -9,5 +9,5 @@
   "code_kit_vendored": "rounds.ts, sampling-profiles.ts, backend-probe.ts, model-list-cache.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, sse.ts, reasoning.ts, capabilities.ts, think-splitter.ts, think-toggle.ts, timeout.ts, model-choice.ts, stream-blocks.ts, i18n.ts, clipboard.ts",
   "obsidian_kit_version": "0.72.0",
   "obsidian_kit_sha": "b72c31c",
-  "obsidian_kit_vendored": "endpoint-source.ts, endpoint-secret-hook.ts, anthropic-wire.ts, override-guard.ts"
+  "obsidian_kit_vendored": "endpoint-source.ts, endpoint-secret-hook.ts, anthropic-wire.ts, override-guard.ts, block-writer.ts (obsidian-kit@0.75.0, db768c9)"
 }

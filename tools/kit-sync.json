@@ -15,7 +15,7 @@
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "anthropic-wire", "override-guard"],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "anthropic-wire", "override-guard", { "name": "block-writer", "ref": "0.75.0" }],
       "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {
@@ -25,7 +25,7 @@
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
         "clock", "stream-area", "hub", "version-list", "endpoint-plumbing", "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport",
-        "model-bar", "model-bar-strings", "thinking-control"
+        "model-bar", "model-bar-strings", "thinking-control", { "name": "write-ports", "ref": "0.75.0" }
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },

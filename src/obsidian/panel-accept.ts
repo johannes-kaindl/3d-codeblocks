@@ -13,7 +13,7 @@ import { parseShapes } from "../core/shapes/parse";
 import { referenceBlock, shapesBlock } from "../core/shapes/references";
 import type { PluginSettings } from "../core/settings-types";
 import { PANEL_TEXTS } from "../i18n/strings";
-import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
+import { BlockChangedError, writeBlockBody, type WritePorts } from "../vendor/kit/block-writer";
 import { locateShapesFence } from "./shapes-convert";
 import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
 

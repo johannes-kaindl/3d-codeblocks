@@ -39,7 +39,7 @@ import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
 import { SourceEditor } from "./obsidian/source-editor";
 import { readSceneColors } from "./obsidian/theme";
 import { isWebGLAvailable } from "./obsidian/webgl";
-import { obsidianWritePorts } from "./obsidian/write-ports";
+import { obsidianWritePorts } from "./vendor/kit-obsidian/write-ports";
 import { loadModel } from "./viewer/loaders";
 import { Viewport } from "./viewer/viewport";
 import type { HostBaseDeps } from "./obsidian/viewer-host";

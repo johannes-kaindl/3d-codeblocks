@@ -18,7 +18,7 @@ import type { EditUiModel } from "../core/edit-session";
 import type { ViewSpec } from "../core/view-spec";
 import { toViewModel } from "../core/view-model";
 import type { SceneColors } from "../viewer/scene";
-import { BlockChangedError, writeBlockBody, type WritePorts } from "./block-writer";
+import { BlockChangedError, writeBlockBody, type WritePorts } from "../vendor/kit/block-writer";
 import { EditCoordinator, type EditIo } from "./edit-mode";
 import { readModel, resolveModelPath } from "./file-source";
 import { buildBox, renderHint, renderMessage, syncBadge, type BoxParts } from "./render-box";
@@ -187,7 +187,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     }
 
     // Obsidian liefert `source` u. U. mit einem trailing "\n" (siehe `stripTrailingNewline`).
-    // `bodyAt` in block-writer.ts haengt nie einen Trenner an einen rekonstruierten Rumpf —
+    // `bodyAt` in vendor/kit/block-writer.ts haengt nie einen Trenner an einen rekonstruierten Rumpf —
     // ungekuerzt wuerde der Abgleich JEDES Mal als "Note changed" scheitern und der
     // geschriebene Rumpf eine Leerzeile vor der schliessenden Fence bekommen.
     const body = stripTrailingNewline(this.source);

@@ -1,7 +1,10 @@
+// vendored from obsidian-kit@0.75.0, src/obsidian/write-ports.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// Herkunft: 3d-codeblocks `src/obsidian/write-ports.ts` (gehoben 2026-11-02, nur der Import auf
+// `../pure/block-writer` ist angepasst).
 // Die Obsidian-Seite der Schreib-Ports aus `block-writer.ts`. Bewusst winzig:
 // alle Entscheidungen liegen im testbaren Schreiber, hier ist nur der Zugriff.
 import { MarkdownView, TFile, type App } from "obsidian";
-import type { EditorHandle, WritePorts } from "./block-writer";
+import type { EditorHandle, WritePorts } from "../kit/block-writer";
 
 export function obsidianWritePorts(app: App): WritePorts {
   return {
