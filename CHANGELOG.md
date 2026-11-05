@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - The block writer and its Obsidian write ports now come from `obsidian-kit` 0.75.0 instead of the plugin's own copy. Behaviour is unchanged; nothing to notice.
 
+### Fixed
+
+- **The plugin no longer carries a regular expression that Safari before 16.4 cannot parse.** The e-mail redaction rule (`redact`, code-kit 0.60.0) matches the same addresses without a lookbehind, so the plugin loads on older iPhones and iPads.
+
 ## [0.13.1] — 2026-10-26
 
 ### Changed
