@@ -99,6 +99,24 @@ describe("PromptPanelView", () => {
     expect(statusText(view)).toContain("Done");
   });
 
+  it("the status line carries its text as aria-label and its phase as class (Kit status indicator)", async () => {
+    const ok = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'));
+    await ok.view.onOpen();
+    const row = one(ok.view, "tdcb-prompt-status");
+    expect(hasClass(row, "okit-status")).toBe(true);
+    await send(ok.view, "a box");
+    expect(hasClass(row, "is-ok")).toBe(true);
+    expect(row.getAttribute("aria-label")).toBe(statusText(ok.view));
+    expect(statusText(ok.view)).not.toBe("");
+    const bad = makeView(answer("Sorry, I cannot"));
+    await bad.view.onOpen();
+    await send(bad.view, "a box");
+    const badRow = one(bad.view, "tdcb-prompt-status");
+    expect(hasClass(badRow, "is-error")).toBe(true);
+    expect(hasClass(badRow, "is-ok")).toBe(false);
+    expect(badRow.getAttribute("aria-label")).toBe(statusText(bad.view));
+  });
+
   it("after a create round the status points to New for another model; after a refine round it does not", async () => {
     const created = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'));
     await created.view.onOpen();

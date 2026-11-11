@@ -1,7 +1,7 @@
 // Prompt-Panel (Spec Modell per Prompt § 6). Ein Frontend für Erzeugen, Ändern und (Plan 5)
 // Versionen — UI-STANDARD „ein Frontend pro Plugin“. LLM ausschließlich über createLlmConnection.
 // Ablauf von run()/Abbruch uebernommen aus lingotuner/src/obsidian/view.ts, 2026-10-03
-import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
+import { ItemView, type WorkspaceLeaf } from "obsidian";
 import { PANEL_TEXTS } from "../i18n/strings";
 import { applyChanges } from "../core/shapes/changes";
 import { convertShapesText } from "../core/shapes/convert";
@@ -23,6 +23,7 @@ import { buildHubInto, type HubController, type HubPanel } from "../vendor/kit-o
 import type { LlmConnection } from "../vendor/kit-obsidian/llm-connection";
 import { buildModelBar, type ModelBar } from "../vendor/kit-obsidian/model-bar";
 import { thinkingOffTexts, type ThinkingControlOptions } from "../vendor/kit-obsidian/thinking-control";
+import { buildStatus, paintStatus, type StatusParts, type StatusPhase } from "../vendor/kit-obsidian/status-indicator";
 import { buildStreamArea, type StreamArea } from "../vendor/kit-obsidian/stream-area";
 import { buildVersionList } from "../vendor/kit-obsidian/version-list";
 import { VIEW_TYPE_PROMPT } from "./prompt-panel-id";
@@ -43,15 +44,6 @@ export interface PromptPanelDeps extends HostBaseDeps {
   managerPresent(): boolean;
 }
 
-type Phase = "idle" | "checking" | "ok" | "error" | "warning";
-const PHASE_ICON: Record<Exclude<Phase, "idle">, string> = {
-  checking: "loader",
-  ok: "circle-check",
-  error: "circle-x",
-  warning: "alert-triangle",
-};
-const PHASES: Phase[] = ["checking", "ok", "error", "warning"];
-
 const encode = (text: string): ArrayBuffer => {
   const bytes = new TextEncoder().encode(text);
   const out = new ArrayBuffer(bytes.byteLength);
@@ -60,17 +52,6 @@ const encode = (text: string): ArrayBuffer => {
 };
 
 const targetLabel = (t: PanelTarget): string => (t.kind === "new" ? PANEL_TEXTS.targetNew : t.label);
-
-/** Setzt Zustandsklasse und Icon eines Status-Indikators (UI-STANDARD §8: Form, Farbe, Klasse). */
-function paintStatus(row: HTMLElement, icon: HTMLElement, label: HTMLElement, phase: Phase, text: string): void {
-  for (const p of PHASES) row.removeClass(`is-${p}`);
-  icon.empty();
-  if (phase !== "idle") {
-    row.addClass(`is-${phase}`);
-    setIcon(icon, PHASE_ICON[phase]);
-  }
-  label.setText(text);
-}
 
 export class PromptPanelView extends ItemView {
   private panel: PanelState = INITIAL_PANEL;
@@ -89,15 +70,11 @@ export class PromptPanelView extends ItemView {
   private hintEl!: HTMLElement;
   /** Die Kit-Modellzeile (Dropdown, Neu laden, Denk-Steuerung); `null` vor dem Aufbau und nach dem Schließen. */
   private modelBar: ModelBar | null = null;
-  private qualityEl!: HTMLElement;
-  private qualityIcon!: HTMLElement;
-  private qualityLabel!: HTMLElement;
+  private quality!: StatusParts;
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private stopBtn!: HTMLButtonElement;
-  private statusRow!: HTMLElement;
-  private statusIcon!: HTMLElement;
-  private statusLabel!: HTMLElement;
+  private status!: StatusParts;
   private area!: StreamArea;
   private previewWrap!: HTMLElement;
   private previewCaption!: HTMLElement;
@@ -231,9 +208,9 @@ export class PromptPanelView extends ItemView {
       },
     });
 
-    this.qualityEl = c.createDiv({ cls: "tdcb-status tdcb-prompt-quality" });
-    this.qualityIcon = this.qualityEl.createSpan({ cls: "tdcb-status-icon" });
-    this.qualityLabel = this.qualityEl.createSpan({ cls: "tdcb-prompt-quality-label" });
+    // Status-Indikator aus dem Kit (UI-STANDARD §8); `idle` zeichnet hier kein Symbol (idleIcon null).
+    this.quality = buildStatus(c, "tdcb-prompt-quality", { idleIcon: null });
+    this.quality.labelEl.addClass("tdcb-prompt-quality-label");
 
     // Kein Eingabefeld ohne Endpunkt: der Empty-State ersetzt es nicht, sondern steht daneben.
     this.emptyEl = c.createDiv({ cls: "tdcb-prompt-empty is-hidden" });
@@ -262,9 +239,8 @@ export class PromptPanelView extends ItemView {
     this.area = buildStreamArea(c, { strings: { reasoning: PANEL_TEXTS.reasoning }, cls: "tdcb-prompt-stream" });
     // Statuszeile des Bereichs trägt den Status-Indikator; Ansage für Screenreader.
     this.area.statusEl.setAttribute("aria-live", "polite");
-    this.statusRow = this.area.statusEl.createDiv({ cls: "tdcb-status tdcb-prompt-status" });
-    this.statusIcon = this.statusRow.createSpan({ cls: "tdcb-status-icon" });
-    this.statusLabel = this.statusRow.createSpan({ cls: "tdcb-prompt-status-label" });
+    this.status = buildStatus(this.area.statusEl, "tdcb-prompt-status", { idleIcon: null });
+    this.status.labelEl.addClass("tdcb-prompt-status-label");
 
     this.previewWrap = c.createDiv({ cls: "tdcb-prompt-preview is-hidden" });
     this.previewCaption = this.previewWrap.createDiv({ cls: "tdcb-prompt-preview-caption" });
@@ -291,8 +267,8 @@ export class PromptPanelView extends ItemView {
     return s.sentModel || s.model;
   }
 
-  private setStatus(phase: Phase, text: string): void {
-    paintStatus(this.statusRow, this.statusIcon, this.statusLabel, phase, text);
+  private setStatus(phase: StatusPhase, text: string): void {
+    paintStatus(this.status, phase, text);
   }
 
   private canSend(): boolean {
@@ -545,7 +521,7 @@ export class PromptPanelView extends ItemView {
     this.hintEl.setText(t.kind === "other" ? PANEL_TEXTS.unsupported(t.label) : "");
     const kind = this.kind();
     const q = qualityLine(this.model(), kind, undefined, { family: this.deps.llm.source().family });
-    paintStatus(this.qualityEl, this.qualityIcon, this.qualityLabel, q.measured ? "idle" : "warning", q.text);
+    paintStatus(this.quality, q.measured ? "idle" : "warning", q.text);
     this.sendBtn.setText(kind === "create" ? PANEL_TEXTS.create : PANEL_TEXTS.refine);
     this.inputEl.setAttribute("placeholder", kind === "create" ? PANEL_TEXTS.placeholderCreate : PANEL_TEXTS.placeholderRefine);
     this.renderControls();

@@ -14,6 +14,7 @@
 import type { PanelPlacement } from "./panel-target";
 import type { LightingMode, ModelLightsMode } from "./lighting";
 import { migrateEndpointList, type EndpointConfig } from "../vendor/kit/endpoint_config";
+import { splitList } from "../vendor/kit/split-list";
 import type { EndpointChoice } from "../vendor/kit/endpoint-source";
 import { DEFAULT_REQUEST_SETTINGS, sanitizeRequestSettings, type RequestSettings } from "../vendor/kit/sampling-profiles";
 import {
@@ -79,10 +80,7 @@ export const MAX_CONTEXTS_LIMIT = 12;
 
 /** "env__, sky__" → ["env__", "sky__"] — leere Eintraege und Raender verworfen. */
 export function parseLockedPrefixes(value: string): string[] {
-  return value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== "");
+  return splitList(value);
 }
 
 // Bewusst NICHT `clampIntField(0, MAX_CONTEXTS_LIMIT)`: das Kit-Feld klemmt einen

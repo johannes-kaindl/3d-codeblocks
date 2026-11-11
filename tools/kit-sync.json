@@ -10,7 +10,7 @@
         "num", "settings_schema", "secrets", { "name": "redact", "ref": "0.60.0" }, "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "rel-path", "block-lines"
+        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "rel-path", "block-lines", { "name": "split-list", "ref": "0.42.0" }
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
@@ -25,7 +25,7 @@
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
         "clock", "stream-area", "hub", "version-list", "endpoint-plumbing", "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport",
-        "model-bar", "model-bar-strings", "thinking-control", { "name": "write-ports", "ref": "0.75.0" }
+        "model-bar", "model-bar-strings", "thinking-control", { "name": "write-ports", "ref": "0.75.0" }, { "name": "choice-modal", "ref": "0.76.0" }, { "name": "status-indicator", "ref": "0.76.0" }
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },

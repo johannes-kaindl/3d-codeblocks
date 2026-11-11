@@ -606,14 +606,16 @@
 .tdcb-prompt-empty { padding: var(--size-4-2); border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s); color: var(--text-muted); }
 .tdcb-prompt-diff ul { margin: 0; padding-left: var(--size-4-4); font-size: var(--font-ui-small); }
 .tdcb-prompt-versions-empty { color: var(--text-muted); font-size: var(--font-ui-small); }
-/* Status-Indikator (UI-STANDARD §8): Form UND Farbe UND Klasse; is-checking dreht sich. */
-.tdcb-status { display: flex; gap: var(--size-2-2); align-items: center; }
-.tdcb-status-icon svg { width: var(--icon-xs); height: var(--icon-xs); }
-.tdcb-status.is-ok .tdcb-status-icon { color: var(--text-success); }
-.tdcb-status.is-error .tdcb-status-icon { color: var(--text-error); }
-.tdcb-status.is-warning .tdcb-status-icon { color: var(--text-warning); }
-.tdcb-status.is-checking .tdcb-status-icon svg { animation: tdcb-spin 1.2s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .tdcb-status.is-checking .tdcb-status-icon svg { animation: none; } }
+/* Kit-Baustein status-indicator (STATUS_INDICATOR_CSS, wortgleich aus src/vendor/kit-obsidian/status-indicator.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+.okit-status { display: flex; gap: var(--size-2-2); align-items: center; font-size: var(--font-ui-small); color: var(--text-muted); }
+.okit-status-icon { display: inline-flex; align-items: center; }
+.okit-status-icon svg { width: 14px; height: 14px; }
+.okit-status.is-ok .okit-status-icon { color: var(--text-success); }
+.okit-status.is-error .okit-status-icon { color: var(--text-error); }
+.okit-status.is-warning .okit-status-icon { color: var(--text-warning); }
+.okit-status.is-checking .okit-status-icon svg { animation: okit-status-spin 1.2s linear infinite; }
+@keyframes okit-status-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .okit-status.is-checking .okit-status-icon svg { animation: none; } }
 
 /* Kit-Baustein endpoint-list (ENDPOINT_LIST_CSS, wortgleich aus src/vendor/kit-obsidian/endpoint-list.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
 /* Pro-Zeile-Status der Endpunkt-Fallback-Liste: Form trägt die Bedeutung, Farbe sekundär (WCAG 1.4.1). */

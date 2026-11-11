@@ -5,7 +5,7 @@
 // Pfad und Zeilen allein koennen nach einer Aenderung darueber einen ANDEREN shapes-Block treffen. Eine .shapes-
 // DATEI hat eine Identitaet (den Pfad): dort wird die Kette auf den aktuellen Text angewendet, Handaenderungen
 // bleiben erhalten. Alles oder nichts (`acceptText`).
-import { Modal, TFile, type App, type MarkdownView } from "obsidian";
+import { TFile, type App, type MarkdownView } from "obsidian";
 import { findFenceAt, type Fence } from "../core/shapes/fence";
 import { exportBaseName } from "../core/shapes/export";
 import { acceptText, chainOf, normBody, type PanelState, type PanelTarget } from "../core/shapes/panel-state";
@@ -14,6 +14,7 @@ import { referenceBlock, shapesBlock } from "../core/shapes/references";
 import type { PluginSettings } from "../core/settings-types";
 import { PANEL_TEXTS } from "../i18n/strings";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "../vendor/kit/block-writer";
+import { askChoice } from "../vendor/kit-obsidian/choice-modal";
 import { locateShapesFence } from "./shapes-convert";
 import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
 
@@ -252,36 +253,13 @@ async function createAsFile(env: AcceptEnv, text: string): Promise<AcceptOutcome
   return { ok: true, message: `Saved ${path} and inserted a reference.` };
 }
 
-/** Zwei-Wege-Wahl fuer „Ask each time". Kein Kit-Baustein: der Kit-Confirm ist Ja/Nein und kennt kein
- *  „Schliessen = keins von beiden". `done` wird genau einmal gerufen (Klick + nachlaufendes onClose). */
-export class AcceptAsModal extends Modal {
-  private done: ((choice: "block" | "file" | null) => void) | null;
-
-  constructor(app: App, done: (choice: "block" | "file" | null) => void) {
-    super(app);
-    this.done = done;
-  }
-
-  onOpen(): void {
-    this.titleEl.setText(PANEL_TEXTS.acceptAsTitle);
-    const row = this.contentEl.createDiv({ cls: "modal-button-container" });
-    const block = row.createEl("button", { text: PANEL_TEXTS.acceptAsBlock, cls: "mod-cta" });
-    block.addEventListener("click", () => this.finish("block"));
-    const file = row.createEl("button", { text: PANEL_TEXTS.acceptAsFile });
-    file.addEventListener("click", () => this.finish("file"));
-    block.focus();
-  }
-
-  onClose(): void {
-    this.finish(null);
-    this.contentEl.empty();
-  }
-
-  private finish(choice: "block" | "file" | null): void {
-    if (!this.done) return;
-    const cb = this.done;
-    this.done = null;
-    cb(choice);
-    this.close();
-  }
+/** Zwei-Wege-Wahl fuer „Ask each time": Kit-`askChoice`; Schliessen (Esc, Klick daneben) liefert `null` = keins von beiden. */
+export function chooseAcceptAs(app: App): Promise<"block" | "file" | null> {
+  return askChoice<"block" | "file">(app, {
+    title: PANEL_TEXTS.acceptAsTitle,
+    options: [
+      { value: "block", label: PANEL_TEXTS.acceptAsBlock, cta: true },
+      { value: "file", label: PANEL_TEXTS.acceptAsFile },
+    ],
+  });
 }

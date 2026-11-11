@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { MarkdownView, TFile } from "obsidian";
 import { acceptText } from "../../src/core/shapes/panel-state";
-import { acceptPanel, AcceptAsModal, readTargetText, type AcceptEnv } from "../../src/obsidian/panel-accept";
+import { acceptPanel, chooseAcceptAs, readTargetText, type AcceptEnv } from "../../src/obsidian/panel-accept";
 import type { PanelState, PanelTarget, ShapesRound } from "../../src/core/shapes/panel-state";
 import { pushRound, type Rounds } from "../../src/vendor/kit/rounds";
 import { EMPTY_ROUNDS } from "../../src/vendor/kit/rounds";
 import { DEFAULT_SETTINGS, type PluginSettings } from "../../src/core/settings-types";
 import type { RawChange } from "../../src/core/shapes/protocol";
 import { PANEL_TEXTS } from "../../src/i18n/strings";
+import { askChoice } from "../../src/vendor/kit-obsidian/choice-modal";
+
+// Der Dialog selbst ist Kit-Code (`askChoice`, im Kit getestet); hier steht nur, was dieses Plugin ihm uebergibt.
+vi.mock("../../src/vendor/kit-obsidian/choice-modal", () => ({ askChoice: vi.fn() }));
 
 vi.mock("../../src/core/shapes/panel-state", async (orig) => {
   const mod = await orig<typeof import("../../src/core/shapes/panel-state")>();
@@ -526,31 +530,21 @@ describe("acceptPanel — other and robustness", () => {
   });
 });
 
-describe("AcceptAsModal", () => {
-  const open = () => {
-    const results: ("block" | "file" | null)[] = [];
-    const modal = new AcceptAsModal({} as never, (c) => results.push(c));
-    modal.open();
-    const buttons = () => ((modal.contentEl as unknown as { children: { children: unknown }[] }).children[0].children as unknown as { tagName: string; textContent: string; click: () => void; focus: () => void }[]).filter((c) => c.tagName === "BUTTON");
-    return { modal, results, buttons };
-  };
-  it("has a title and two real buttons with text; the first gets focus", () => {
-    const { modal, buttons } = open();
-    expect(modal.titleEl.textContent).toBe(PANEL_TEXTS.acceptAsTitle);
-    expect(buttons().map((b) => b.textContent)).toEqual([PANEL_TEXTS.acceptAsBlock, PANEL_TEXTS.acceptAsFile]);
-    expect(buttons()[0].focus).toHaveBeenCalled();
+describe("chooseAcceptAs", () => {
+  const app = {} as never;
+  it("asks with the plugin texts: block is the main button, file the second, no extra cancel button", async () => {
+    vi.mocked(askChoice).mockResolvedValueOnce("file");
+    expect(await chooseAcceptAs(app)).toBe("file");
+    expect(askChoice).toHaveBeenLastCalledWith(app, {
+      title: PANEL_TEXTS.acceptAsTitle,
+      options: [
+        { value: "block", label: PANEL_TEXTS.acceptAsBlock, cta: true },
+        { value: "file", label: PANEL_TEXTS.acceptAsFile },
+      ],
+    });
   });
-  it("resolves the clicked choice exactly once (trailing onClose does not resolve again)", () => {
-    const { results, buttons } = open();
-    const [first, second] = buttons();
-    second.click();
-    first.click();
-    expect(results).toEqual(["file"]);
-  });
-  it("resolves null when closed without a choice, once", () => {
-    const { modal, results } = open();
-    modal.close();
-    modal.close();
-    expect(results).toEqual([null]);
+  it("passes a closed dialog through as null (neither block nor file)", async () => {
+    vi.mocked(askChoice).mockResolvedValueOnce(null);
+    expect(await chooseAcceptAs(app)).toBeNull();
   });
 });
