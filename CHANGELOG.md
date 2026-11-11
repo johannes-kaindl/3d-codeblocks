@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - The block writer and its Obsidian write ports now come from `obsidian-kit` 0.75.0 instead of the plugin's own copy. Behaviour is unchanged; nothing to notice.
+- **The prompt panel's status line and its quality line now use the shared status indicator of `obsidian-kit` 0.76.0, and the "Apply the new model as …" question uses the shared choice dialog.** Wording, symbols, colours, buttons and the way to cancel (Esc or a click outside means neither) stay as they were. What you notice: both lines now carry their text as an accessible name for screen readers (they had none), and the symbol shown while a request runs now turns (it stays still when the system asks to reduce motion).
 
 ### Fixed
 
