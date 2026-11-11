@@ -616,6 +616,8 @@
 .okit-status.is-checking .okit-status-icon svg { animation: okit-status-spin 1.2s linear infinite; }
 @keyframes okit-status-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .okit-status.is-checking .okit-status-icon svg { animation: none; } }
+/* Im Prompt-Panel bleibt die Schrift der Messzeile und der Statuszeile so klein wie vor dem Kit-Baustein (--font-ui-smaller; der Baustein zeichnet --font-ui-small). */
+.tdcb-prompt .okit-status { font-size: var(--font-ui-smaller); }
 
 /* Kit-Baustein endpoint-list (ENDPOINT_LIST_CSS, wortgleich aus src/vendor/kit-obsidian/endpoint-list.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
 /* Pro-Zeile-Status der Endpunkt-Fallback-Liste: Form trägt die Bedeutung, Farbe sekundär (WCAG 1.4.1). */
