@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-11-11
+
 ### Changed
 
 - The block writer and its Obsidian write ports now come from `obsidian-kit` 0.75.0 instead of the plugin's own copy. Behaviour is unchanged; nothing to notice.
