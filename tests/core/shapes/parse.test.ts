@@ -99,6 +99,15 @@ describe("parseShapes", () => {
   });
 });
 
+describe("normalizeColor (Kit css-color)", () => {
+  it.each([
+    ["#ABC", "#aabbcc"], ["#aabbcc", "#aabbcc"], ["#A1b2C3", "#a1b2c3"], ["#000", "#000000"],
+    ["abc", null], ["#abcd", null], ["#abcdefg", null], ["#12", null], ["", null], ["#abc ", null], [" #abc", null], ["#abc\n", null], ["red", null], ["#ggg", null], ["rgb(1,2,3)", null],
+  ])("%j -> %j", (input, out) => {
+    expect(normalizeColor(input)).toBe(out);
+  });
+});
+
 describe("normalizeSize / normalizeColor", () => {
   it("normalizes", () => {
     expect(normalizeSize("box", [1])).toEqual([1, 1, 1]);

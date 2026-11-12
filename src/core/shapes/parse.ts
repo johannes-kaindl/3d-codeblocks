@@ -1,6 +1,7 @@
 // shapes-Text → Kopf, Teile, Fehler. Pure. Fehler gelten JE ZEILE: eine kaputte Zeile
 // kostet nur ihr Teil, der Rest rendert (Spec § 3.3).
 import { parseBlockLines } from "../../vendor/kit/block-lines";
+import { normalizeHex } from "../../vendor/kit/css-color";
 import { parseView, VIEW_NAMES } from "../view-spec";
 import {
   KEYWORDS,
@@ -15,18 +16,15 @@ import {
 } from "./types";
 
 const NAME = /^[\p{L}\p{N}_-]+$/u;
-const HEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const HEADER_KEYS = ["title", "height", "view"];
 
 export function isValidName(name: string): boolean {
   return NAME.test(name) && !(KEYWORDS as readonly string[]).includes(name.toLowerCase());
 }
 
+/** `#rgb`/`#rrggbb` in beliebiger Schreibweise -> `#rrggbb` klein, sonst `null` (Kit `css-color`, code-kit 0.56.0; der Ursprung des Kit-Moduls ist diese Funktion). */
 export function normalizeColor(value: string): string | null {
-  const m = HEX.exec(value);
-  if (!m) return null;
-  const hex = m[1].toLowerCase();
-  return hex.length === 3 ? `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}` : `#${hex}`;
+  return normalizeHex(value);
 }
 
 export function normalizeSize(kind: ShapeKind, values: number[]): number[] | string {

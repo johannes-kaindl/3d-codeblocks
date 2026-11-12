@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **"Apply" in the prompt panel now uses the shared apply step of `obsidian-kit` 0.80.1 (and `code-kit` 0.54.0) instead of the plugin's own copy.** Wording and where the result goes stay the same; the three flaws below are the visible difference.
+- Colour values in a model (`#rgb`, `#rrggbb`) are now read by the shared `css-color` of `code-kit` 0.56.0 instead of the plugin's own copy. Behaviour is unchanged; nothing to notice.
 
 ### Fixed
 
