@@ -9,9 +9,10 @@
 //   würde die Wörter stillschweigend löschen. Stattdessen scheitert die ganze Liste.
 // - Einziger Einstieg für Modellantworten: `applyChangesAnswer` (nimmt das GANZE Leser-Ergebnis).
 import { formatNumber, formatPartLine, partsFromLlm } from "./format";
-import { normalizeColor, normalizeSize, parseShapes } from "./parse";
+import { isUnknownWordWarning, normalizeColor, normalizeSize, parseShapes } from "./parse";
 import type { RawChange, readChangesAnswer } from "./protocol";
 import { SHAPE_KINDS, type ShapeDraft, type ShapeKind, type ShapePart, type Vec3 } from "./types";
+import { t } from "../../i18n/t";
 
 export type ApplyResult =
   | { ok: true; text: string; before: ShapeDraft[]; after: ShapeDraft[] }
@@ -58,9 +59,9 @@ function vec(name: string, field: string, v: number[] | undefined, fallback: Vec
 function addFaults(part: unknown): string[] {
   if (typeof part !== "object" || part === null || Array.isArray(part)) return [];
   const rec = part as Record<string, unknown>;
-  const label = typeof rec.name === "string" && rec.name.trim() !== "" ? `\`${rec.name.trim()}\`` : "unnamed part";
+  const label = typeof rec.name === "string" && rec.name.trim() !== "" ? `\`${rec.name.trim()}\`` : t("core.chg.unnamed");
   const out: string[] = [];
-  if (rec.shape === undefined) out.push(`${label}: \`add\` needs a \`shape\``);
+  if (rec.shape === undefined) out.push(t("core.chg.addNeedsShape", label));
   for (const field of ["position", "rotation_deg"]) {
     const v = rec[field];
     if (v === undefined) continue;
@@ -69,7 +70,7 @@ function addFaults(part: unknown): string[] {
     }
   }
   if (rec.color !== undefined && (typeof rec.color !== "string" || normalizeColor(rec.color) === null)) {
-    out.push(`${label}: \`color\` needs a hex colour like #8b5a2b`);
+    out.push(t("core.chg.colorHex", label));
   }
   return out;
 }
@@ -95,7 +96,7 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
 
   const parsed = parseShapes(text);
   const before: ShapeDraft[] = parsed.parts.map(toDraft);
-  const unknownWords = new Set(parsed.warnings.filter((w) => w.message.startsWith("Unknown word")).map((w) => w.line));
+  const unknownWords = new Set(parsed.warnings.filter(isUnknownWordWarning).map((w) => w.line));
 
   const state = new Map<string, State>();
   const order: string[] = [];
@@ -132,7 +133,7 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
       draft.rot = printedVec(draft.rot);
       const clash = [...state.keys()].filter((n) => fold(n) === fold(draft.name));
       if (clash.length > 0) {
-        problems.push(`${label} (add): a part named \`${clash[0]}\` already exists — remove it first or pick another name`);
+        problems.push(t("core.chg.clash", label, clash[0]));
         return;
       }
       state.set(draft.name, { draft, line: -1 });
@@ -143,16 +144,16 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
     const names = [...state.keys()];
     const m = matchPart(names, change.name);
     if (m.kind === "none") {
-      problems.push(`${label}: no part named \`${change.name}\` (available: ${names.join(", ") || "none"})`);
+      problems.push(t("core.chg.noPart", label, change.name, names.join(", ") || t("core.chg.none")));
       return;
     }
     if (m.kind === "ambiguous") {
-      problems.push(`${label}: \`${change.name}\` matches more than one part: ${m.candidates.join(", ")}`);
+      problems.push(t("core.chg.ambiguous", label, change.name, m.candidates.join(", ")));
       return;
     }
     const found = m.name;
     if (errorNames.has(fold(found))) {
-      problems.push(`${label}: \`${found}\` appears on a line with an error — fix the text first`);
+      problems.push(t("core.chg.lineError", label, found));
       return;
     }
     touched.add(found);
@@ -173,12 +174,12 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
     if (change.shape !== undefined) {
       const wanted = change.shape.trim().toLowerCase();
       if (!(SHAPE_KINDS as readonly string[]).includes(wanted)) {
-        problems.push(`${label}: \`${found}\`: unknown shape \`${change.shape}\``);
+        problems.push(t("core.chg.unknownShape", label, found, change.shape));
         return;
       }
       kind = wanted as ShapeKind;
       if (kind !== d.kind && change.size === undefined) {
-        problems.push(`${label}: \`${found}\`: changing the shape needs a \`size\` for a ${kind}`);
+        problems.push(t("core.chg.shapeNeedsSize", label, found, kind));
         return;
       }
     }
@@ -186,15 +187,15 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
     if (change.size !== undefined) {
       const raw = change.size;
       const normalized =
-        raw.every((v) => typeof v === "number" && Number.isFinite(v)) ? normalizeSize(kind, raw) : "`size` values must be finite numbers";
+        raw.every((v) => typeof v === "number" && Number.isFinite(v)) ? normalizeSize(kind, raw) : t("core.chg.sizeFinite");
       if (typeof normalized === "string") own.push(`\`${found}\`: ${normalized}`);
-      else if (normalized.some((v) => formatNumber(v) === "0")) own.push(`\`${found}\`: \`size\` values must be at least 0.0001`);
+      else if (normalized.some((v) => formatNumber(v) === "0")) own.push(t("core.chg.sizeMin", found));
       else size = normalized.map(printed);
     }
     let color = d.color;
     if (change.color !== undefined) {
       const normalized = normalizeColor(change.color);
-      if (normalized === null) own.push(`\`${found}\`: \`color\` needs a hex colour like #8b5a2b`);
+      if (normalized === null) own.push(t("core.chg.colorOwn", found));
       else color = normalized;
     }
     const at = vec(found, "at", change.at, d.at, own);
@@ -214,7 +215,7 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
     if (!s || s.line < 0) continue;
     if (JSON.stringify(s.draft) === JSON.stringify(toDraft(p))) continue;
     if (unknownWords.has(p.line)) {
-      problems.push(`line ${p.line} has unrecognised words — fix it by hand first`);
+      problems.push(t("core.chg.unrecognised", p.line));
       continue;
     }
     const e = entries[p.line - 1];
@@ -254,19 +255,19 @@ export function applyChanges(text: string, changes: readonly RawChange[]): Apply
   const re = parseShapes(out);
   const reDrafts = re.parts.map(toDraft);
   const guard: string[] = [];
-  if (re.errors.length > parsed.errors.length) guard.push("the result would contain a line the parser rejects");
+  if (re.errors.length > parsed.errors.length) guard.push(t("core.chg.guardLine"));
   for (const want of expected) {
     const got = reDrafts.find((d) => d.name === want.name);
     if (!got || JSON.stringify(got) !== JSON.stringify(want)) {
-      guard.push(`\`${want.name}\`: its values need more than 4 decimals — edit this part by hand`);
+      guard.push(t("core.chg.guardDecimals", want.name));
     }
   }
   for (const b of before) {
     if (touched.has(b.name)) continue;
     const got = reDrafts.find((d) => d.name === b.name);
-    if (!got || JSON.stringify(got) !== JSON.stringify(b)) guard.push(`\`${b.name}\`: would be changed by the rewrite — nothing applied`);
+    if (!got || JSON.stringify(got) !== JSON.stringify(b)) guard.push(t("core.chg.guardRewrite", b.name));
   }
-  if (reDrafts.length !== expected.length && guard.length === 0) guard.push("the result has a different number of parts than expected");
+  if (reDrafts.length !== expected.length && guard.length === 0) guard.push(t("core.chg.guardCount"));
   if (guard.length > 0) return { ok: false, problems: [...new Set(guard)] };
   return { ok: true, text: out, before, after: reDrafts };
 }
@@ -277,11 +278,11 @@ export function applyChangesAnswer(text: string, answer: ReturnType<typeof readC
   if (answer.dropped.length > 0) {
     return {
       ok: false,
-      problems: answer.dropped.map((d) => `item ${d.index + 1} was not usable (${d.reason}) — nothing applied`),
+      problems: answer.dropped.map((d) => t("core.chg.itemUnusable", d.index + 1, d.reason)),
     };
   }
   const r = applyChanges(text, answer.changes);
   // „ok, aber nichts geändert“ ist kein Erfolg: leere Liste oder ein Diff, der den Bestand nicht berührt.
-  if (r.ok && JSON.stringify(r.before) === JSON.stringify(r.after)) return { ok: false, problems: ["the answer changed nothing"] };
+  if (r.ok && JSON.stringify(r.before) === JSON.stringify(r.after)) return { ok: false, problems: [t("core.chg.nothing")] };
   return r;
 }

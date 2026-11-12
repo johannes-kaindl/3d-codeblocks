@@ -9,6 +9,7 @@
 //
 // Pure: der Existenz-Check kommt als Funktion herein (`exists`), damit diese Datei
 // ohne Obsidian testbar bleibt (check:pure).
+import { t } from "../i18n/t";
 import { editTargetPath } from "./edit-target";
 
 export interface BadgeState {
@@ -18,9 +19,7 @@ export interface BadgeState {
   title: string;
 }
 
-export const BADGE_LABEL = "Unapplied edits";
-
-const HIDDEN: BadgeState = { visible: false, label: BADGE_LABEL, title: "" };
+const hidden = (): BadgeState => ({ visible: false, label: t("badge.label"), title: "" });
 
 export function editBadgeState(input: {
   /** Pfad des ANGEZEIGTEN Modells — `null`, solange nichts geladen ist. */
@@ -29,18 +28,18 @@ export function editBadgeState(input: {
   editing: boolean;
   exists: (path: string) => boolean;
 }): BadgeState {
-  if (input.modelPath === null || input.editing) return HIDDEN;
+  if (input.modelPath === null || input.editing) return hidden();
 
   const target = editTargetPath(input.modelPath);
   // `null` = kein editierbares Format (STL). `inPlace` = die betrachtete Datei IST
   // schon die Edit-Datei — dann sieht der Nutzer den Wunsch selbst, nicht das
   // Original, und ein "hier gibt es Edits woanders"-Hinweis waere schlicht falsch.
-  if (target === null || target.inPlace) return HIDDEN;
-  if (!input.exists(target.path)) return HIDDEN;
+  if (target === null || target.inPlace) return hidden();
+  if (!input.exists(target.path)) return hidden();
 
   return {
     visible: true,
-    label: BADGE_LABEL,
-    title: `Saved edits exist in ${target.path}. This view shows the original — open edit mode to see them.`,
+    label: t("badge.label"),
+    title: t("badge.title", target.path),
   };
 }

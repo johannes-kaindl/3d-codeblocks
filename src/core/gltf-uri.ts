@@ -14,6 +14,7 @@ export type UriClass =
   | { kind: "rejected"; reason: "empty" | "scheme" | "outside-vault" };
 
 import { resolveRelPath } from "../vendor/kit/rel-path";
+import { t } from "../i18n/t";
 
 const SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 
@@ -78,12 +79,7 @@ export interface ResourceProblem {
 // Datei, ueber den der Nutzer nichts entscheiden kann.
 const REASON_ORDER = ["missing", "external-blocked", "outside-vault", "scheme"] as const;
 
-const REASON_TEXT: Record<(typeof REASON_ORDER)[number], string> = {
-  missing: "Not found in the vault",
-  "external-blocked": 'Not loaded because "Allow external resources" is off',
-  "outside-vault": "Refused, because it points outside the vault",
-  scheme: "Refused, because this kind of reference cannot be read",
-};
+const reasonText = (reason: (typeof REASON_ORDER)[number]): string => t(`core.res.${reason}`);
 
 /** Hoechstens so viele Dateinamen je Zeile — ein Modell mit 50 fehlenden Texturen soll
     einen Hinweis erzeugen, keine Textwand. */
@@ -98,7 +94,7 @@ export function resourceProblemNotes(problems: readonly ResourceProblem[]): stri
 
     const named = uris.slice(0, MAX_NAMED).join(", ");
     const rest = uris.length - MAX_NAMED;
-    notes.push(`${REASON_TEXT[reason]}: ${named}${rest > 0 ? ` and ${rest} more` : ""}`);
+    notes.push(`${reasonText(reason)}: ${named}${rest > 0 ? t("core.res.andMore", rest) : ""}`);
   }
 
   return notes;

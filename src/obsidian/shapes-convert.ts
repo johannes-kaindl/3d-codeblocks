@@ -24,6 +24,7 @@ import {
 import { BlockChangedError, replaceLines, type WritePorts } from "../vendor/kit/block-writer";
 import { resolveModelPath } from "./file-source";
 import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
+import { t } from "../i18n/t";
 
 export interface ConvertEnv {
   app: App;
@@ -51,13 +52,13 @@ function checkedFence(text: string, fence: Fence): { fence: Fence; lines: string
   // BOM auf Zeile 0 gehoert nicht zur Einrueckung.
   const open = lines[fence.openLine].replace(/^\uFEFF/, "");
   if (/^\s/.test(open)) {
-    return { problem: "The ```shapes block is indented (probably inside a list or quote). A file reference cannot replace it there without breaking the structure — nothing was changed." };
+    return { problem: t("conv.indented") };
   }
   if (fence.closeLine <= fence.openLine || !closesFence(lines[fence.openLine], lines[fence.closeLine])) {
-    return { problem: "The ```shapes block has no closing fence — close it first. Nothing was changed." };
+    return { problem: t("conv.noClose") };
   }
   if (fence.body.trim() === "") {
-    return { problem: "The ```shapes block is empty — there is nothing to move into a file." };
+    return { problem: t("conv.empty") };
   }
   return { fence, lines };
 }
@@ -81,7 +82,7 @@ export async function convertBlockToFile(env: ConvertEnv): Promise<boolean> {
   const src = sourceEditor(app);
   const found = src ? shapesFenceAtCursor(src) : null;
   if (!src || !found) {
-    notice("Place the cursor in a ```shapes block (editing view) to move it into a .shapes file.");
+    notice(t("conv.placeCursor"));
     return false;
   }
   if ("problem" in found) {
@@ -104,13 +105,13 @@ async function moveFenceToFile(env: ConvertEnv, file: TFile, fence: Fence, lines
     // Nie ueberschreiben, auch nicht bei einer Schreibweise, die die Pfadvergabe uebersieht.
     // Zweiter Gurt: die Schreibweisen-Regeln (Gross/Klein) kennt der Adapter, nicht wir.
     if (app.vault.getAbstractFileByPath(path) || (await app.vault.adapter.exists(path))) {
-      notice(`${path} already exists — nothing was changed.`);
+      notice(t("conv.exists", path));
       return false;
     }
     // Die Datei endet mit genau einem Zeilenumbruch, LF.
     created = await app.vault.create(path, `${fence.body}\n`);
   } catch (error) {
-    notice(`Could not create the file${path ? ` ${path}` : ""}: ${errorText(error)} — nothing was changed.`);
+    notice(path ? t("conv.createFailed", path, errorText(error)) : t("conv.createFailedAnon", errorText(error)));
     return false;
   }
 
@@ -118,16 +119,16 @@ async function moveFenceToFile(env: ConvertEnv, file: TFile, fence: Fence, lines
     const linktext = app.metadataCache.fileToLinktext(created, file.path, false);
     await replaceLines(ports, file.path, fence.openLine, fence.closeLine, expected, referenceBlock(linktext));
   } catch (error) {
-    const why = error instanceof BlockChangedError ? "The note changed while converting" : `Could not update the note (${errorText(error)})`;
+    const why = error instanceof BlockChangedError ? t("conv.whyNoteChanged") : t("conv.whyUpdateFailed", errorText(error));
     try {
       await app.fileManager.trashFile(created);
-      notice(`${why} — nothing was changed (the new file was removed again).`);
+      notice(t("conv.rolledBack", why));
     } catch (removeError) {
-      notice(`${why} — the note is unchanged, but the new file ${path} could not be removed (${errorText(removeError)}). Delete it by hand.`);
+      notice(t("conv.rollbackFailed", why, path, errorText(removeError)));
     }
     return false;
   }
-  notice(`Moved the block to ${path}.`);
+  notice(t("conv.moved", path));
   return true;
 }
 
@@ -145,16 +146,16 @@ export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: n
   try {
     text = ports.editorFor(path)?.getValue() ?? (await ports.vault.read(path));
   } catch (error) {
-    notice(`Could not read ${path}: ${errorText(error)} — nothing was changed.`);
+    notice(t("conv.readFailed", path, errorText(error)));
     return false;
   }
   if (!(file instanceof TFile) || typeof text !== "string") {
-    notice(`Could not find ${path} — nothing was changed.`);
+    notice(t("conv.notFound", path));
     return false;
   }
   const fence = locateShapesFence(text, lineStart, lineEnd);
   if (!fence) {
-    notice("The block moved or sits inside a quote, callout or list — nothing was changed. Place the cursor in it and use the command instead.");
+    notice(t("conv.blockMoved"));
     return false;
   }
   // Zeilennummern allein tragen nicht: nach einer Aenderung darueber trifft eine veraltete Position einen ANDERN,
@@ -162,7 +163,7 @@ export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: n
   // abschliessendes Zeilenende tragen (siehe ModelBlock.stripTrailingNewline) — beide Seiten ohne eines vergleichen.
   const norm = (t: string) => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
   if (norm(fence.body) !== norm(expectedBody)) {
-    notice("The block moved or sits inside a quote, callout or list — nothing was changed. Place the cursor in it and use the command instead.");
+    notice(t("conv.blockMoved"));
     return false;
   }
   const checked = checkedFence(text, fence);
@@ -219,15 +220,7 @@ interface OpenShapesView {
 
 const SCANNED_EXTENSIONS = new Set(["md", "canvas", "base"]);
 
-const REASON_TEXT: Record<AloneReason, string> = {
-  list: "sits in a list item",
-  quote: "sits in a quote or callout",
-  indent: "is indented",
-  inline: "is in the middle of a sentence (a code block cannot split a sentence)",
-  table: "sits in a table",
-  continuation: "continues a paragraph",
-  "markdown-embed": "is a Markdown-style embed — change it to ![[…]] first",
-};
+const reasonText = (reason: AloneReason): string => t(`conv.reason.${reason}`);
 
 const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:/;
 
@@ -262,36 +255,36 @@ function extraBlockKeys(blockText: string): { keys: string[]; comments: boolean 
 function refusal(file: TFile, refs: ModelReference[]): string | null {
   const name = file.name;
   const where = (list: ModelReference[]) => [...new Set(list.map((r) => r.notePath))].join(", ");
-  if (refs.length === 0) return `${name} is not used in any note — nothing to turn into a block.`;
+  if (refs.length === 0) return t("conv.unused", name);
   if (refs.length > 1) {
-    return `${name} is used in ${refs.length} places (${where(refs)}). Turning it into one block would leave the others without a model — nothing was changed.`;
+    return t("conv.multiple", name, refs.length, where(refs));
   }
   const ref = refs[0];
-  const at = `${ref.notePath}, line ${ref.from + 1}`;
+  const at = t("conv.at", ref.notePath, ref.from + 1);
   if (ref.kind === "link") {
-    return `${name} is only linked ([[…]] without !) at ${at}. A link cannot become a code block, and it would break once the file is gone — nothing was changed.`;
+    return t("conv.onlyLinked", name, at);
   }
   if (ref.kind === "block" && ref.nested) {
-    return `The \`\`\`3d block that uses ${name} (${at}) sits inside a quote, callout or list. Replacing it would break that structure — nothing was changed.`;
+    return t("conv.nested3d", name, at);
   }
   if (ref.kind === "block") {
     const extras = extraBlockKeys(ref.text);
     if (extras.keys.length > 0) {
-      return `The \`\`\`3d block that uses ${name} (${at}) has other settings (${extras.keys.join(", ")}) that a code block of the shapes language cannot keep — remove them or move the file by hand — nothing was changed.`;
+      return t("conv.extraKeys", name, at, extras.keys.join(", "));
     }
     if (extras.comments) {
-      return `The \`\`\`3d block that uses ${name} (${at}) has comment lines that would be lost — remove them or move the file by hand — nothing was changed.`;
+      return t("conv.comments", name, at);
     }
   }
   if (ref.kind === "embed" && !ref.alone) {
     if (ref.aloneReason === "markdown-embed") {
-      return `The embed of ${name} at ${at} ${REASON_TEXT["markdown-embed"]} — nothing was changed.`;
+      return t("conv.embedMarkdown", name, at, reasonText("markdown-embed"));
     }
-    const reason = ref.aloneReason ? REASON_TEXT[ref.aloneReason] : "is not on its own line";
-    return `The embed of ${name} at ${at} ${reason}. Move it onto its own line at the top level first — nothing was changed.`;
+    const reason = ref.aloneReason ? reasonText(ref.aloneReason) : t("conv.reason.notAlone");
+    return t("conv.embedReason", name, at, reason);
   }
   if (ref.kind === "embed" && ref.options) {
-    return `The embed of ${name} at ${at} has display options (${ref.options}) that a code block cannot keep — remove them first — nothing was changed.`;
+    return t("conv.embedOptions", name, at, ref.options);
   }
   return null;
 }
@@ -300,21 +293,21 @@ export async function convertFileToBlock(env: ConvertEnv): Promise<boolean> {
   const { app, ports, notice } = env;
   const file = targetFile(app);
   if (!file) {
-    notice("Place the cursor on a reference to a .shapes file, or open one, to turn it into a code block.");
+    notice(t("conv.placeRef"));
     return false;
   }
   try {
     return await run(app, ports, notice, file);
   } catch (error) {
-    notice(`Could not convert ${file.name}: ${errorText(error)} — nothing was changed.`);
+    notice(t("conv.convertFailed", file.name, errorText(error)));
     return false;
   }
 }
 
 function mentionNotice(file: TFile, mentions: { notePath: string; line: number }[]): string {
-  const list = mentions.slice(0, 3).map((m) => `${m.notePath}, line ${m.line + 1}`).join("; ");
-  const more = mentions.length > 3 ? ` (and ${mentions.length - 3} more)` : "";
-  return `${file.name} has another mention: ${list}${more}. A mention by file name alone (in text, in a canvas or base file, or a differently located file of the same name) blocks the conversion, because deleting the file could break it — nothing was changed.`;
+  const list = mentions.slice(0, 3).map((m) => t("conv.at", m.notePath, m.line + 1)).join("; ");
+  const more = mentions.length > 3 ? t("conv.andMore", mentions.length - 3) : "";
+  return t("conv.mention", file.name, `${list}${more}`);
 }
 
 /** Was mit der Datei passiert, sagt die Obsidian-Einstellung "Deleted files" (trashOption), nicht wir. */
@@ -326,16 +319,16 @@ function trashOutcome(app: App): string {
     // Eine werfende Einstellungsabfrage darf eine gelungene Umwandlung nicht in eine Fehlermeldung verwandeln.
     option = undefined;
   }
-  if (option === "local") return "The file was moved to the .trash folder of the vault — restore it from there if you need it.";
-  if (option === "system") return "The file was moved to the system trash — restore it from there if you need it.";
-  return "The file was removed according to your Deleted files setting (it is not recoverable if that is set to permanently delete).";
+  if (option === "local") return t("conv.trash.local");
+  if (option === "system") return t("conv.trash.system");
+  return t("conv.trash.other");
 }
 
 async function run(app: App, ports: WritePorts, notice: (m: string) => void, file: TFile): Promise<boolean> {
   // Markdown UND Canvas/Base: eine Canvas-Datei oder eine Base kann die Datei einbetten. Gelesen wird
   // von der Platte (read), nicht aus dem Cache: ein veralteter Cache liesse einen Verweis verschwinden.
   const scanned = app.vault.getFiles().filter((f) => SCANNED_EXTENSIONS.has(f.extension.toLowerCase()));
-  if (scanned.length > 300) notice(`Checking ${scanned.length} notes…`);
+  if (scanned.length > 300) notice(t("conv.checking", scanned.length));
   // Ungespeichertes Tippen in einer offenen Notiz steht nur im Editor-Puffer, nicht auf der Platte.
   const notes: NoteText[] = await Promise.all(
     scanned.map(async (f) => ({ path: f.path, text: ports.editorFor(f.path)?.getValue() ?? (await app.vault.read(f)) })),
@@ -368,14 +361,14 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
   // Unmittelbar vor dem Schreiben: hat sich die Datei seit dem Lesen geaendert, wuerde der Umzug
   // fremde Aenderungen verlieren.
   if ((await app.vault.read(file)) !== text) {
-    notice(`${file.name} changed while converting — nothing was changed.`);
+    notice(t("conv.fileChanged", file.name));
     return false;
   }
   try {
     await replaceLines(ports, ref.notePath, ref.from, ref.to, ref.text, shapesBlock(text));
   } catch (error) {
     if (error instanceof BlockChangedError) {
-      notice(`${ref.notePath} changed while converting — nothing was changed and ${file.name} was kept.`);
+      notice(t("conv.noteChangedKept", ref.notePath, file.name));
       return false;
     }
     throw error;
@@ -386,7 +379,7 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
   try {
     // Auch Tippen waehrend des Umzugs zaehlt: der Ansichtspuffer muss noch dem gelesenen Text entsprechen.
     if ((await app.vault.read(file)) !== text || views.some((v) => v.getViewData() !== text)) {
-      notice(`${file.name} is now a code block in ${ref.notePath}, but the file changed meanwhile, so it was left in place at ${file.path}.`);
+      notice(t("conv.doneFileChanged", file.name, ref.notePath, file.path));
       return true;
     }
     // Offene Ansicht schliessen, solange die Datei noch existiert: ihr Schlusssichern schreibt dann
@@ -400,14 +393,14 @@ async function run(app: App, ports: WritePorts, notice: (m: string) => void, fil
         if (view.file?.path === ref.notePath) await view.save?.();
       }
     } catch (error) {
-      notice(`${file.name} is now a code block in ${ref.notePath}, but the note could not be saved yet (${errorText(error)}), so the file was left in place at ${file.path}.`);
+      notice(t("conv.doneNoteNotSaved", file.name, ref.notePath, errorText(error), file.path));
       return true;
     }
     await app.fileManager.trashFile(file);
   } catch (error) {
-    notice(`${file.name} is now a code block in ${ref.notePath}, but the file could not be moved to the trash (${errorText(error)}). It is still at ${file.path}.`);
+    notice(t("conv.doneTrashFailed", file.name, ref.notePath, errorText(error), file.path));
     return true;
   }
-  notice(`${file.name} is now a code block in ${ref.notePath}. ${trashOutcome(app)}`);
+  notice(t("conv.done", file.name, ref.notePath, trashOutcome(app)));
   return true;
 }

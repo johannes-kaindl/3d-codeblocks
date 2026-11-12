@@ -14,12 +14,12 @@ import {
 } from "../core/gltf-patch";
 import { glbJsonText } from "../core/gltf-inspect";
 import type { EditRigCallbacks } from "../viewer/edit-controls";
+import { t } from "../i18n/t";
 
-export const EDIT_UNAVAILABLE_FORMAT = "Editing requires a glTF or GLB file";
-export const EDIT_UNAVAILABLE_LOADING = "The model is still loading";
-export const EDIT_STALE_ON_DISK = "Model changed on disk — re-open edit mode to continue";
-export const EDIT_BLOCKED_DUPLICATE =
-  "This node shares its mesh with others and cannot be edited individually";
+export const editUnavailableFormat = (): string => t("edit.unavailableFormat");
+export const editUnavailableLoading = (): string => t("reason.modelLoading");
+export const editStaleOnDisk = (): string => t("edit.staleOnDisk");
+export const editBlockedDuplicate = (): string => t("edit.blockedDuplicate");
 
 const same = (a: readonly [number, number, number], b: readonly [number, number, number]) =>
   a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
@@ -100,12 +100,12 @@ export function vaultEditIo(app: App): EditIo {
     exists: (path) => fileAt(path) !== null,
     readText: async (path) => {
       const file = fileAt(path);
-      if (!file) throw new Error(`File not found: ${path}`);
+      if (!file) throw new Error(t("edit.fileNotFound", path));
       return app.vault.read(file);
     },
     readBinary: async (path) => {
       const file = fileAt(path);
-      if (!file) throw new Error(`File not found: ${path}`);
+      if (!file) throw new Error(t("edit.fileNotFound", path));
       return app.vault.readBinary(file);
     },
     writeText: async (path, text) => {
@@ -157,9 +157,9 @@ export class EditCoordinator {
   availability(): { ok: boolean; reason: string | null } {
     const path = this.deps.filePath();
     if (path === null || editFormatFor(path) === null) {
-      return { ok: false, reason: EDIT_UNAVAILABLE_FORMAT };
+      return { ok: false, reason: editUnavailableFormat() };
     }
-    if (this.deps.host() === null) return { ok: false, reason: EDIT_UNAVAILABLE_LOADING };
+    if (this.deps.host() === null) return { ok: false, reason: editUnavailableLoading() };
     return { ok: true, reason: null };
   }
 
@@ -192,7 +192,7 @@ export class EditCoordinator {
     if (this.active) return;
     const availability = this.availability();
     if (!availability.ok) {
-      this.deps.notice(availability.reason ?? EDIT_UNAVAILABLE_FORMAT);
+      this.deps.notice(availability.reason ?? editUnavailableFormat());
       return;
     }
     const path = this.deps.filePath();
@@ -207,7 +207,7 @@ export class EditCoordinator {
       json = JSON.parse(await this.readOriginalText(path));
     } catch (error) {
       if (epoch === this.epoch) {
-        this.deps.notice(`Could not read model: ${error instanceof Error ? error.message : String(error)}`);
+        this.deps.notice(t("edit.readFailed", error instanceof Error ? error.message : String(error)));
       }
       return;
     }
@@ -228,7 +228,7 @@ export class EditCoordinator {
     const rig = host.createEditRig(this.rigCallbacks());
     if (!rig) {
       // Kein Rig → kein stiller "aktiv, aber ohne Gizmo"-Zustand (Fix #4).
-      this.deps.notice(EDIT_UNAVAILABLE_LOADING);
+      this.deps.notice(editUnavailableLoading());
       return;
     }
 
@@ -266,7 +266,7 @@ export class EditCoordinator {
       } else {
         originalBinary = await this.deps.io.readBinary(path);
         const text = glbJsonText(originalBinary);
-        if (text === null) throw new Error("not a valid GLB container");
+        if (text === null) throw new Error(t("edit.invalidGlb"));
         originalText = text;
       }
 
@@ -274,7 +274,7 @@ export class EditCoordinator {
         // Nicht schreiben, Modus und Session unangetastet lassen: der Nutzer behaelt
         // seine ungespeicherten Edits (bleibt dirty) und kann nach einem Neubetreten
         // — das die Session per Name auf den neuen Stand legt — erneut speichern.
-        this.deps.notice(EDIT_STALE_ON_DISK);
+        this.deps.notice(editStaleOnDisk());
         this.deps.onChange();
         return;
       }
@@ -287,10 +287,10 @@ export class EditCoordinator {
       // Nur baselinen, wenn sich waehrend des Schreibens nichts mehr veraendert hat —
       // sonst bleibt die Session bewusst dirty, statt den neuen Edit zu verschlucken.
       if (trsEditsEqual(session.changes(), snapshot)) session.markSaved();
-      this.deps.notice(`Edits saved to ${target.path}`);
+      this.deps.notice(t("edit.saved", target.path));
     } catch (error) {
       // Modus und Session bleiben erhalten — kein Datenverlust (Spec §5).
-      this.deps.notice(`Could not save edits: ${error instanceof Error ? error.message : String(error)}`);
+      this.deps.notice(t("edit.saveFailed", error instanceof Error ? error.message : String(error)));
     }
     this.deps.onChange();
   }
@@ -318,7 +318,7 @@ export class EditCoordinator {
         // gewechselt). Der Abbruch ist korrekt — aber STUMM sah er im GUI-Smoke wie
         // ein toter Discard-Knopf aus: Edits bleiben, Modus bleibt an, nichts meldet
         // sich. Melden statt schlucken; ein erneutes Discard trifft die frische Session.
-        this.deps.notice("The model reloaded while the dialog was open — please try Discard again.");
+        this.deps.notice(t("edit.reloadedDuringDialog"));
         return;
       }
     }
@@ -347,7 +347,7 @@ export class EditCoordinator {
       json = JSON.parse(await this.readOriginalText(path));
     } catch {
       if (epoch === this.epoch) {
-        this.deps.notice("Could not re-read model after reload — edit mode closed");
+        this.deps.notice(t("edit.rereadFailed"));
         this.exitSilently();
       }
       return;
@@ -356,7 +356,7 @@ export class EditCoordinator {
 
     const session = new EditSession(analyzeTopLevelNodes(json, this.deps.lockedPrefixes()));
     const { lost } = session.applyOverlay(byName);
-    if (lost.length > 0) this.deps.notice(`${lost.length} edited node(s) no longer exist: ${lost.join(", ")}`);
+    if (lost.length > 0) this.deps.notice(t("edit.lostNodes", lost.length, lost.join(", ")));
     this.session = session;
     this.selected = null;
 
@@ -371,7 +371,7 @@ export class EditCoordinator {
     if (!rig) {
       // Session bleibt aktiv (sie ueberlebt den Reload per Definition dieser Methode),
       // aber ohne Gizmo — kein stilles "pinned ohne Rig" (Fix #4, gleiche Form).
-      this.deps.notice(EDIT_UNAVAILABLE_LOADING);
+      this.deps.notice(editUnavailableLoading());
       this.deps.onChange();
       return;
     }
@@ -451,7 +451,7 @@ export class EditCoordinator {
       },
       onInteract: () => {},
       onSelectBlocked: (reason) => {
-        if (reason === "duplicate") this.deps.notice(EDIT_BLOCKED_DUPLICATE);
+        if (reason === "duplicate") this.deps.notice(editBlockedDuplicate());
       },
     };
   }
@@ -459,7 +459,7 @@ export class EditCoordinator {
   private async readOriginalText(path: string): Promise<string> {
     if (editFormatFor(path) === "gltf-json") return this.deps.io.readText(path);
     const text = glbJsonText(await this.deps.io.readBinary(path));
-    if (text === null) throw new Error("not a valid GLB container");
+    if (text === null) throw new Error(t("edit.invalidGlb"));
     return text;
   }
 
@@ -473,7 +473,7 @@ export class EditCoordinator {
         // stillschweigend als "leeres Overlay" durchgehen (analyzeTopLevelNodes([]) bei
         // `null`-JSON) statt in den Catch zu fallen und die Notice auszuloesen.
         const binText = glbJsonText(await this.deps.io.readBinary(editPath));
-        if (binText === null) throw new Error("not a valid GLB container");
+        if (binText === null) throw new Error(t("edit.invalidGlb"));
         text = binText;
       }
       const overlay = extractTrsByName(JSON.parse(text));
@@ -482,12 +482,12 @@ export class EditCoordinator {
       const { applied, lost } = session.applyOverlay(dropUnchangedLockedEntries(overlay, session));
       // Verlorene Nodes benannt melden, nicht nur gezaehlt (Fix #6) — konsistent mit
       // reapplyAfterReload().
-      const lostSuffix = lost.length > 0 ? ` — ${lost.length} no longer match: ${lost.join(", ")}` : "";
+      const lostSuffix = lost.length > 0 ? t("edit.loadedLostSuffix", lost.length, lost.join(", ")) : "";
       if (applied > 0 || lost.length > 0) {
-        this.deps.notice(`Loaded existing edits for ${applied} node(s)${lostSuffix}`);
+        this.deps.notice(t("edit.loaded", applied, lostSuffix));
       }
     } catch {
-      this.deps.notice(`Could not read ${editPath} — starting from the original`);
+      this.deps.notice(t("edit.editFileUnreadable", editPath));
     }
   }
 }

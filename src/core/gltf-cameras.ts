@@ -1,3 +1,4 @@
+import { t } from "../i18n/t";
 // Kameras, die in der Datei selbst stehen, ueber ihren Namen ansprechbar machen.
 // Pure: kein obsidian-, kein three-Import.
 //
@@ -101,16 +102,16 @@ export function fileCameraNotes(
   if (lookup.kind === "not-found") {
     const names = fileCameraNames(cameras);
     // Der Vorwurf "unbekannt" ist nur brauchbar, wenn dabeisteht, was es stattdessen gibt.
-    const offer = names.length > 0 ? `this file has: ${names.join(", ")}` : "this file has no cameras";
-    return [`unknown camera \`${name}\` — ${offer}`];
+    const offer = names.length > 0 ? t("core.cam.has", names.join(", ")) : t("core.cam.none");
+    return [t("core.cam.unknown", name, offer)];
   }
 
   if (lookup.kind === "orthographic") {
-    return [`\`${name}\` is an orthographic camera — not supported`];
+    return [t("core.cam.ortho", name)];
   }
 
   if (lookup.ambiguous) {
-    return [`\`${name}\` names more than one camera — using the first`];
+    return [t("core.cam.ambiguous", name)];
   }
 
   return [];

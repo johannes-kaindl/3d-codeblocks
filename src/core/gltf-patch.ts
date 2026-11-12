@@ -12,6 +12,7 @@ import {
   GLB_MAGIC,
   glbJsonText,
 } from "./gltf-inspect";
+import { t } from "../i18n/t";
 
 export type Vec3 = [number, number, number];
 
@@ -138,7 +139,7 @@ export function patchGltfJson(text: string, edits: TrsEdit[]): string {
 
 export function patchGlbContainer(buffer: ArrayBuffer, edits: TrsEdit[]): ArrayBuffer {
   const jsonText = glbJsonText(buffer);
-  if (jsonText === null) throw new Error("not a valid GLB container");
+  if (jsonText === null) throw new Error(t("edit.invalidGlb"));
 
   const patchedJson = new TextEncoder().encode(patchGltfJson(jsonText, edits));
   // GLB-Spec: JSON-Chunk mit 0x20 (Space) auf ein Vielfaches von 4 auffuellen.

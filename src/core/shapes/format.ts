@@ -2,6 +2,7 @@
 // Das LLM antwortet in JSON (so ist es gemessen, Spike A); gespeichert wird Zeilentext.
 import { isValidName, normalizeColor, normalizeSize } from "./parse";
 import { SHAPE_KINDS, type ShapeDraft, type ShapeKind, type Vec3 } from "./types";
+import { t } from "../../i18n/t";
 
 export function formatNumber(n: number): string {
   const rounded = Number(n.toFixed(4));
@@ -52,13 +53,13 @@ export function partsFromLlm(raw: readonly unknown[], nameOffset = 0): {
 
   raw.forEach((item, index) => {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
-      dropped.push({ index, reason: "not an object" });
+      dropped.push({ index, reason: t("core.fmt.notObject") });
       return;
     }
     const rec = item as Record<string, unknown>;
     const kind = typeof rec.shape === "string" ? rec.shape.trim().toLowerCase() : "";
     if (!(SHAPE_KINDS as readonly string[]).includes(kind)) {
-      dropped.push({ index, reason: `unknown shape \`${String(rec.shape)}\`` });
+      dropped.push({ index, reason: t("core.fmt.unknownShape", String(rec.shape)) });
       return;
     }
     // Coerce size strictly: only accept typeof v === "number"
@@ -69,12 +70,12 @@ export function partsFromLlm(raw: readonly unknown[], nameOffset = 0): {
     }
     const sizeValues = sizeRaw.filter((v) => typeof v === "number");
     if (sizeValues.length !== sizeRaw.length) {
-      dropped.push({ index, reason: "`size` must contain only numbers" });
+      dropped.push({ index, reason: t("core.fmt.sizeNumbers") });
       return;
     }
     // Check that all size values are finite
     if (!sizeValues.every(Number.isFinite)) {
-      dropped.push({ index, reason: "`size` values must be finite" });
+      dropped.push({ index, reason: t("core.fmt.sizeFinite") });
       return;
     }
     const size = normalizeSize(kind as ShapeKind, sizeValues);
@@ -84,7 +85,7 @@ export function partsFromLlm(raw: readonly unknown[], nameOffset = 0): {
     }
     // Check that no size value rounds to zero
     if (size.some((v) => formatNumber(v) === "0")) {
-      dropped.push({ index, reason: "`size` values must be at least 0.0001" });
+      dropped.push({ index, reason: t("core.fmt.sizeMin") });
       return;
     }
 

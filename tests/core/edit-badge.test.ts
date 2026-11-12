@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BADGE_LABEL, editBadgeState } from "../../src/core/edit-badge";
+import { editBadgeState } from "../../src/core/edit-badge";
 
 const always = () => true;
 const never = () => false;
@@ -13,7 +13,7 @@ describe("editBadgeState", () => {
     });
 
     expect(state.visible).toBe(true);
-    expect(state.label).toBe(BADGE_LABEL);
+    expect(state.label).toBe("Unapplied edits");
     // Der Tooltip muss den Pfad nennen -- ohne ihn weiss der Nutzer nicht, WO die
     // gespeicherte Arbeit liegt, und der Hinweis waere nur ein Rätsel mehr.
     expect(state.title).toContain("weltmodell/3d/eg.edit.gltf");

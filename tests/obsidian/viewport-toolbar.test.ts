@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { makeFakeEl } from "../__mocks__/obsidian";
 import { buildActionBar, buildToolbar, toolbarVisible } from "../../src/obsidian/viewport-toolbar";
 import { NAMED_VIEWS } from "../../src/core/view-spec";
-import { MODEL_LOADING_REASON, type ViewportController } from "../../src/core/active-viewport";
+import type { ViewportController } from "../../src/core/active-viewport";
 import type { EditUiModel } from "../../src/core/edit-session";
 
 function controller(overrides: Partial<ViewportController> = {}): ViewportController {
@@ -86,7 +86,7 @@ describe("buildToolbar", () => {
       controller({ canSave: () => true, getView: () => null }),
     );
     expect(bar.children[0].disabled).toBe(true);
-    expect(bar.children[0].title).toBe(MODEL_LOADING_REASON);
+    expect(bar.children[0].title).toBe("The model is still loading");
     expect(bar.children[1].disabled).toBe(false);
   });
 });

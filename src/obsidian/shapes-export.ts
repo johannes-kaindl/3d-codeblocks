@@ -5,6 +5,7 @@ import { MarkdownView, Notice, TFile, type App } from "obsidian";
 import { buildGltfExport, exportBaseName } from "../core/shapes/export";
 import { capList } from "../core/shapes/convert";
 import { findFenceAt } from "../core/shapes/fence";
+import { t } from "../i18n/t";
 
 interface Source {
   text: string;
@@ -36,27 +37,27 @@ async function findSource(app: App): Promise<Source | null> {
 // Zeilen, die der Export weggelassen oder nur teilweise uebernommen hat, gehoeren in die
 // Erfolgsmeldung — sonst haelt man ein unvollstaendiges Modell fuer das ganze.
 function exportedNotice(path: string, notes: string[]): string {
-  if (notes.length === 0) return `Exported to ${path}`;
-  return `Exported to ${path} \u2014 ${notes.length} problem(s) ignored: ${capList(notes, 3).join("; ")}`;
+  if (notes.length === 0) return t("export.done", path);
+  return t("export.doneWithNotes", path, notes.length, capList(notes, 3).join("; "));
 }
 
 export async function exportShapesAsGltf(app: App, confirm: (message: string) => Promise<boolean>): Promise<void> {
   try {
     await runExport(app, confirm);
   } catch (error) {
-    new Notice(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+    new Notice(t("export.failed", error instanceof Error ? error.message : String(error)));
   }
 }
 
 async function runExport(app: App, confirm: (message: string) => Promise<boolean>): Promise<void> {
   const source = await findSource(app);
   if (!source) {
-    new Notice("Place the cursor in a ```shapes block or open a .shapes file to export it.");
+    new Notice(t("export.noSource"));
     return;
   }
   const built = buildGltfExport(source.text, source.generatedFrom);
   if (!built.ok) {
-    new Notice(`Nothing to export: ${capList(built.messages, 5).join(" ")}`);
+    new Notice(t("export.nothing", capList(built.messages, 5).join(" ")));
     return;
   }
 
@@ -67,7 +68,7 @@ async function runExport(app: App, confirm: (message: string) => Promise<boolean
   let target = app.vault.getAbstractFileByPath(wanted);
 
   if (target && !(target instanceof TFile)) {
-    new Notice(`Cannot export: ${wanted} is a folder.`);
+    new Notice(t("export.isFolder", wanted));
     return;
   }
   // freePath ist nummeriert, wenn der Name belegt ist. Findet der exakte Pfad nichts (Groß-/
@@ -76,13 +77,13 @@ async function runExport(app: App, confirm: (message: string) => Promise<boolean
     const lower = wanted.toLowerCase();
     target = app.vault.getFiles().find((f) => f.path.toLowerCase() === lower) ?? null;
     if (!target) {
-      new Notice(`Cannot export: ${wanted} is taken but could not be found.`);
+      new Notice(t("export.taken", wanted));
       return;
     }
   }
 
   if (target instanceof TFile) {
-    if (!(await confirm(`Overwrite ${target.path}?`))) return;
+    if (!(await confirm(t("export.overwrite", target.path)))) return;
     await app.vault.modify(target, built.json);
     new Notice(exportedNotice(target.path, built.notes));
     return;

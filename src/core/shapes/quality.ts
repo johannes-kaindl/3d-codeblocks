@@ -7,6 +7,7 @@
 // (Regel: tests/helpers/prompt-sha.ts); ändert sich der Prompt, wird die Zeile ungültig und gehört nach
 // docs/LAB.md in die Liste der zurückgezogenen Zeilen.
 import type { FamilyId } from "../../vendor/kit/sampling-profiles";
+import { t } from "../../i18n/t";
 
 export type QualityTask = "create" | "refine";
 
@@ -62,23 +63,23 @@ export function findMeasurement(model: string, task: QualityTask, table: readonl
   return table.find((m) => m.task === task && m.model.toLowerCase() === wanted) ?? null;
 }
 
-const NOUN: Record<QualityTask, { measured: string; plural: string }> = {
-  create: { measured: "test prompts gave a plausible 3D model", plural: "test prompts plausible" },
-  refine: { measured: "test change requests were applied correctly", plural: "test change requests right" },
-};
+const noun = (task: QualityTask): { measured: string; plural: string } => ({
+  measured: t(`quality.${task}.measured`),
+  plural: t(`quality.${task}.plural`),
+});
 
 export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): { measured: boolean; text: string } {
   // Die Tabelle misst lokale Modelle; die Zahl des kleinen Referenzmodells sagt über ein Cloud-Modell nichts (wie bei `failureHint`: die Familie gewinnt).
-  if (opts?.family === "claude") return { measured: false, text: "Not measured for this model." };
+  if (opts?.family === "claude") return { measured: false, text: t("quality.notMeasured") };
   const m = findMeasurement(model, task, table);
-  if (m) return { measured: true, text: `Measured: ${m.good} of ${m.of} ${NOUN[task].measured} (${m.model}, ${m.measuredAt}, n=1 per ${task === "refine" ? "request" : "prompt"}).` };
+  if (m) return { measured: true, text: t("quality.measured", m.good, m.of, noun(task).measured, m.model, m.measuredAt, t(task === "refine" ? "quality.perRequest" : "quality.perPrompt")) };
   // Bezugszahl nur aus derselben Aufgabe: eine Erstellen-Zahl sagt nichts über das Verfeinern.
   const ref = smallReference(task, table);
-  if (!ref) return { measured: false, text: "Not measured for this model." };
+  if (!ref) return { measured: false, text: t("quality.notMeasured") };
   const shortName = ref.model.slice(ref.model.lastIndexOf("/") + 1);
   return {
     measured: false,
-    text: `Not measured for this model — the one small model tested (${shortName}) got ${ref.good} of ${ref.of} ${NOUN[task].plural}.`,
+    text: t("quality.reference", shortName, ref.good, ref.of, noun(task).plural),
   };
 }
 
@@ -89,15 +90,15 @@ function best(task: QualityTask, table: readonly Measurement[]): Measurement | n
 }
 
 export function failureHint(model: string, task: QualityTask = "create", table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): string {
-  const base = task === "refine" ? "The change list could not be applied." : "The answer could not be turned into a model.";
+  const base = t(task === "refine" ? "quality.failRefine" : "quality.failCreate");
   // Die Tabelle misst lokale Modelle; „ein größeres Modell“ ist für ein Cloud-Modell kein Rat, den der Nutzer umsetzen kann.
   if (opts?.family === "claude") return base;
-  const noun = task === "refine" ? "test change requests applied correctly" : "test prompts plausible";
+  const nounText = t(task === "refine" ? "quality.failNounRefine" : "quality.failNounCreate");
   const top = best(task, table);
   if (!top) return base;
   const own = findMeasurement(model, task, table);
   if (own && own.model === top.model) {
-    return `${base} In the test this model got ${own.good} of ${own.of} ${noun} — try a simpler wording or a smaller change.`;
+    return `${base} ${t("quality.failOwn", own.good, own.of, nounText)}`;
   }
-  return `${base} A larger model may do better — measured best: ${top.model}, ${top.good} of ${top.of} ${noun}.`;
+  return `${base} ${t("quality.failBest", top.model, top.good, top.of, nounText)}`;
 }

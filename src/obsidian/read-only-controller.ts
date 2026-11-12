@@ -3,7 +3,8 @@
 // Methodensaetze — der Unterschied zwischen den beiden Wegen ist nur, woher
 // Host und Label kommen.
 import { Notice } from "obsidian";
-import { NO_BLOCK_REASON, type ViewportController } from "../core/active-viewport";
+import type { ViewportController } from "../core/active-viewport";
+import { t } from "../i18n/t";
 import type { EditUiModel } from "../core/edit-session";
 import type { ViewSpec } from "../core/view-spec";
 
@@ -29,7 +30,7 @@ export function readOnlyController(
     applyView: (spec) => host()?.applyView(spec),
     canSave: () => false,
     async save() {
-      new Notice(NO_BLOCK_REASON);
+      new Notice(t("reason.noBlock"));
     },
     ...(editPanel ? { editPanel } : {}),
   };

@@ -14,6 +14,7 @@
 // - Reihenfolge der Ausgabe: `after`, danach entfernte Teile in `before`-Reihenfolge.
 import { formatNumber, isZero } from "./format";
 import type { ShapeDraft } from "./types";
+import { t } from "../../i18n/t";
 
 export type Field = "shape" | "size" | "at" | "rot" | "color";
 
@@ -67,7 +68,7 @@ export function diffParts(before: readonly ShapeDraft[], after: readonly ShapeDr
     if (atField) fields.push(atField);
     const rotField = vecField("rot", b.rot, p.rot);
     if (rotField) fields.push(rotField);
-    if (b.color !== p.color) fields.push({ field: "color", from: b.color ?? "default", to: p.color ?? "default" });
+    if (b.color !== p.color) fields.push({ field: "color", from: b.color ?? t("core.diff.default"), to: p.color ?? t("core.diff.default") });
     if (fields.length > 0) out.push({ name: p.name, change: "changed", fields });
   }
   // Entfernt = je Name alle `before`-Teile ab dem Zähler (nach Index, nicht nach Objektidentität).
@@ -81,7 +82,7 @@ export function diffParts(before: readonly ShapeDraft[], after: readonly ShapeDr
 }
 
 export function formatDiff(entry: PartDiff): string {
-  if (entry.change === "removed") return `${entry.name}: removed`;
-  if (entry.change === "added") return `${entry.name}: added (${entry.detail})`;
+  if (entry.change === "removed") return t("core.diff.removed", entry.name);
+  if (entry.change === "added") return t("core.diff.added", entry.name, entry.detail);
   return `${entry.name}: ${entry.fields.map((f) => `${f.field} ${f.from} → ${f.to}`).join("; ")}`;
 }

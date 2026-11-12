@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { ControlPanelView, panelModel } from "../../src/obsidian/control-panel";
 import {
   ActiveViewport,
-  MODEL_LOADING_REASON,
-  NO_BLOCK_REASON,
   type ViewportController,
 } from "../../src/core/active-viewport";
 import type { EditUiModel } from "../../src/core/edit-session";
@@ -69,7 +67,7 @@ describe("panelModel", () => {
     // des Ladens passieren, bevor `getView()` etwas liefert (siehe Review Task 10).
     const model = panelModel(controller({ getView: () => null }));
     expect(model.canSave).toBe(false);
-    expect(model.saveDisabledReason).toBe(MODEL_LOADING_REASON);
+    expect(model.saveDisabledReason).toBe("The model is still loading");
     expect(model.canClear).toBe(true);
     expect(model.clearDisabledReason).toBeNull();
   });
@@ -145,9 +143,9 @@ describe("ControlPanelView", () => {
     const save = findByText(view.contentEl, "Save view");
     const clear = findByText(view.contentEl, "Clear view");
     expect(save.disabled).toBe(true);
-    expect(save.title).toBe(NO_BLOCK_REASON);
+    expect(save.title).toBe("The view can only be saved in a `3d` code block");
     expect(clear.disabled).toBe(true);
-    expect(clear.title).toBe(NO_BLOCK_REASON);
+    expect(clear.title).toBe("The view can only be saved in a `3d` code block");
   });
 
   it("disables only Save while the model is still loading", () => {
@@ -158,7 +156,7 @@ describe("ControlPanelView", () => {
     const save = findByText(view.contentEl, "Save view");
     const clear = findByText(view.contentEl, "Clear view");
     expect(save.disabled).toBe(true);
-    expect(save.title).toBe(MODEL_LOADING_REASON);
+    expect(save.title).toBe("The model is still loading");
     expect(clear.disabled).toBe(false);
   });
 

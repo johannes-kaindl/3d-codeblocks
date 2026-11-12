@@ -23,6 +23,7 @@ import {
 } from "./viewer-host";
 
 import { createResourceResolver } from "./gltf-resources";
+import { t } from "../i18n/t";
 
 export const VIEW_TYPE_3D = "tdcb-3d-model";
 
@@ -48,7 +49,7 @@ export class ModelFileView extends FileView implements TrackedView {
 
   readonly controller = readOnlyController(
     () => this.host,
-    () => this.file?.path ?? "3D model",
+    () => this.file?.path ?? t("view.model3d"),
     () => this.edit.uiModel(),
   );
 
@@ -104,7 +105,7 @@ export class ModelFileView extends FileView implements TrackedView {
   }
 
   getDisplayText(): string {
-    return this.file?.basename ?? "3D model";
+    return this.file?.basename ?? t("view.model3d");
   }
 
   async onLoadFile(file: TFile): Promise<void> {

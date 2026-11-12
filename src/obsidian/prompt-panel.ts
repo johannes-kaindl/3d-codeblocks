@@ -2,7 +2,8 @@
 // Versionen — UI-STANDARD „ein Frontend pro Plugin“. LLM ausschließlich über createLlmConnection.
 // Ablauf von run()/Abbruch uebernommen aus lingotuner/src/obsidian/view.ts, 2026-10-03
 import { ItemView, type WorkspaceLeaf } from "obsidian";
-import { PANEL_TEXTS } from "../i18n/strings";
+import { modelBarStrings, PANEL_TEXTS } from "../i18n/strings";
+import { getLang } from "../i18n/t";
 import { applyChanges } from "../core/shapes/changes";
 import { convertShapesText } from "../core/shapes/convert";
 import { diffParts, formatDiff } from "../core/shapes/diff";
@@ -188,6 +189,7 @@ export class PromptPanelView extends ItemView {
       containerEl: c,
       llm: this.deps.llm,
       label: PANEL_TEXTS.modelLabel,
+      strings: modelBarStrings(),
       // Sperre wie die des Sendens: während einer Anfrage und während Apply läuft ein Modellwechsel ins Leere.
       disabled: () => this.controller !== null || this.applying,
       onChange: () => this.renderHeader(),
@@ -201,7 +203,7 @@ export class PromptPanelView extends ItemView {
         ...this.deps.thinking,
         strings: {
           button: (level) => (level === "off" ? PANEL_TEXTS.thinkingOff : PANEL_TEXTS.thinkingOn(level)),
-          offNotPossible: thinkingOffTexts("en"),
+          offNotPossible: thinkingOffTexts(getLang()),
           level: (l) => PANEL_TEXTS.thinkingLevel(l),
           pickerLabel: PANEL_TEXTS.thinkingPicker,
         },
@@ -236,7 +238,7 @@ export class PromptPanelView extends ItemView {
     this.stopBtn = actions.createEl("button", { cls: "tdcb-prompt-stop is-hidden", text: PANEL_TEXTS.abort, attr: { type: "button" } });
     this.stopBtn.addEventListener("click", () => this.controller?.abort());
 
-    this.area = buildStreamArea(c, { strings: { reasoning: PANEL_TEXTS.reasoning }, cls: "tdcb-prompt-stream" });
+    this.area = buildStreamArea(c, { strings: { reasoning: PANEL_TEXTS.reasoning, copyReasoning: PANEL_TEXTS.copyReasoning }, cls: "tdcb-prompt-stream" });
     // Statuszeile des Bereichs trägt den Status-Indikator; Ansage für Screenreader.
     this.area.statusEl.setAttribute("aria-live", "polite");
     this.status = buildStatus(this.area.statusEl, "tdcb-prompt-status", { idleIcon: null });
@@ -571,7 +573,7 @@ export class PromptPanelView extends ItemView {
     this.roundsEl.empty();
     const { rounds, active } = this.panel.rounds;
     buildVersionList(this.roundsEl, {
-      items: rounds.map((r, i) => ({ label: `${i + 1}. ${r.instruction}`, meta: r.kind === "refine" ? `${r.diff.length} change(s)` : "new" })),
+      items: rounds.map((r, i) => ({ label: `${i + 1}. ${r.instruction}`, meta: r.kind === "refine" ? PANEL_TEXTS.roundChanges(r.diff.length) : PANEL_TEXTS.roundNew })),
       active,
       onSelect: (i) => {
         this.panel = { ...this.panel, rounds: selectRound(this.panel.rounds, i) };

@@ -3,18 +3,19 @@
 import { parseShapes } from "./parse";
 import { shapesToGltf, type GltfDocument } from "./to-gltf";
 import type { LineIssue, ParsedShapes } from "./types";
+import { t } from "../../i18n/t";
 
-const EMPTY_HINT = "Write one part per line, e.g. `box Cube size 1 at 0 0.5 0`.";
+const emptyHint = (): string => t("core.convert.emptyHint");
 
 export function formatIssue(issue: LineIssue): string {
-  return `Line ${issue.line}: ${issue.message}`;
+  return t("core.convert.line", issue.line, issue.message);
 }
 
 /** Hoechstens `max` Eintraege, der Rest als "… and N more" — eine umbenannte Nicht-shapes-
     Datei erzeugt sonst eine Meldung je Zeile. */
 export function capList(items: readonly string[], max: number): string[] {
   if (items.length <= max) return [...items];
-  return [...items.slice(0, max), `… and ${items.length - max} more`];
+  return [...items.slice(0, max), t("core.convert.more", items.length - max)];
 }
 
 export function convertShapesText(
@@ -25,7 +26,7 @@ export function convertShapesText(
   | { ok: false; messages: string[]; empty: boolean; parsed: ParsedShapes } {
   const parsed = parseShapes(text);
   if (parsed.parts.length === 0) {
-    const messages = parsed.errors.length > 0 ? parsed.errors.map(formatIssue) : [EMPTY_HINT];
+    const messages = parsed.errors.length > 0 ? parsed.errors.map(formatIssue) : [emptyHint()];
     // `empty`: weder Teil noch Zeilenfehler (leer, nur Kommentare) — kein Fehler, sondern Leerzustand.
     return { ok: false, messages, empty: parsed.errors.length === 0, parsed };
   }

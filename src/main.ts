@@ -1,4 +1,5 @@
 import {
+  getLanguage,
   MarkdownView,
   Notice,
   Plugin,
@@ -6,6 +7,8 @@ import {
   type MarkdownPostProcessorContext,
   type WorkspaceLeaf,
 } from "obsidian";
+import { PANEL_TEXTS } from "./i18n/strings";
+import { getLang, pickLang, setLang, t } from "./i18n/t";
 import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { MODEL_FILE_EXTENSIONS } from "./core/format";
@@ -60,6 +63,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   llm!: LlmConnection;
 
   async onload(): Promise<void> {
+    // Die Sprache vor allem, was Texte zeichnet (Befehle, Ansichten, Einstellungen); sie folgt der Obsidian-Oberfläche.
+    setLang(pickLang(getLanguage()));
     const stored: unknown = await this.loadData();
     this.settings = validateSettings(stored);
     // Das globale Modell-Feld ist weg, jede Zeile traegt ihr Modell. `validateSettings` verwirft den Altschluessel,
@@ -74,6 +79,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       caller: "3d-codeblocks",
       capability: "chat",
       mode: "structured",
+      lang: () => getLang(),
       // Das Panel zeigt die Stufenwahl in der Modellzeile (Denk-Steuerung, UI-STANDARD §8): der Schalter wirkt hier.
       levelPicker: true,
       // Opt-in fuer den Anthropic-Transport: ohne ihn bleibt ein Claude-Eintrag des Managers fuer dieses Plugin unsichtbar. Mit ihm
@@ -123,9 +129,9 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     // es erst ab Obsidian 1.13, unser minAppVersion ist 1.5.0.
     const confirmDiscard = () =>
       confirmAction(this.app, {
-        message: "Discard unsaved edits?",
-        confirmLabel: "Discard",
-        cancelLabel: "Keep editing",
+        message: t("confirm.discardEdits"),
+        confirmLabel: t("confirm.discard"),
+        cancelLabel: t("confirm.keepEditing"),
       });
     const hostDeps: HostBaseDeps & {
       active: ActiveViewport;
@@ -207,7 +213,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       );
     } catch (error) {
       console.warn("[three-d-codeblocks] ```shapes code blocks unavailable:", error);
-      new Notice("3D Codeblocks: ```shapes code blocks unavailable — another plugin already uses that language.");
+      new Notice(t("notice.shapesUnavailable"));
     }
 
     // ![[datei.gltf]] — Embed in einer Notiz über die (inoffizielle) embedRegistry.
@@ -222,7 +228,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       // Sichtbar machen (statt still): dann ist im Smoke sofort klar, ob Embeds fehlen,
       // weil die API weg ist — oder aus einem anderen Grund.
       console.warn("[three-d-codeblocks] embedRegistry unavailable — ![[…]] embeds disabled.");
-      new Notice("3D Codeblocks: ![[…]] embeds unavailable (Obsidian embedRegistry missing).");
+      new Notice(t("notice.embedsUnavailable"));
     }
 
     // Datei anklicken → 3D-View im ganzen Pane. `track` wie bei Block/Embed: die
@@ -251,7 +257,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       this.registerExtensions(["shapes"], VIEW_TYPE_SHAPES);
     } catch (error) {
       console.warn("[three-d-codeblocks] .shapes files unavailable:", error);
-      new Notice("3D Codeblocks: .shapes files unavailable — another plugin already handles that extension.");
+      new Notice(t("notice.shapesFilesUnavailable"));
     }
 
     // Rechte Leiste: Presets/Save/Clear/Fit fuer den zuletzt bedienten Viewport.
@@ -280,30 +286,30 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
               this.refreshPromptPanels();
             },
           },
-          readTargetText: (t) => readTargetText(this.acceptEnv(), t),
+          readTargetText: (target) => readTargetText(this.acceptEnv(), target),
           accept: (state) => acceptPanel(this.acceptEnv(), state),
           openSettings: () => {
             // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
             const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
             if (!setting) {
-              new Notice("Open Settings → Community plugins → 3D Codeblocks.");
+              new Notice(PANEL_TEXTS.settingsFallback);
               return;
             }
             setting.open();
             setting.openTabById(this.manifest.id);
           },
-          confirm: (message) => confirmAction(this.app, { message, confirmLabel: "Discard", cancelLabel: "Keep" }),
+          confirm: (message) => confirmAction(this.app, { message, confirmLabel: t("confirm.discard"), cancelLabel: PANEL_TEXTS.discardKeep }),
           managerPresent: () => findEndpointManager(this.app) !== null,
         }),
     );
-    this.addCommand({ id: "open-prompt-panel", name: "Open prompt panel", callback: () => void this.openPromptPanel({ kind: "new" }) });
+    this.addCommand({ id: "open-prompt-panel", name: t("cmd.openPrompt"), callback: () => void this.openPromptPanel({ kind: "new" }) });
     this.addCommand({
       id: "edit-in-prompt-panel",
-      name: "Edit shapes model in prompt panel",
+      name: t("cmd.editInPrompt"),
       checkCallback: (checking) => {
-        const t = this.active.get()?.shapesTarget?.() ?? null;
-        if (!t) return false;
-        if (!checking) void this.openPromptPanel(t);
+        const target = this.active.get()?.shapesTarget?.() ?? null;
+        if (!target) return false;
+        if (!checking) void this.openPromptPanel(target);
         return true;
       },
     });
@@ -312,16 +318,16 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       this.active.subscribe((controller) => {
         // Ohne Controller (nichts bedient) bleibt das Ziel, wie es ist: ein frisches Panel hat ohnehin „neu“.
         if (!controller) return;
-        const t: PanelTarget = controller.shapesTarget?.() ?? { kind: "other", label: controller.label() };
+        const target: PanelTarget = controller.shapesTarget?.() ?? { kind: "other", label: controller.label() };
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
-          if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(t);
+          if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(target);
         }
       }),
     );
 
     this.addCommand({
       id: "open-controls",
-      name: "Open 3D view controls",
+      name: t("cmd.openControls"),
       callback: async () => {
         const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_3D_CONTROLS);
         if (existing.length > 0) {
@@ -350,7 +356,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     const withActive = (run: (controller: ViewportController) => void) => () => {
       const controller = this.active.get();
       if (!controller) {
-        new Notice("No active 3D model");
+        new Notice(t("notice.noActive"));
         return;
       }
       run(controller);
@@ -358,7 +364,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
 
     this.addCommand({
       id: "save-view",
-      name: "Save current view to block",
+      name: t("cmd.saveView"),
       callback: withActive((controller) => {
         const spec = controller.getView();
         if (spec !== null) void controller.save(spec);
@@ -367,28 +373,28 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
 
     this.addCommand({
       id: "clear-view",
-      name: "Clear saved view",
+      name: t("cmd.clearView"),
       callback: withActive((controller) => void controller.save(null)),
     });
 
     this.addCommand({
       id: "save-view-as-image",
-      name: "Save current view as image",
+      name: t("cmd.saveImage"),
       callback: withActive((controller) => void saveViewAsImage(this.app, controller)),
     });
 
     this.addCommand({
       id: "fit-view",
-      name: "Fit camera to model",
+      name: t("cmd.fit"),
       callback: withActive((controller) => controller.applyView(null)),
     });
 
     this.addCommand({
       id: "export-shapes-gltf",
-      name: "Export shapes model as glTF",
+      name: t("cmd.exportGltf"),
       callback: () =>
         void exportShapesAsGltf(this.app, (message) =>
-          confirmAction(this.app, { message, confirmLabel: "Overwrite", cancelLabel: "Cancel" }),
+          confirmAction(this.app, { message, confirmLabel: t("confirm.overwrite"), cancelLabel: t("confirm.cancel") }),
         ),
     });
 
@@ -397,7 +403,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     const convertEnv = () => this.convertEnv();
     this.addCommand({
       id: "convert-shapes-block-to-file",
-      name: "Move shapes block into a .shapes file",
+      name: t("cmd.blockToFile"),
       checkCallback: (checking) => {
         if (!canConvertBlockToFile(this.app)) return false;
         if (!checking) void convertBlockToFile(convertEnv());
@@ -406,7 +412,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     });
     this.addCommand({
       id: "convert-shapes-file-to-block",
-      name: "Move .shapes file into a code block",
+      name: t("cmd.fileToBlock"),
       checkCallback: (checking) => {
         if (!canConvertFileToBlock(this.app)) return false;
         if (!checking) void convertFileToBlock(convertEnv());
@@ -416,10 +422,10 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu) => {
         if (canConvertBlockToFile(this.app)) {
-          menu.addItem((item) => item.setTitle("Move shapes block into a file").setIcon("file-output").onClick(() => void convertBlockToFile(convertEnv())));
+          menu.addItem((item) => item.setTitle(t("menu.blockToFile")).setIcon("file-output").onClick(() => void convertBlockToFile(convertEnv())));
         }
         if (canConvertFileToBlock(this.app)) {
-          menu.addItem((item) => item.setTitle("Move .shapes file into a code block").setIcon("file-input").onClick(() => void convertFileToBlock(convertEnv())));
+          menu.addItem((item) => item.setTitle(t("menu.fileToBlock")).setIcon("file-input").onClick(() => void convertFileToBlock(convertEnv())));
         }
       }),
     );
@@ -540,7 +546,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
 
   async openPromptPanel(target: PanelTarget): Promise<void> {
     const workspace = this.app.workspace;
-    const unavailable = () => new Notice("The prompt panel is not available");
+    const unavailable = () => new Notice(PANEL_TEXTS.unavailable);
     // Intern, aber lesbar: ohne registrierten Typ legt setViewState ein leeres Blatt an, statt zu werfen.
     const registry = (this.app as unknown as { viewRegistry?: { viewByType?: Record<string, unknown> } }).viewRegistry?.viewByType;
     // registerView laeuft unbedingt in onload; nur verweigern, wenn die Registry lesbar ist und den Typ NICHT kennt

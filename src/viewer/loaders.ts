@@ -21,6 +21,7 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 import { XYZLoader } from "three/examples/jsm/loaders/XYZLoader.js";
 import type { ModelFormat } from "../core/format";
 import type { FileCameraInfo } from "../core/gltf-cameras";
+import { t } from "../i18n/t";
 
 /** Eine in der Datei definierte Kamera, verknuepft mit ihrem Objekt in der Szene. */
 export interface FileCamera extends FileCameraInfo {
@@ -62,7 +63,7 @@ export function loadModel(
   if (format === "gltf") return loadGltf(buffer, resolveUrl);
   return loadPlain(buffer, format, materialColor, resolveUrl).then((object) => {
     // Eine Datei ohne Geometrie waere ein leerer Bildschirm ohne Grund: lieber die Meldung des Hosts („Could not load the model“).
-    if (new Box3().setFromObject(object).isEmpty()) throw new Error("the file holds no geometry");
+    if (new Box3().setFromObject(object).isEmpty()) throw new Error(t("viewer.noGeometry"));
     return { object, cameras: [] as FileCamera[] };
   });
 }

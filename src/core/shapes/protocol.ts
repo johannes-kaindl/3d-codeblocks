@@ -3,6 +3,7 @@
 // braucht einen neuen Messlauf; der Test pinnt ihn per SHA-256.
 import { extractJsonCandidates } from "../../vendor/kit/llm-json";
 import { parseShapes } from "./parse";
+import { t } from "../../i18n/t";
 
 export interface PromptMessage {
   role: "system" | "user";
@@ -53,7 +54,7 @@ type Extracted = { ok: true; values: unknown[]; truncated: boolean } | { ok: fal
 function extractJson(text: string): Extracted {
   const found = extractJsonCandidates(text);
   if (found.ok) return found;
-  return { ok: false, reason: found.reason === "no-json" ? "no JSON in the answer" : "the JSON is incomplete or broken" };
+  return { ok: false, reason: found.reason === "no-json" ? t("core.proto.noJson") : t("core.proto.broken") };
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -67,8 +68,8 @@ function pickList(
     if (isRecord(v) && Array.isArray(v[key])) return { ok: true, list: v[key] as unknown[] };
     if (Array.isArray(v) && v.every(isRecord)) return { ok: true, list: v };
   }
-  if (json.truncated) return { ok: false, reason: "the JSON is incomplete or broken" };
-  return { ok: false, reason: `the JSON has no \`${key}\` list` };
+  if (json.truncated) return { ok: false, reason: t("core.proto.broken") };
+  return { ok: false, reason: t("core.proto.noList", key) };
 }
 
 export function readPartsAnswer(text: string): { ok: true; parts: unknown[] } | { ok: false; reason: string } {
@@ -101,16 +102,16 @@ export function readChangesAnswer(
   const dropped: { index: number; reason: string }[] = [];
   picked.list.forEach((item, index) => {
     const drop = (reason: string): void => void dropped.push({ index, reason });
-    if (!isRecord(item)) return drop("not an object");
+    if (!isRecord(item)) return drop(t("core.fmt.notObject"));
     const op = typeof item.op === "string" ? item.op.trim().toLowerCase() : "";
     const name = typeof item.name === "string" ? item.name.trim() : "";
     if (op === "add") {
       // `add` ist so streng wie `change`: ein unbekannter Schlüssel (`at`, `colour`, …) lässt den Eintrag scheitern.
       const unknownAddKey = Object.keys(item).find((k) => !ADD_KEYS.has(k));
-      if (unknownAddKey !== undefined) return drop(`\`add\` has an unknown key \`${unknownAddKey}\``);
+      if (unknownAddKey !== undefined) return drop(t("core.proto.addKey", unknownAddKey));
       changes.push({ op: "add", part: item });
     } else if (op === "remove" || op === "change") {
-      if (name === "") return drop(`\`${op}\` needs a name`);
+      if (name === "") return drop(t("core.proto.needsName", op));
       if (op === "remove") {
         changes.push({ op: "remove", name });
         return;
@@ -118,37 +119,37 @@ export function readChangesAnswer(
       // Jeder Schlüssel außerhalb der bekannten Felder lässt den Eintrag scheitern, statt still ignoriert
       // zu werden (sonst „gelingt“ ein vertipptes `colour` als Nichtstun).
       const unknownKey = Object.keys(item).find((k) => !CHANGE_KEYS.has(k));
-      if (unknownKey !== undefined) return drop(`\`change\` has an unknown key \`${unknownKey}\``);
+      if (unknownKey !== undefined) return drop(t("core.proto.changeKey", unknownKey));
       const change: Extract<RawChange, { op: "change" }> = { op: "change", name };
       if (item.shape !== undefined) {
-        if (typeof item.shape !== "string") return drop("`shape` must be text");
+        if (typeof item.shape !== "string") return drop(t("core.proto.shapeText"));
         change.shape = item.shape;
       }
       if (item.position !== undefined) {
         const at = numbers(item.position);
-        if (!at || at.length !== 3) return drop("`position` must be three numbers");
+        if (!at || at.length !== 3) return drop(t("core.proto.position"));
         change.at = at;
       }
       if (item.size !== undefined) {
         const size = numbers(item.size);
-        if (!size) return drop("`size` must be a list of numbers");
+        if (!size) return drop(t("core.proto.sizeList"));
         change.size = size;
       }
       if (item.rotation_deg !== undefined) {
         const rot = numbers(item.rotation_deg);
-        if (!rot || rot.length !== 3) return drop("`rotation_deg` must be three numbers");
+        if (!rot || rot.length !== 3) return drop(t("core.proto.rotation"));
         change.rot = rot;
       }
       if (item.color !== undefined) {
-        if (typeof item.color !== "string") return drop("`color` must be text");
+        if (typeof item.color !== "string") return drop(t("core.proto.colorText"));
         change.color = item.color;
       }
       if (change.shape === undefined && change.at === undefined && change.size === undefined && change.rot === undefined && change.color === undefined) {
-        return drop("`change` changes nothing");
+        return drop(t("core.proto.changeNothing"));
       }
       changes.push(change);
     } else {
-      drop(`unknown op \`${String(item.op)}\``);
+      drop(t("core.proto.unknownOp", String(item.op)));
     }
   });
   return { ok: true, changes, dropped };

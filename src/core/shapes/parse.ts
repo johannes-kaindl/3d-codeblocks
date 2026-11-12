@@ -14,8 +14,13 @@ import {
   type ShapesHeader,
   type Vec3,
 } from "./types";
+import { t } from "../../i18n/t";
 
 const NAME = /^[\p{L}\p{N}_-]+$/u;
+/** Warnungen „unbekanntes Wort“: `changes.ts` erkennt sie am Objekt, nicht am (übersetzten) Text. */
+const UNKNOWN_WORD = new WeakSet<LineIssue>();
+export const isUnknownWordWarning = (w: LineIssue): boolean => UNKNOWN_WORD.has(w);
+
 const HEADER_KEYS = ["title", "height", "view"];
 
 export function isValidName(name: string): boolean {
@@ -33,16 +38,16 @@ export function normalizeSize(kind: ShapeKind, values: number[]): number[] | str
   if (kind === "box") {
     if (values.length === 1) size = [values[0], values[0], values[0]];
     else if (values.length === 3) size = [...values];
-    arityMessage = "`size` of a box needs 1 or 3 numbers";
+    arityMessage = t("core.parse.sizeBox");
   } else if (kind === "sphere") {
     if (values.length === 1) size = [...values];
-    arityMessage = "`size` of a sphere needs 1 number (radius)";
+    arityMessage = t("core.parse.sizeSphere");
   } else {
     if (values.length === 2) size = [...values];
-    arityMessage = `\`size\` of a ${kind} needs 2 numbers (radius, height)`;
+    arityMessage = t("core.parse.sizeRound", kind);
   }
   if (size === null) return arityMessage;
-  if (size.some((v) => !(v > 0))) return "`size` values must be greater than 0";
+  if (size.some((v) => !(v > 0))) return t("core.parse.sizePositive");
   return size;
 }
 
@@ -56,11 +61,11 @@ function parsePartLine(line: string, lineNo: number): PartResult {
   const tokens = line.split(/\s+/);
   const kind = tokens[0].toLowerCase();
   if (!(SHAPE_KINDS as readonly string[]).includes(kind)) {
-    return { error: `Unknown shape \`${tokens[0]}\` — use box, cylinder, sphere or cone` };
+    return { error: t("core.parse.unknownShape", tokens[0]) };
   }
   const name = tokens[1];
   if (name === undefined || !isValidName(name)) {
-    return { error: "Every part needs a name after the shape (letters, digits, `-`, `_`)" };
+    return { error: t("core.parse.needsName") };
   }
 
   const warnings: LineIssue[] = [];
@@ -74,7 +79,9 @@ function parsePartLine(line: string, lineNo: number): PartResult {
   while (i < tokens.length) {
     const token = tokens[i];
     if (!isKeyword(token)) {
-      warnings.push({ line: lineNo, message: `Unknown word \`${token}\` ignored` });
+      const warning: LineIssue = { line: lineNo, message: t("core.parse.unknownWord", token) };
+      UNKNOWN_WORD.add(warning);
+      warnings.push(warning);
       i += 1;
       continue;
     }
@@ -125,11 +132,11 @@ function applyHeader(
   const value = rawValue.trim();
   const lower = key.toLowerCase();
   if (lower === "file") {
-    errors.push({ line: lineNo, message: "`file:` belongs in a `3d` block — a shapes block holds the parts itself" });
+    errors.push({ line: lineNo, message: t("core.parse.fileKey") });
     return;
   }
   if (!HEADER_KEYS.includes(lower)) {
-    warnings.push({ line: lineNo, message: `Unknown key: \`${key}\`` });
+    warnings.push({ line: lineNo, message: t("core.parse.unknownKey", key) });
     return;
   }
   if (lower === "title") {
@@ -137,7 +144,7 @@ function applyHeader(
   } else if (lower === "height") {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      warnings.push({ line: lineNo, message: `\`height\` must be a number: \`${value}\`` });
+      warnings.push({ line: lineNo, message: t("core.parse.height", value) });
     } else {
       header.height = parsed;
     }
@@ -146,7 +153,7 @@ function applyHeader(
     if (parsed === null) {
       warnings.push({
         line: lineNo,
-        message: `\`view\`: unknown view \`${value}\` — use ${VIEW_NAMES} or three numbers (azimuth,elevation,distance)`,
+        message: t("core.parse.view", value, VIEW_NAMES),
       });
     } else {
       header.view = parsed;
@@ -174,7 +181,7 @@ export function parseShapes(source: string): ParsedShapes {
     const lineNo = item.lineNo;
     if (item.entry !== null) {
       if (seenPart) {
-        errors.push({ line: lineNo, message: "Header lines (`key: value`) must come before the first part" });
+        errors.push({ line: lineNo, message: t("core.parse.headerOrder") });
         continue;
       }
       applyHeader(item.entry.rawKey, item.entry.rawValue, lineNo, header, errors, warnings);
@@ -190,7 +197,7 @@ export function parseShapes(source: string): ParsedShapes {
     }
     warnings.push(...result.warnings);
     if (names.has(result.part.name)) {
-      errors.push({ line: lineNo, message: `Duplicate name \`${result.part.name}\`` });
+      errors.push({ line: lineNo, message: t("core.parse.duplicate", result.part.name) });
       continue;
     }
     names.add(result.part.name);

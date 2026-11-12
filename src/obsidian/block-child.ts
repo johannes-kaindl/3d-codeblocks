@@ -6,7 +6,6 @@
 // jedem Tastendruck) — dort disposen wir den Host und damit den WebGL-Kontext.
 import { Notice, MarkdownRenderChild, type App, type TFile } from "obsidian";
 import {
-  NO_BLOCK_REASON,
   type ActiveViewport,
   type ViewportController,
 } from "../core/active-viewport";
@@ -36,6 +35,7 @@ import { buildToolbar, toolbarVisible } from "./viewport-toolbar";
 // Re-Export, damit bestehende Importe (main.ts, Tests) stabil bleiben.
 import { createResourceResolver } from "./gltf-resources";
 import type { FileCameraInfo } from "../core/gltf-cameras";
+import { t } from "../i18n/t";
 
 export type { ViewportFactory, ContextBudget, ViewportLike, ViewportCreateOptions } from "./viewer-host";
 
@@ -156,7 +156,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   // --- ViewportController -----------------------------------------------------
 
   label(): string {
-    return this.config?.title ?? this.config?.file ?? "3D model";
+    return this.config?.title ?? this.config?.file ?? t("view.model3d");
   }
 
   /** `this.edit` ist `null` vor `onload()` und nach `onunload()` -- ohne Coordinator
@@ -182,7 +182,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
   async save(spec: ViewSpec | null): Promise<void> {
     const info = this.deps.sectionInfo();
     if (info === null) {
-      new Notice(NO_BLOCK_REASON);
+      new Notice(t("reason.noBlock"));
       return;
     }
 
@@ -195,7 +195,7 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
     if (next === body) {
       // Ohne Feedback wirkt der Save-/Clear-Button hier tot — er tut ja etwas,
       // nur ist das Ergebnis mit dem Ist-Zustand identisch.
-      new Notice("View already up to date");
+      new Notice(t("block.upToDate"));
       return;
     }
 
@@ -206,12 +206,12 @@ export class ModelBlock extends MarkdownRenderChild implements ViewportControlle
         body,
         next,
       );
-      new Notice(spec === null ? "View cleared" : "View saved");
+      new Notice(spec === null ? t("block.viewCleared") : t("block.viewSaved"));
     } catch (error) {
       new Notice(
         error instanceof BlockChangedError
           ? error.message
-          : `Could not save view: ${describeError(error)}`,
+          : t("block.saveFailed", describeError(error)),
       );
     }
   }

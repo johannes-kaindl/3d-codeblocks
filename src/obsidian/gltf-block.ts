@@ -23,6 +23,7 @@ import { buildBox, type BoxParts } from "./render-box";
 import { readOnlyController } from "./read-only-controller";
 import { buildActionBar, type ActionButton } from "./viewport-toolbar";
 import { ViewerHost, wrapBudgetWithActive, type HostBaseDeps } from "./viewer-host";
+import { t } from "../i18n/t";
 
 export interface GltfBlockDeps extends HostBaseDeps {
   active: ActiveViewport;
@@ -61,7 +62,7 @@ export class GltfBlock extends MarkdownRenderChild {
 
   private label(): string {
     if (this.kind !== "shapes") return "glTF code block";
-    return parseShapes(this.source).header.title ?? "shapes code block";
+    return parseShapes(this.source).header.title ?? t("view.shapesBlock");
   }
 
   /** Beim Klick gelesen, nie gemerkt: Zeilen verschieben sich, sobald darueber getippt wird. */
@@ -87,15 +88,15 @@ export class GltfBlock extends MarkdownRenderChild {
       const buttons: ActionButton[] = [
         {
           icon: "sparkles",
-          label: "Edit in prompt panel",
+          label: t("act.editInPrompt"),
           run: () => {
-            const t = this.target();
-            if (t) this.deps.openInPanel?.(t);
+            const target = this.target();
+            if (target) this.deps.openInPanel?.(target);
           },
         },
       ];
       if (this.deps.moveToFile) {
-        buttons.push({ icon: "file-output", label: "Move into a .shapes file", run: () => this.deps.moveToFile?.() });
+        buttons.push({ icon: "file-output", label: t("act.moveToFile"), run: () => this.deps.moveToFile?.() });
       }
       buildActionBar(this.parts.viewport, buttons);
     }
@@ -143,7 +144,7 @@ export class GltfBlock extends MarkdownRenderChild {
       provideBytes: () => Promise.resolve(new TextEncoder().encode(this.source).buffer),
       format: this.kind === "shapes" ? "shapes" : "gltf",
       inspectContainer: false,
-      label: this.kind === "shapes" ? "shapes code block" : "glTF code block",
+      label: this.kind === "shapes" ? t("view.shapesBlock") : t("view.gltfBlock"),
       ...(view ? { view } : {}),
     });
   }

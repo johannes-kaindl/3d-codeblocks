@@ -455,3 +455,10 @@ export function getFrontMatterInfo(content: string): { exists: boolean; frontmat
   const from = content.indexOf("\n") + 1;
   return { exists: true, frontmatter: block, from, to: from + block.length, contentStart: m[0].length };
 }
+
+/** `getLanguage()` (Obsidian 1.8): Sprache der Oberfläche; Tests laufen englisch, ein Test stellt sie per `setMockLanguage` um. */
+let mockLanguage = "en";
+export const getLanguage = (): string => mockLanguage;
+export function setMockLanguage(language: string): void {
+  mockLanguage = language;
+}

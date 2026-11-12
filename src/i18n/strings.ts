@@ -1,98 +1,113 @@
-// UI-Texte, die nicht an einer einzelnen Zeile haengen (UI-STANDARD §10). Das Plugin ist
-// englisch; die Hilfe-Zeile nimmt die Kit-Vorgabe unveraendert.
+// UI-Texte, die nicht an einer einzelnen Zeile hängen (UI-STANDARD §10), und die Brücke zu den Kit-Bausteinen, die ihre Texte als Bündel nehmen.
+// Die Wörterbücher stehen in `texts-en.ts`/`texts-de.ts`, die Engine in `t.ts`. `PANEL_TEXTS` und `ACCEPT_STRINGS` lesen die Sprache bei jedem Zugriff
+// (Getter): die Sprache wird erst im `onload` gesetzt, die Module sind da längst geladen.
 import type { AcceptStrings, InsertWhere } from "../vendor/kit-obsidian/panel-accept";
-import { HELP_SETTING_TEXTS_EN, type HelpSettingTexts } from "../vendor/kit-obsidian/help-setting";
-import { isManagerErrorCode, LLM_CONNECTION_STRINGS_EN, managerErrorText } from "../vendor/kit-obsidian/llm-connection-strings";
+import { HELP_SETTING_TEXTS_DE, HELP_SETTING_TEXTS_EN, type HelpSettingTexts } from "../vendor/kit-obsidian/help-setting";
+import {
+  isManagerErrorCode,
+  LLM_CONNECTION_STRINGS_DE,
+  LLM_CONNECTION_STRINGS_EN,
+  managerErrorText,
+} from "../vendor/kit-obsidian/llm-connection-strings";
+import { MODEL_BAR_STRINGS_DE, MODEL_BAR_STRINGS_EN, type ModelBarStrings } from "../vendor/kit-obsidian/model-bar-strings";
+import { getLang, t } from "./t";
 
-export const HELP_TEXTS: HelpSettingTexts = HELP_SETTING_TEXTS_EN;
+/** Die Hilfe-Zeile der Einstellungen in der Sprache des Plugins (Kit-Vorgabe, kein eigener Text). */
+export function helpTexts(): HelpSettingTexts {
+  return getLang() === "de" ? HELP_SETTING_TEXTS_DE : HELP_SETTING_TEXTS_EN;
+}
+
+/** Die Texte der Modellzeile (Kit `model-bar`) in der Sprache des Plugins. */
+export function modelBarStrings(): ModelBarStrings {
+  return getLang() === "de" ? MODEL_BAR_STRINGS_DE : MODEL_BAR_STRINGS_EN;
+}
 
 /** Texte des Prompt-Panels (Plan 3b, Task 6). Die LLM-Einstellungen tragen die Kit-Texte. */
 export const PANEL_TEXTS = {
-  title: "Model by prompt",
-  tabPrompt: "Prompt",
-  tabVersions: "Versions",
-  targetNew: "New model",
-  targetEdit: (label: string) => `Edit: ${label}`,
-  targetKept: (label: string) => `Target kept: ${label} — discard to switch`,
-  newButton: "New",
-  placeholderCreate: "Describe the model, e.g. “A table: top 1.2 × 0.7 m, four legs, 0.75 m high.”",
-  placeholderRefine: "What should change? e.g. “Make the top 20 cm higher.”",
-  create: "Create",
-  refine: "Change",
-  abort: "Stop",
-  accept: "Apply",
-  discard: "Discard",
-  rounds: "Rounds",
-  reasoning: "Thinking…",
-  running: (model: string) => `Asking ${model}… this can take several minutes.`,
-  done: "Done — check the preview, then apply or change further.",
-  doneCreate: "Done — check the preview, then apply or change further, or press New to start another model.",
-  aborted: "Stopped.",
-  noEndpoint: "No language model is set up yet.",
-  openSettings: "Open settings",
-  emptyCreate: "Describe a model in words. Examples: “A snowman from three spheres with a cone nose.” · “A bookshelf with three shelves, 1.8 m high.”",
-  versionsEmpty: "No saved versions yet.",
-  versionsOnlyFiles: "Versions are kept for .shapes files only.",
-  unsupported: (label: string) => `${label} can't be changed by prompt.`,
-  discardConfirm: (n: number) => `Discard ${n} unapplied round(s)?`,
-  acceptAsTitle: "Apply the new model as …",
-  acceptAsBlock: "Code block at the cursor",
-  acceptAsFile: "File in the attachment folder",
-  noNoteOpen: "Open a note to insert a code block.",
-  noteInReadingView: "The open note is in reading view — switch to editing view to insert a code block.",
-  modelLabel: "Prompt",
-  thinkingOff: "Thinking: off",
-  thinkingOn: (level: string) => `Thinking: ${level}`,
-  thinkingLevel: (level: string) => `Thinking: ${level}`,
-  thinkingPicker: "Thinking level",
-  promptLabel: "Your instruction",
-  previewLabel: "Preview",
-  previewOf: (n: number) => `Preview of round ${n}`,
-  diffHeading: "Changes in this round",
-  modelGone: "The model to change is gone.",
-  blockGone: "The block changed or moved — click it again (toolbar button).",
-  answerChangesNothing: "The answer changes nothing.",
-  cutOff: "The answer was cut off (length limit).",
-  targetChanged: "The target changed while the model was answering — nothing was added.",
-  noUsableParts: "the answer holds no usable part",
+  get title() { return t("panel.title"); },
+  get tabPrompt() { return t("panel.tabPrompt"); },
+  get tabVersions() { return t("panel.tabVersions"); },
+  get targetNew() { return t("panel.targetNew"); },
+  targetEdit: (label: string) => t("panel.targetEdit", label),
+  targetKept: (label: string) => t("panel.targetKept", label),
+  get newButton() { return t("panel.newButton"); },
+  get placeholderCreate() { return t("panel.placeholderCreate"); },
+  get placeholderRefine() { return t("panel.placeholderRefine"); },
+  get create() { return t("panel.create"); },
+  get refine() { return t("panel.refine"); },
+  get abort() { return t("panel.abort"); },
+  get accept() { return t("panel.accept"); },
+  get discard() { return t("panel.discard"); },
+  get rounds() { return t("panel.rounds"); },
+  get reasoning() { return t("panel.reasoning"); },
+  get copyReasoning() { return t("panel.copyReasoning"); },
+  running: (model: string) => t("panel.running", model),
+  get done() { return t("panel.done"); },
+  get doneCreate() { return t("panel.doneCreate"); },
+  get aborted() { return t("panel.aborted"); },
+  get noEndpoint() { return t("panel.noEndpoint"); },
+  get openSettings() { return t("panel.openSettings"); },
+  get emptyCreate() { return t("panel.emptyCreate"); },
+  get versionsEmpty() { return t("panel.versionsEmpty"); },
+  get versionsOnlyFiles() { return t("panel.versionsOnlyFiles"); },
+  unsupported: (label: string) => t("panel.unsupported", label),
+  discardConfirm: (n: number) => t("panel.discardConfirm", n),
+  get acceptAsTitle() { return t("panel.acceptAsTitle"); },
+  get acceptAsBlock() { return t("panel.acceptAsBlock"); },
+  get acceptAsFile() { return t("panel.acceptAsFile"); },
+  get noNoteOpen() { return t("panel.noNoteOpen"); },
+  get noteInReadingView() { return t("panel.noteInReadingView"); },
+  get modelLabel() { return t("panel.modelLabel"); },
+  get thinkingOff() { return t("panel.thinkingOff"); },
+  thinkingOn: (level: string) => t("panel.thinkingOn", level),
+  thinkingLevel: (level: string) => t("panel.thinkingLevel", level),
+  get thinkingPicker() { return t("panel.thinkingPicker"); },
+  get promptLabel() { return t("panel.promptLabel"); },
+  get previewLabel() { return t("panel.previewLabel"); },
+  previewOf: (n: number) => t("panel.previewOf", n),
+  get diffHeading() { return t("panel.diffHeading"); },
+  get modelGone() { return t("panel.modelGone"); },
+  get blockGone() { return t("panel.blockGone"); },
+  get answerChangesNothing() { return t("panel.answerChangesNothing"); },
+  get cutOff() { return t("panel.cutOff"); },
+  get targetChanged() { return t("panel.targetChanged"); },
+  get noUsableParts() { return t("panel.noUsableParts"); },
+  get roundNew() { return t("panel.roundNew"); },
+  roundChanges: (n: number) => t("panel.roundChanges", n),
+  get discardKeep() { return t("panel.discardKeep"); },
+  get settingsFallback() { return t("panel.settingsFallback"); },
+  get unavailable() { return t("panel.unavailable"); },
   // Ein Code des LLM Endpoint Managers bekommt seinen Text (jeder nennt die Stelle, an der es behoben wird); alles andere
-  // (etwa eine Konfigurationsmeldung) bleibt als „Reason“ stehen.
-  noEndpointDetail: (detail: string, sourceKind?: string) => (sourceKind === "manager" && isManagerErrorCode(detail) ? managerErrorText(LLM_CONNECTION_STRINGS_EN, detail) : `Reason: ${detail}`),
-} as const;
-
-const NOTHING_APPLIED = "nothing was applied";
-const INSERT_WHERE: Record<InsertWhere, string> = {
-  "after-block-at-selection": "after the code block at the selection",
-  "after-block-at-cursor": "after the code block at the cursor",
-  "after-frontmatter": "after the front matter",
-  "after-selection": "after the selection",
-  "at-cursor": "at the cursor",
+  // (etwa eine Konfigurationsmeldung) bleibt als „Grund“ stehen.
+  noEndpointDetail: (detail: string, sourceKind?: string) =>
+    sourceKind === "manager" && isManagerErrorCode(detail)
+      ? managerErrorText(getLang() === "de" ? LLM_CONNECTION_STRINGS_DE : LLM_CONNECTION_STRINGS_EN, detail)
+      : t("panel.reason", detail),
 };
 
 /** Meldungen des Übernehmens (Kit `panel-accept`, `AcceptStrings`): ganze Sätze, das Panel zeigt sie unverändert. */
 export const ACCEPT_STRINGS: AcceptStrings = {
-  unsupported: PANEL_TEXTS.unsupported,
-  notApplied: (problem) => `${problem} — ${NOTHING_APPLIED}.`,
-  unchanged: "The model already looks like this — nothing to change.",
-  cannotReplace: `A new model can't replace an existing one — use New. Nothing was applied.`,
-  blockMoved: `The block moved — ${NOTHING_APPLIED}.`,
-  blockChanged: `The block changed — ${NOTHING_APPLIED}.`,
-  noteChanged: `The note changed — ${NOTHING_APPLIED}.`,
-  closesFence: `The new text contains a line that would close the code block — ${NOTHING_APPLIED}.`,
-  cancelled: `Cancelled — ${NOTHING_APPLIED}.`,
-  noNoteOpen: PANEL_TEXTS.noNoteOpen,
-  noteInReadingView: PANEL_TEXTS.noteInReadingView,
-  appliedTo: (label) => `Applied to ${label}.`,
-  appliedAsBlock: (where) => `Applied to the open note as a code block ${INSERT_WHERE[where]}.`,
-  appendedToNote: "Applied to the open note as a code block at the end of the note.",
-  fileGone: (path) => `${path} is gone or was renamed — ${NOTHING_APPLIED}.`,
-  fileExists: (path) => `${path} already exists — nothing was written.`,
-  couldNotCreate: (path, reason) => `Could not create the file${path ? ` ${path}` : ""}: ${reason} — nothing was written.`,
-  savedFileWithReference: (path) => `Saved ${path} and inserted a reference.`,
-  savedFileNoReference: (path, why) =>
-    `Saved ${path}. No reference was inserted because ${why === "reading" ? "the open note is in reading view" : why === "note-changed" ? "the open note changed meanwhile" : "no note is open for editing"}.`,
-  savedFileAppended: (path) => `Saved ${path} and appended a reference at the end of the note.`,
-  savedFileReferenceFailed: (path, reason) => `Saved ${path}, but the reference could not be inserted (${reason}). The file exists.`,
-  unclosedFence: (selected) => `The ${selected ? "selection ends" : "cursor is"} in a code block that is never closed — ${NOTHING_APPLIED}.`,
-  couldNotApply: (reason) => `Could not apply: ${reason} — ${NOTHING_APPLIED}.`,
+  unsupported: (label) => PANEL_TEXTS.unsupported(label),
+  notApplied: (problem) => t("accept.notApplied", problem),
+  get unchanged() { return t("accept.unchanged"); },
+  get cannotReplace() { return t("accept.cannotReplace"); },
+  get blockMoved() { return t("accept.blockMoved"); },
+  get blockChanged() { return t("accept.blockChanged"); },
+  get noteChanged() { return t("accept.noteChanged"); },
+  get closesFence() { return t("accept.closesFence"); },
+  get cancelled() { return t("accept.cancelled"); },
+  get noNoteOpen() { return PANEL_TEXTS.noNoteOpen; },
+  get noteInReadingView() { return PANEL_TEXTS.noteInReadingView; },
+  appliedTo: (label) => t("accept.appliedTo", label),
+  appliedAsBlock: (where: InsertWhere) => t("accept.appliedAsBlock", t(`accept.where.${where}`)),
+  get appendedToNote() { return t("accept.appendedToNote"); },
+  fileGone: (path) => t("accept.fileGone", path),
+  fileExists: (path) => t("accept.fileExists", path),
+  couldNotCreate: (path, reason) => (path ? t("accept.couldNotCreate", path, reason) : t("accept.couldNotCreateAnon", reason)),
+  savedFileWithReference: (path) => t("accept.savedWithReference", path),
+  savedFileNoReference: (path, why) => t("accept.savedNoReference", path, t(`accept.noRef.${why}`)),
+  savedFileAppended: (path) => t("accept.savedAppended", path),
+  savedFileReferenceFailed: (path, reason) => t("accept.savedReferenceFailed", path, reason),
+  unclosedFence: (selected) => t(selected ? "accept.unclosedFence.selection" : "accept.unclosedFence.cursor"),
+  couldNotApply: (reason) => t("accept.couldNotApply", reason),
 };

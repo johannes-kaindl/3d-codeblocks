@@ -4,13 +4,12 @@
 // zeichnet nur — UI-STANDARD §6. DOM ausschliesslich ueber createEl/createDiv.
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
 import {
-  MODEL_LOADING_REASON,
-  NO_BLOCK_REASON,
   type ActiveViewport,
   type ViewportController,
 } from "../core/active-viewport";
 import type { EditUiModel } from "../core/edit-session";
 import { NAMED_VIEWS } from "../core/view-spec";
+import { t } from "../i18n/t";
 
 export const VIEW_TYPE_3D_CONTROLS = "three-d-controls";
 
@@ -29,7 +28,7 @@ export function panelModel(controller: ViewportController | null): PanelModel {
   if (controller === null) {
     return {
       empty: true,
-      label: "Click a 3D model to control it here.",
+      label: t("ctrl.empty"),
       canSave: false,
       saveDisabledReason: null,
       canClear: false,
@@ -44,9 +43,9 @@ export function panelModel(controller: ViewportController | null): PanelModel {
     empty: false,
     label: controller.label(),
     canSave: hasBlock && hasView,
-    saveDisabledReason: !hasBlock ? NO_BLOCK_REASON : !hasView ? MODEL_LOADING_REASON : null,
+    saveDisabledReason: !hasBlock ? t("reason.noBlock") : !hasView ? t("reason.modelLoading") : null,
     canClear: hasBlock,
-    clearDisabledReason: hasBlock ? null : NO_BLOCK_REASON,
+    clearDisabledReason: hasBlock ? null : t("reason.noBlock"),
   };
 }
 
@@ -63,7 +62,7 @@ export class ControlPanelView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "3D view";
+    return t("ctrl.viewTitle");
   }
 
   getIcon(): string {
@@ -101,17 +100,17 @@ export class ControlPanelView extends ItemView {
 
     const actions = root.createDiv({ cls: "tdcb-panel-actions" });
 
-    const save = actions.createEl("button", { cls: "mod-cta", text: "Save view" });
+    const save = actions.createEl("button", { cls: "mod-cta", text: t("act.saveView") });
     save.disabled = !model.canSave;
     if (model.saveDisabledReason) save.title = model.saveDisabledReason;
     save.addEventListener("click", () => void controller.save(controller.getView()));
 
-    const clear = actions.createEl("button", { text: "Clear view" });
+    const clear = actions.createEl("button", { text: t("act.clearView") });
     clear.disabled = !model.canClear;
     if (model.clearDisabledReason) clear.title = model.clearDisabledReason;
     clear.addEventListener("click", () => void controller.save(null));
 
-    const fit = actions.createEl("button", { text: "Fit" });
+    const fit = actions.createEl("button", { text: t("ctrl.fit") });
     fit.addEventListener("click", () => controller.applyView(null));
     setIcon(fit.createSpan({ cls: "tdcb-icon" }), "maximize");
 
@@ -131,7 +130,7 @@ function drawEditSection(root: HTMLElement, edit: EditUiModel): void {
   const section = root.createDiv({ cls: "tdcb-panel-edit" });
 
   if (!edit.active) {
-    const enter = section.createEl("button", { text: "Edit model" });
+    const enter = section.createEl("button", { text: t("act.editModel") });
     enter.disabled = edit.disabledReason !== null;
     if (edit.disabledReason) enter.title = edit.disabledReason;
     enter.addEventListener("click", () => edit.enter());
@@ -139,16 +138,16 @@ function drawEditSection(root: HTMLElement, edit: EditUiModel): void {
   }
 
   const modes = section.createDiv({ cls: "tdcb-panel-edit-modes" });
-  const move = modes.createEl("button", { text: "Move" });
+  const move = modes.createEl("button", { text: t("act.move") });
   move.toggleClass("mod-cta", edit.mode === "translate");
   move.addEventListener("click", () => edit.setMode("translate"));
-  const scale = modes.createEl("button", { text: "Scale" });
+  const scale = modes.createEl("button", { text: t("act.scale") });
   scale.toggleClass("mod-cta", edit.mode === "scale");
   scale.addEventListener("click", () => edit.setMode("scale"));
 
   const selection = edit.selection;
   if (selection === null) {
-    section.createDiv({ text: "Click a part of the model to select it." });
+    section.createDiv({ text: t("ctrl.selectPart") });
   } else {
     section.createDiv({ cls: "tdcb-panel-edit-label", text: selection.name });
 
@@ -176,14 +175,14 @@ function drawEditSection(root: HTMLElement, edit: EditUiModel): void {
   }
 
   const buttons = section.createDiv({ cls: "tdcb-panel-actions" });
-  const reset = buttons.createEl("button", { text: "Reset node" });
+  const reset = buttons.createEl("button", { text: t("act.resetNode") });
   reset.disabled = selection === null;
   reset.addEventListener("click", () => edit.reset());
 
-  const save = buttons.createEl("button", { cls: "mod-cta", text: "Save edits" });
+  const save = buttons.createEl("button", { cls: "mod-cta", text: t("act.saveEdits") });
   save.disabled = !edit.dirty;
   save.addEventListener("click", () => edit.save());
 
-  const discard = buttons.createEl("button", { text: "Discard edits" });
+  const discard = buttons.createEl("button", { text: t("act.discardEdits") });
   discard.addEventListener("click", () => edit.discard());
 }

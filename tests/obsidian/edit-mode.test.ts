@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  EDIT_BLOCKED_DUPLICATE,
-  EDIT_STALE_ON_DISK,
-  EDIT_UNAVAILABLE_LOADING,
+  editBlockedDuplicate,
+  editStaleOnDisk,
+  editUnavailableLoading,
   EditCoordinator,
   type EditIo,
 } from "../../src/obsidian/edit-mode";
@@ -182,7 +182,7 @@ describe("EditCoordinator", () => {
     await coordinator.enter();
     expect(coordinator.active).toBe(false);
     expect(host.pin).not.toHaveBeenCalledWith(true);
-    expect(notices).toContain(EDIT_UNAVAILABLE_LOADING);
+    expect(notices).toContain(editUnavailableLoading());
   });
 
   it("enter: doppeltes Aufrufen waehrend des ersten Reads baut das Rig nur einmal (Fix #1)", async () => {
@@ -233,7 +233,7 @@ describe("EditCoordinator", () => {
     await coordinator.enter();
     const cb = host.createEditRig.mock.calls[0][0];
     cb.onSelectBlocked?.("duplicate");
-    expect(notices).toContain(EDIT_BLOCKED_DUPLICATE);
+    expect(notices).toContain(editBlockedDuplicate());
   });
 
   it("rigCallbacks: onSelectBlocked('locked') bleibt stumm — nur 'duplicate' meldet (Welle 6)", async () => {
@@ -292,7 +292,7 @@ describe("EditCoordinator", () => {
     await coordinator.save();
 
     expect(io.files["3d/eg.edit.gltf"]).toBeUndefined();
-    expect(notices).toContain(EDIT_STALE_ON_DISK);
+    expect(notices).toContain(editStaleOnDisk());
     // Kein Datenverlust: Modus und ungespeicherter Edit bleiben erhalten.
     expect(coordinator.active).toBe(true);
     expect(coordinator.uiModel().dirty).toBe(true);
@@ -311,7 +311,7 @@ describe("EditCoordinator", () => {
     await coordinator.save();
 
     expect(io.files["3d/eg.edit.gltf"]).toBeUndefined();
-    expect(notices).toContain(EDIT_STALE_ON_DISK);
+    expect(notices).toContain(editStaleOnDisk());
     expect(coordinator.active).toBe(true);
   });
 
@@ -323,7 +323,7 @@ describe("EditCoordinator", () => {
     await coordinator.save();
 
     expect(io.files["3d/eg.edit.gltf"]).toBeDefined();
-    expect(notices).not.toContain(EDIT_STALE_ON_DISK);
+    expect(notices).not.toContain(editStaleOnDisk());
   });
 
   it("save auf einer .edit.-Quelle schreibt in-place", async () => {

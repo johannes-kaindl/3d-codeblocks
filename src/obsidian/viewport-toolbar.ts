@@ -3,12 +3,11 @@
 // die Entscheidung "gibt es sie ueberhaupt" trifft `resolvePanelTarget`.
 import { setIcon } from "obsidian";
 import {
-  MODEL_LOADING_REASON,
-  NO_BLOCK_REASON,
   type ViewportController,
 } from "../core/active-viewport";
 import type { EditUiModel } from "../core/edit-session";
 import { resolvePanelTarget, type PanelPlacement } from "../core/panel-target";
+import { t } from "../i18n/t";
 
 export function toolbarVisible(placement: PanelPlacement, panelVisible: boolean): boolean {
   return resolvePanelTarget(placement, panelVisible) === "toolbar";
@@ -25,12 +24,12 @@ interface ToolbarButton {
   run: (controller: ViewportController) => void;
 }
 
-const BUTTONS: ToolbarButton[] = [
+const buttons = (): ToolbarButton[] => [
   {
     icon: "pin",
-    label: "Save view",
+    label: t("act.saveView"),
     disabledReason: (hasBlock, hasView) =>
-      !hasBlock ? NO_BLOCK_REASON : !hasView ? MODEL_LOADING_REASON : null,
+      !hasBlock ? t("reason.noBlock") : !hasView ? t("reason.modelLoading") : null,
     run: (controller) => {
       const spec = controller.getView();
       if (spec !== null) void controller.save(spec);
@@ -38,13 +37,13 @@ const BUTTONS: ToolbarButton[] = [
   },
   {
     icon: "pin-off",
-    label: "Clear view",
-    disabledReason: (hasBlock) => (hasBlock ? null : NO_BLOCK_REASON),
+    label: t("act.clearView"),
+    disabledReason: (hasBlock) => (hasBlock ? null : t("reason.noBlock")),
     run: (controller) => void controller.save(null),
   },
   {
     icon: "maximize",
-    label: "Fit camera to model",
+    label: t("act.fit"),
     disabledReason: () => null,
     run: (controller) => controller.applyView(null),
   },
@@ -60,10 +59,10 @@ interface EditButtonSpec {
   run: (edit: EditUiModel) => void;
 }
 
-const EDIT_BUTTONS: EditButtonSpec[] = [
+const editButtons = (): EditButtonSpec[] => [
   {
     icon: "move",
-    label: "Move",
+    label: t("act.move"),
     disabled: () => false,
     title: () => null,
     isActive: (edit) => edit.mode === "translate",
@@ -71,7 +70,7 @@ const EDIT_BUTTONS: EditButtonSpec[] = [
   },
   {
     icon: "scaling",
-    label: "Scale",
+    label: t("act.scale"),
     disabled: () => false,
     title: () => null,
     isActive: (edit) => edit.mode === "scale",
@@ -79,21 +78,21 @@ const EDIT_BUTTONS: EditButtonSpec[] = [
   },
   {
     icon: "rotate-ccw",
-    label: "Reset node",
+    label: t("act.resetNode"),
     disabled: (edit) => edit.selection === null,
     title: () => null,
     run: (edit) => edit.reset(),
   },
   {
     icon: "save",
-    label: "Save edits",
+    label: t("act.saveEdits"),
     disabled: (edit) => !edit.dirty,
-    title: (edit) => (edit.dirty ? null : "No changes yet"),
+    title: (edit) => (edit.dirty ? null : t("act.noChanges")),
     run: (edit) => edit.save(),
   },
   {
     icon: "x",
-    label: "Discard edits",
+    label: t("act.discardEdits"),
     disabled: () => false,
     title: () => null,
     run: (edit) => edit.discard(),
@@ -150,7 +149,7 @@ export function buildToolbar(
   const bar = parent.createDiv({ cls: "tdcb-toolbar" });
 
   if (edit?.active) {
-    for (const spec of EDIT_BUTTONS) {
+    for (const spec of editButtons()) {
       appendButton(
         bar,
         spec.icon,
@@ -167,7 +166,7 @@ export function buildToolbar(
   const hasBlock = controller.canSave();
   const hasView = controller.getView() !== null;
 
-  for (const spec of BUTTONS) {
+  for (const spec of buttons()) {
     const reason = spec.disabledReason(hasBlock, hasView);
     appendButton(bar, spec.icon, spec.label, reason !== null, reason ?? spec.label, false, () =>
       spec.run(controller),
@@ -178,9 +177,9 @@ export function buildToolbar(
     appendButton(
       bar,
       "pencil",
-      "Edit model",
+      t("act.editModel"),
       edit.disabledReason !== null,
-      edit.disabledReason ?? "Edit model",
+      edit.disabledReason ?? t("act.editModel"),
       false,
       () => edit.enter(),
     );

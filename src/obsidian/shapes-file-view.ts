@@ -14,6 +14,7 @@ import type { IssueLine, SourceEditorLike } from "./source-editor";
 import type { TrackedView } from "./tracked-view";
 import { buildActionBar } from "./viewport-toolbar";
 import { ViewerHost, wrapBudgetWithActive, type HostBaseDeps } from "./viewer-host";
+import { t } from "../i18n/t";
 
 export const VIEW_TYPE_SHAPES = "tdcb-shapes-file";
 
@@ -23,7 +24,7 @@ export interface ShapesFileViewDeps extends HostBaseDeps {
   openInPanel?: (target: PanelTarget) => void;
 }
 
-const PILL_LABELS: Record<ShapesMode, string> = { model: "Model", text: "Text", split: "Split" };
+const pillLabel = (mode: ShapesMode): string => t(`sv.${mode}`);
 
 export class ShapesFileView extends TextFileView implements TrackedView {
   /** Der GESPEICHERTE Modus: nur der Nutzer (setMode) oder die erste echte Breitenmessung
@@ -47,7 +48,7 @@ export class ShapesFileView extends TextFileView implements TrackedView {
   readonly controller: ViewportController = {
     ...readOnlyController(
       () => this.host,
-      () => this.file?.path ?? "shapes model",
+      () => this.file?.path ?? t("view.shapesModel"),
     ),
     shapesTarget: () => this.target(),
   };
@@ -72,7 +73,7 @@ export class ShapesFileView extends TextFileView implements TrackedView {
   }
 
   getDisplayText(): string {
-    return this.file?.basename ?? "shapes model";
+    return this.file?.basename ?? t("view.shapesModel");
   }
 
   async onOpen(): Promise<void> {
@@ -80,9 +81,9 @@ export class ShapesFileView extends TextFileView implements TrackedView {
     root.empty();
     root.addClass("tdcb-shapes-view");
 
-    const bar = root.createDiv({ cls: "tdcb-shapes-pills", attr: { role: "group", "aria-label": "View" } });
+    const bar = root.createDiv({ cls: "tdcb-shapes-pills", attr: { role: "group", "aria-label": t("sv.view") } });
     for (const mode of ["model", "text", "split"] as ShapesMode[]) {
-      const pill = bar.createEl("button", { cls: "tdcb-shapes-pill", text: PILL_LABELS[mode] });
+      const pill = bar.createEl("button", { cls: "tdcb-shapes-pill", text: pillLabel(mode) });
       pill.dataset.mode = mode;
       pill.addEventListener("click", () => this.setMode(mode));
       this.pills.set(mode, pill);
@@ -101,10 +102,10 @@ export class ShapesFileView extends TextFileView implements TrackedView {
       buildActionBar(this.parts.viewport, [
         {
           icon: "sparkles",
-          label: "Edit in prompt panel",
+          label: t("act.editInPrompt"),
           run: () => {
-            const t = this.target();
-            if (t) this.deps.openInPanel?.(t);
+            const target = this.target();
+            if (target) this.deps.openInPanel?.(target);
           },
         },
       ]);
@@ -261,7 +262,7 @@ export class ShapesFileView extends TextFileView implements TrackedView {
       provideBytes: () => Promise.resolve(new TextEncoder().encode(text).buffer),
       format: "shapes",
       inspectContainer: false,
-      label: this.file?.basename ?? "shapes model",
+      label: this.file?.basename ?? t("view.shapesModel"),
     });
   }
 
@@ -287,8 +288,8 @@ function summarize(issues: IssueLine[]): string {
   const errors = issues.filter((i) => i.severity === "error").length;
   const warnings = issues.length - errors;
   const counts = [
-    errors > 0 ? `${errors} ${errors === 1 ? "error" : "errors"}` : "",
-    warnings > 0 ? `${warnings} ${warnings === 1 ? "warning" : "warnings"}` : "",
+    errors > 0 ? t(errors === 1 ? "sv.error.one" : "sv.error.many", errors) : "",
+    warnings > 0 ? t(warnings === 1 ? "sv.warning.one" : "sv.warning.many", warnings) : "",
   ].filter(Boolean);
-  return `${counts.join(", ")} — Line ${first.line}: ${first.message}`;
+  return t("sv.summary", counts.join(", "), first.line, first.message);
 }

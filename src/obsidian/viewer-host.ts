@@ -24,6 +24,7 @@ import { resourceProblemNotes } from "../core/gltf-uri";
 import { convertShapesBytes } from "../core/shapes/convert";
 import type { ResourceResolver } from "./gltf-resources";
 import type { LightingMode, ModelLightsMode } from "../core/lighting";
+import { t } from "../i18n/t";
 
 export interface ViewportLike {
   setModel(object: unknown): void;
@@ -342,7 +343,7 @@ export class ViewerHost {
     }
 
     const overlay = this.stage.createDiv({ cls: "tdcb-play" });
-    overlay.createSpan({ text: "Click to activate" });
+    overlay.createSpan({ text: t("box.activate") });
     overlay.addEventListener("click", () => void this.reactivate());
   }
 

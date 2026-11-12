@@ -3,6 +3,7 @@
 import { setIcon } from "obsidian";
 import type { BadgeState } from "../core/edit-badge";
 import type { ViewModel } from "../core/view-model";
+import { t } from "../i18n/t";
 
 export interface BoxParts {
   root: HTMLElement;
@@ -62,7 +63,7 @@ export function renderMessage(host: HTMLElement, vm: ViewModel, onReload?: () =>
   if (vm.message !== null) box.createSpan({ text: vm.message });
 
   if (vm.showReloadButton && onReload) {
-    const button = box.createEl("button", { cls: "mod-cta", text: "Reload" });
+    const button = box.createEl("button", { cls: "mod-cta", text: t("box.reload") });
     button.addEventListener("click", onReload);
   }
 }

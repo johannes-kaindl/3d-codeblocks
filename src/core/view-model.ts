@@ -2,6 +2,7 @@
 // ViewModel und trifft keine Entscheidungen (UI-STANDARD §6).
 import { SUPPORTED_EXTENSIONS } from "./format";
 import { capList } from "./shapes/convert";
+import { t } from "../i18n/t";
 
 export type ViewerState =
   | { kind: "config-error"; messages: string[] }
@@ -56,32 +57,30 @@ export function toViewModel(state: ViewerState): ViewModel {
     case "config-error":
       return error(state.messages.join(" "));
     case "missing-file":
-      return error(`File not found: ${state.path}`);
+      return error(t("core.vm.missing", state.path));
     case "unsupported-format":
       return error(
-        `Unsupported format: ${state.path} (supported: ${SUPPORTED_EXTENSIONS.join(", ")})`,
+        t("core.vm.unsupported", state.path, SUPPORTED_EXTENSIONS.join(", ")),
       );
     case "compressed-gltf":
       // Nennt bewusst den AUSWEG mit: Meshopt geht seit 2026-08-30, nur Draco nicht.
       // Eine Fehlermeldung, die nur "geht nicht" sagt, laesst den Nutzer im Regen.
       return error(
-        "Draco-compressed glTF is not supported: its decoder needs a web worker, which " +
-          "Obsidian's renderer does not allow. Export uncompressed, or with Meshopt " +
-          `compression \u2014 that one works. Required: ${state.extensions.join(", ")}`,
+        t("core.vm.draco", state.extensions.join(", ")),
       );
     case "invalid-file":
-      return error("The file is damaged or not a valid GLB.");
+      return error(t("core.vm.invalidFile"));
     case "invalid-gltf-json":
-      return error("The glTF code is not valid JSON.");
+      return error(t("core.vm.invalidJson"));
     case "invalid-shapes":
-      return error(`The shapes code has no valid part. ${capList(state.messages, 5).join(" ")}`.trim());
+      return error(`${t("core.vm.noValidPart")} ${capList(state.messages, 5).join(" ")}`.trim());
     case "empty-shapes":
       return { ...SILENT, message: state.hint, tone: "info", empty: true };
     case "no-webgl":
-      return error("WebGL is unavailable, so the 3D view cannot be shown.");
+      return error(t("core.vm.noWebgl"));
     case "context-lost":
-      return error("The 3D context was lost.", true);
+      return error(t("core.vm.contextLost"), true);
     case "load-failed":
-      return error(`Could not load the model: ${state.detail}`, true);
+      return error(t("core.vm.loadFailed", state.detail), true);
   }
 }

@@ -6,6 +6,7 @@
 
 import { parseBlockLines, unquote } from "../vendor/kit/block-lines";
 import { VIEW_NAMES, parseView, type ViewRef } from "./view-spec";
+import { t } from "../i18n/t";
 
 export interface BlockConfig {
   file: string;
@@ -54,7 +55,7 @@ export function parseBlockConfig(source: string): ParseResult {
     const value = item.entry.value;
 
     if (!(KNOWN_KEYS as readonly string[]).includes(key)) {
-      warnings.push(`Unknown key: \`${item.entry.rawKey}\``);
+      warnings.push(t("core.parse.unknownKey", item.entry.rawKey));
       continue;
     }
 
@@ -67,7 +68,7 @@ export function parseBlockConfig(source: string): ParseResult {
       const parsed = parseView(value);
       if (parsed === null) {
         warnings.push(
-          `\`view\`: unknown view \`${value}\` — use ${VIEW_NAMES}, three numbers (azimuth,elevation,distance) or \`camera:<name>\` for a camera from the file`,
+          t("core.cfg.view", value, VIEW_NAMES),
         );
       } else {
         view = parsed;
@@ -75,7 +76,7 @@ export function parseBlockConfig(source: string): ParseResult {
     } else {
       const parsed = Number(value);
       if (!Number.isFinite(parsed) || parsed <= 0) {
-        warnings.push(`\`height\` must be a number: \`${value}\``);
+        warnings.push(t("core.parse.height", value));
       } else {
         height = parsed;
       }
@@ -83,11 +84,11 @@ export function parseBlockConfig(source: string): ParseResult {
   }
 
   if (fileSeen > 1) {
-    warnings.push("`file` given more than once — using the last one.");
+    warnings.push(t("core.cfg.fileTwice"));
   }
 
   if (file === undefined || file === "") {
-    return { config: null, errors: ["No `file:` given."], warnings };
+    return { config: null, errors: [t("core.cfg.noFile")], warnings };
   }
 
   return { config: { file, height, title, view }, errors: [], warnings };
