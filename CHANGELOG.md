@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **"Apply" in the prompt panel now uses the shared apply step of `obsidian-kit` 0.80.1 (and `code-kit` 0.54.0) instead of the plugin's own copy.** Wording and where the result goes stay the same; the three flaws below are the visible difference.
+
+### Fixed
+
+- **A line typed above the model's code block while the model was answering no longer loses your rounds.** The block is found again by its content (when exactly one block matches) and the panel keeps working on it; before, "Apply" said "The block moved" and the rounds were gone.
+- **A new model saved as a file no longer writes its reference into the wrong note.** If you switched to another note or to reading view while the file was being created, the reference could land in the note you had left; now the file is saved, nothing is inserted, and the message says why.
+- **A new model inserted at the cursor in a note that starts with front matter (`---`) no longer breaks the front matter.** With the cursor at the very top or inside the front matter, the code block is placed after the closing `---`.
+
 ## [0.13.2] — 2026-11-11
 
 ### Changed

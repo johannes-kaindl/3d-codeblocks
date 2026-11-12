@@ -20,8 +20,8 @@ const deepFreeze = <T>(o: T): T => {
   return o;
 };
 
-const BLOCK: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 2, lineEnd: 5, label: "Tisch", body: "" };
-const OTHER: PanelTarget = { kind: "shapes-file", path: "x.shapes", label: "x" };
+const BLOCK: PanelTarget = { kind: "block", path: "n.md", lineStart: 2, lineEnd: 5, label: "Tisch", body: "" };
+const OTHER: PanelTarget = { kind: "file", path: "x.shapes", label: "x" };
 const TABLE = "box Platte size 1.2 0.05 0.7 at 0 0.725 0\nbox Bein-1 size 0.05 0.7 0.05 at -0.55 0.35 -0.3";
 
 const refine = (instruction: string, changes: RawChange[], basedOn: number | null, text = ""): ShapesRound => ({

@@ -328,7 +328,7 @@ export class PromptPanelView extends ItemView {
       base = baseTextForRefine(this.panel, await this.deps.readTargetText(target));
       if (this.controller !== ctrl) return;
       if (base === null) {
-        this.setStatus("error", target.kind === "shapes-block" ? PANEL_TEXTS.blockGone : PANEL_TEXTS.modelGone);
+        this.setStatus("error", target.kind === "block" ? PANEL_TEXTS.blockGone : PANEL_TEXTS.modelGone);
         return;
       }
       messages = buildRefineMessages(base, instruction);
@@ -587,7 +587,7 @@ export class PromptPanelView extends ItemView {
   private renderVersions(): void {
     if (!this.versionsEl) return;
     this.versionsEl.empty();
-    const text = this.panel.target.kind === "shapes-file" ? PANEL_TEXTS.versionsEmpty : PANEL_TEXTS.versionsOnlyFiles;
+    const text = this.panel.target.kind === "file" ? PANEL_TEXTS.versionsEmpty : PANEL_TEXTS.versionsOnlyFiles;
     this.versionsEl.createDiv({ cls: "tdcb-prompt-versions-empty", text });
   }
 }

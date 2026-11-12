@@ -5,13 +5,11 @@
 // scheitert ein Schritt, kommt KEIN Text zurück. Keine Uhr, keine Mutation, wirft nie.
 import { applyChanges } from "./changes";
 import type { RawChange } from "./protocol";
+import { sameTarget, type Target } from "../../vendor/kit/panel-session";
 import { activeRound, EMPTY_ROUNDS, type Rounds } from "../../vendor/kit/rounds";
 
-export type PanelTarget =
-  | { kind: "new" }
-  | { kind: "shapes-block"; path: string; lineStart: number; lineEnd: number; label: string; body: string }
-  | { kind: "shapes-file"; path: string; label: string }
-  | { kind: "other"; label: string };
+/** Das Ziel des Panels ist der Kit-Typ (code-kit `panel-session`): `block` = ein ```shapes-Block einer Notiz, `file` = eine .shapes-Datei. */
+export type PanelTarget = Target;
 
 export type ShapesRound =
   | { kind: "create"; instruction: string; text: string; model: string; at: number }
@@ -24,30 +22,9 @@ export interface PanelState {
 
 export const INITIAL_PANEL: PanelState = { target: { kind: "new" }, rounds: EMPTY_ROUNDS };
 
-/** Vergleichsform fuer Blocktexte (Fingerabdruck): CRLF -> LF, ein abschliessendes Zeilenende zaehlt nicht
- *  (`source` aus dem Nachbearbeiter kann eines tragen, siehe `convertBlockAt`, Commit 7b2e418). */
-export const normBody = (t: string): string => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
-
-/** (`body` = Quelltext des Blocks beim Klick: der Fingerabdruck, gegen den der Schreiber prueft; er zaehlt nicht fuer die Gleichheit.)
- *  Strukturell gleich? Block: Pfad + Zeilen + Blocktext (die Beschriftung zählt nicht; ein anderer Text ist ein frischer Fingerabdruck, also ein ANDERES Ziel). Ein Block, dessen Zeilen
- *  sich verschoben haben, ist bei offenen Runden ein ANDERES Ziel: das Panel bekommt bei jedem Klick ein
- *  frisches Ziel, und der Schreiber (Task 7) findet den Zaun über die Zeilennummer wieder und verweigert,
- *  wenn der Block gewandert ist. */
-export function sameTarget(a: PanelTarget, b: PanelTarget): boolean {
-  if (a.kind !== b.kind) return false;
-  switch (a.kind) {
-    case "new":
-      return true;
-    case "shapes-block": {
-      const o = b as typeof a;
-      return a.path === o.path && a.lineStart === o.lineStart && a.lineEnd === o.lineEnd && normBody(a.body) === normBody(o.body);
-    }
-    case "shapes-file":
-      return a.path === (b as typeof a).path;
-    case "other":
-      return a.label === (b as typeof a).label;
-  }
-}
+/** Strukturell gleich? Das Kit (`panel-session`) entscheidet: Block = Pfad + Zeilen + Blocktext (die Beschriftung zählt nicht; ein anderer Text ist ein
+ *  frischer Fingerabdruck, also ein ANDERES Ziel). */
+export { sameTarget };
 
 /** Solange Runden offen sind, bleibt das Ziel; `kept` meldet, dass ein ANDERES Ziel angeboten wurde. */
 export function followTarget(s: PanelState, t: PanelTarget): { state: PanelState; kept: boolean } {

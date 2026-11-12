@@ -360,7 +360,7 @@ describe("prompt panel follows the active viewport", () => {
     app.workspace.getLeavesOfType = vi.fn((t: string) => (t === VIEW_TYPE_PROMPT ? [{ view }] : []));
     const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
     await plugin.onload();
-    const t = { kind: "shapes-file", path: "a.shapes", label: "a" } as const;
+    const t = { kind: "file", path: "a.shapes", label: "a" } as const;
     plugin.active.set({ shapesTarget: () => t, label: () => "a" } as never);
     expect(setTarget).toHaveBeenLastCalledWith(t);
     setTarget.mockClear();
@@ -379,7 +379,7 @@ describe("openPromptPanel", () => {
     vi.spyOn(v, "setTarget").mockImplementation(() => {});
     return v;
   };
-  const target = { kind: "shapes-file", path: "a.shapes", label: "a" } as const;
+  const target = { kind: "file", path: "a.shapes", label: "a" } as const;
   function setup(opts: { registered?: boolean; existing?: any } = {}) {
     const app = makeFakeApp();
     const view = spiedView();

@@ -331,7 +331,7 @@ describe("ShapesFileView", () => {
       const { view } = makeView();
       expect(view.controller.shapesTarget?.()).toBeNull();
       withFile(view);
-      expect(view.controller.shapesTarget?.()).toEqual({ kind: "shapes-file", path: "Modelle/Tisch.shapes", label: "Tisch" });
+      expect(view.controller.shapesTarget?.()).toEqual({ kind: "file", path: "Modelle/Tisch.shapes", label: "Tisch" });
     });
 
     it("builds an action bar with only 'Edit in prompt panel' inside the model viewport, not next to the pills", async () => {
@@ -346,7 +346,7 @@ describe("ShapesFileView", () => {
       expect(bars[0].children.map((b: any) => b.getAttribute("aria-label"))).toEqual(["Edit in prompt panel"]);
       expect(bars[0].children[0].dataset.icon).toBe("sparkles");
       bars[0].children[0].click();
-      expect(openInPanel).toHaveBeenCalledWith({ kind: "shapes-file", path: "Modelle/Tisch.shapes", label: "Tisch" });
+      expect(openInPanel).toHaveBeenCalledWith({ kind: "file", path: "Modelle/Tisch.shapes", label: "Tisch" });
     });
 
     it("builds no bar without openInPanel", async () => {

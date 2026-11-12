@@ -60,7 +60,7 @@ export class ShapesFileView extends TextFileView implements TrackedView {
   }
 
   private target(): PanelTarget | null {
-    return this.file ? { kind: "shapes-file", path: this.file.path, label: this.file.basename } : null;
+    return this.file ? { kind: "file", path: this.file.path, label: this.file.basename } : null;
   }
 
   getViewType(): string {

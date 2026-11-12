@@ -443,3 +443,15 @@ export function makeFakeApp(): any {
     },
   };
 }
+
+const FRONTMATTER_RE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---(?:\r?\n|$)/;
+
+/** `getFrontMatterInfo` (gebraucht vom Kit-`panel-accept`): Nachbildung nach obsidian-kit `src/testing/obsidian-mock.ts` (0.80.1), erkennt nur den
+ *  einfachen `---\n…\n---`-Block am Dateianfang; `exists` und `contentStart` stimmen mit der echten Funktion überein. */
+export function getFrontMatterInfo(content: string): { exists: boolean; frontmatter: string; from: number; to: number; contentStart: number } {
+  const m = FRONTMATTER_RE.exec(content);
+  if (!m) return { exists: false, frontmatter: "", from: 0, to: 0, contentStart: 0 };
+  const block = m[1] ?? "";
+  const from = content.indexOf("\n") + 1;
+  return { exists: true, frontmatter: block, from, to: from + block.length, contentStart: m[0].length };
+}

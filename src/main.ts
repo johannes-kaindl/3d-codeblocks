@@ -32,7 +32,7 @@ import {
   convertFileToBlock,
 } from "./obsidian/shapes-convert";
 import { PromptPanelView, VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel";
-import { acceptPanel, chooseAcceptAs, readTargetText, type AcceptEnv } from "./obsidian/panel-accept";
+import { acceptPanel, buildAcceptEnv, readTargetText, type AcceptEnv } from "./obsidian/accept";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { saveViewAsImage } from "./obsidian/save-image";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
@@ -522,13 +522,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   }
 
   private acceptEnv(): AcceptEnv {
-    return {
-      app: this.app,
-      ports: obsidianWritePorts(this.app),
-      settings: () => this.settings,
-      lastEditor: () => this.lastEditor(),
-      choose: () => chooseAcceptAs(this.app),
-    };
+    return buildAcceptEnv({ app: this.app, ports: obsidianWritePorts(this.app), settings: () => this.settings, lastEditor: () => this.lastEditor() });
   }
 
   private convertEnv() {

@@ -174,8 +174,8 @@ export async function convertBlockAt(env: ConvertEnv, path: string, lineStart: n
 }
 
 /** Der ```shapes-Zaun, der GENAU an `lineStart` oeffnet und an `lineEnd` schliesst (Zeilen aus dem Nachbearbeiter,
- *  0-basiert, beide inklusive) — sonst `null` (Block gewandert, andere Sprache, andere Laenge). Geteilt mit dem
- *  Prompt-Panel (`panel-accept.ts`), damit es EINE Auffindungsregel gibt. */
+ *  0-basiert, beide inklusive) — sonst `null` (Block gewandert, andere Sprache, andere Laenge). Streng auf die Zeilen:
+ *  das Prompt-Panel findet seinen Block ueber das Kit (`readBlockText`/`acceptPanel`) auch nach einer Zeile darueber wieder. */
 export function locateShapesFence(text: string, lineStart: number, lineEnd: number): Fence | null {
   const fence = listFences(text).find((f) => f.openLine === lineStart);
   return fence && fence.lang === "shapes" && fence.closeLine === lineEnd ? fence : null;

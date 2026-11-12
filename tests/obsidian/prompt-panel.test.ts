@@ -7,7 +7,7 @@ const MODEL = "tiny/model";
 const TABLE = "box Platte size 1.2 0.05 0.7 at 0 0.725 0 color #8b5a2b";
 const TIMING = { startedAt: 0, firstTokenAt: 0, endedAt: 0 };
 
-const BLOCK: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 3, lineEnd: 6, label: "Table", body: "" };
+const BLOCK: PanelTarget = { kind: "block", path: "n.md", lineStart: 3, lineEnd: 6, label: "Table", body: "" };
 const OTHER: PanelTarget = { kind: "other", label: "Elsewhere" };
 
 type Handlers = { onToken?: (t: string) => void; onReasoning?: (t: string) => void; signal?: AbortSignal };
@@ -231,15 +231,15 @@ describe("PromptPanelView", () => {
   });
 
   it("shows the real acceptPanel messages unchanged in the status line (no doubled prefix)", async () => {
-    const { acceptPanel } = await import("../../src/obsidian/panel-accept");
+    const { acceptPanel, buildAcceptEnv } = await import("../../src/obsidian/accept");
     const inserted: string[] = [];
     const view0 = { file: { path: "n.md" }, getMode: () => "source", editor: { somethingSelected: () => false, getCursor: () => ({ line: 0, ch: 0 }), getValue: () => "", replaceSelection: (t: string) => { inserted.push(t); } } };
-    const env = {
+    const env = buildAcceptEnv({
       app: {} as never,
       ports: { editorFor: () => null, vault: { read: async () => "", process: async () => {} } },
       settings: () => DEFAULT_SETTINGS,
       lastEditor: () => view0 as never,
-    };
+    });
     const { view } = makeView(answer('{"parts":[{"name":"A","shape":"box","size":[1]}]}'), { accept: (s: never) => acceptPanel(env, s) });
     await view.onOpen();
     await send(view, "a box");
@@ -257,7 +257,7 @@ describe("PromptPanelView", () => {
 
   describe("block target lifecycle (fingerprint)", () => {
     const CHANGE = '{"changes":[{"op":"change","name":"Platte","position":[0,0.925,0]}]}';
-    const B0: PanelTarget = { kind: "shapes-block", path: "n.md", lineStart: 3, lineEnd: 5, label: "Table", body: TABLE };
+    const B0: PanelTarget = { kind: "block", path: "n.md", lineStart: 3, lineEnd: 5, label: "Table", body: TABLE };
     it("a fresh fingerprint offered while rounds are open is kept; Discard adopts it and the next change builds on the fresh text", async () => {
       const fresh = { ...B0, body: `${TABLE}\nbox X size 1 at 0 0 0` };
       const read = vi.fn(async (t: PanelTarget) => (t === fresh ? fresh.body : TABLE));
@@ -317,7 +317,7 @@ describe("PromptPanelView", () => {
     it("other targets keep the old wording", async () => {
       const { view } = makeView(answer(CHANGE), { readTargetText: vi.fn(async () => null) });
       await view.onOpen();
-      view.setTarget({ kind: "shapes-file", path: "x.shapes", label: "x" });
+      view.setTarget({ kind: "file", path: "x.shapes", label: "x" });
       await send(view, "raise");
       expect(statusText(view)).toBe("The model to change is gone.");
     });
@@ -394,7 +394,7 @@ describe("PromptPanelView", () => {
       one(view, "tdcb-prompt-discard").click();
       await vi.waitFor(() => expect(view.state().rounds.rounds).toHaveLength(0));
       expect(shown(view)).toBe(true);
-      view.setTarget({ kind: "shapes-file", path: "x.shapes", label: "x" });
+      view.setTarget({ kind: "file", path: "x.shapes", label: "x" });
       expect(shown(view)).toBe(false);
     });
     it("yields to the no-endpoint empty state when both would apply", async () => {
@@ -431,8 +431,8 @@ describe("PromptPanelView", () => {
   });
 
   it("keeps target A while a refine request runs and B is offered", async () => {
-    const A: PanelTarget = { kind: "shapes-block", path: "a.md", lineStart: 0, lineEnd: 2, label: "A", body: "" };
-    const B: PanelTarget = { kind: "shapes-block", path: "b.md", lineStart: 0, lineEnd: 2, label: "B", body: "" };
+    const A: PanelTarget = { kind: "block", path: "a.md", lineStart: 0, lineEnd: 2, label: "A", body: "" };
+    const B: PanelTarget = { kind: "block", path: "b.md", lineStart: 0, lineEnd: 2, label: "B", body: "" };
     const h = held('{"changes":[{"op":"change","name":"Platte","position":[0,0.925,0]}]}');
     const { view } = makeView(h.complete, { readTargetText: vi.fn(async () => TABLE) });
     await view.onOpen();
