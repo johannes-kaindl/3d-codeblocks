@@ -19,6 +19,7 @@ import {
 } from "../core/shapes/panel-state";
 import { buildCreateMessages, buildRefineMessages, readChangesAnswer, readPartsAnswer } from "../core/shapes/protocol";
 import { failureHint, qualityLine, type QualityTask } from "../core/shapes/quality";
+import { settleTarget, taskKind } from "../vendor/kit/panel-session";
 import { clearRounds, pushRound, selectRound } from "../vendor/kit/rounds";
 import { buildHubInto, type HubController, type HubPanel } from "../vendor/kit-obsidian/hub";
 import type { LlmConnection } from "../vendor/kit-obsidian/llm-connection";
@@ -261,7 +262,7 @@ export class PromptPanelView extends ItemView {
   // ---- Ablauf ---------------------------------------------------------------------------------
 
   private kind(): QualityTask {
-    return this.panel.target.kind === "new" && this.panel.rounds.rounds.length === 0 ? "create" : "refine";
+    return taskKind(this.panel);
   }
 
   private model(): string {
@@ -310,8 +311,9 @@ export class PromptPanelView extends ItemView {
 
   /** Ein angebotenes Ziel, das waehrend des Laufs zurueckgehalten wurde, gilt jetzt, wenn keine Runde offen ist. */
   private settleTarget(): void {
-    if (this.panel.rounds.rounds.length === 0 && this.offered !== null) {
-      this.panel = { ...this.panel, target: this.offered };
+    const settled = settleTarget(this.panel, this.offered);
+    if (settled !== this.panel) {
+      this.panel = settled;
       this.offered = null;
       this.kept = false;
     }

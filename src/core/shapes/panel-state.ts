@@ -5,8 +5,8 @@
 // scheitert ein Schritt, kommt KEIN Text zurück. Keine Uhr, keine Mutation, wirft nie.
 import { applyChanges } from "./changes";
 import type { RawChange } from "./protocol";
-import { sameTarget, type Target } from "../../vendor/kit/panel-session";
-import { activeRound, EMPTY_ROUNDS, type Rounds } from "../../vendor/kit/rounds";
+import { baseTextForRefine as kitBaseTextForRefine, followTarget as kitFollowTarget, sameTarget, type Target } from "../../vendor/kit/panel-session";
+import { EMPTY_ROUNDS, type Rounds } from "../../vendor/kit/rounds";
 import { t } from "../../i18n/t";
 
 /** Das Ziel des Panels ist der Kit-Typ (code-kit `panel-session`): `block` = ein ```shapes-Block einer Notiz, `file` = eine .shapes-Datei. */
@@ -29,8 +29,9 @@ export { sameTarget };
 
 /** Solange Runden offen sind, bleibt das Ziel; `kept` meldet, dass ein ANDERES Ziel angeboten wurde. */
 export function followTarget(s: PanelState, t: PanelTarget): { state: PanelState; kept: boolean } {
-  if (s.rounds.rounds.length > 0) return { state: s, kept: !sameTarget(s.target, t) };
-  return { state: { ...s, target: t }, kept: false };
+  const state = kitFollowTarget(s, t);
+  // Das Kit gibt dasselbe Objekt zurück, wenn das Ziel bleibt (Runden offen); nur dann zählt ein ANDERES Angebot als zurückgehalten.
+  return { state, kept: state === s && !sameTarget(s.target, t) };
 }
 
 interface Resolved {
@@ -112,7 +113,5 @@ export function acceptText(rounds: Rounds<ShapesRound>, currentTargetText: strin
 /** Grundlage der nächsten Verfeinerung: der Text der aktiven Runde (das, was der Nutzer sieht), sonst der
  *  aktuelle Zieltext; für Ziel „neu" ohne Runden gibt es nichts zu verfeinern (`null`). */
 export function baseTextForRefine(s: PanelState, currentTargetText: string | null): string | null {
-  const active = activeRound(s.rounds);
-  if (active !== null) return active.text;
-  return s.target.kind === "new" ? null : currentTargetText;
+  return kitBaseTextForRefine(s, currentTargetText, { textOf: (r) => r.text });
 }

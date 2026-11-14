@@ -4,7 +4,7 @@
 import { MarkdownView, Notice, TFile, type App } from "obsidian";
 import { buildGltfExport, exportBaseName } from "../core/shapes/export";
 import { capList } from "../core/shapes/convert";
-import { findFenceAt } from "../core/shapes/fence";
+import { findFenceAt } from "../vendor/kit/fence-scan";
 import { t } from "../i18n/t";
 
 interface Source {

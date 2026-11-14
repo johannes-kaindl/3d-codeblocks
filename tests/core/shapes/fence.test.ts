@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fenceFor, findFenceAt, listFences } from "../../../src/core/shapes/fence";
+import { fenceFor } from "../../../src/vendor/kit/fences";
+import { findFenceAt, listFences } from "../../../src/vendor/kit/fence-scan";
 
 const NOTE = ["# Möbel", "", "```shapes", "box A size 1", "```", "", "~~~js", "x", "~~~", "````shapes", "```", "box B size 1", "````"].join("\n");
 
@@ -28,6 +29,19 @@ describe("findFenceAt", () => {
   it("does not see fences nested in a callout or list item", () => {
     expect(findFenceAt("> ```shapes\n> box A size 1\n> ```", 1)).toBeNull();
     expect(findFenceAt("- item\n    ```shapes\n    box A size 1\n    ```", 2)).toBeNull();
+  });
+});
+
+describe("Unterschied zum früheren Eigenbau (Kit-Fassung ist CommonMark-genauer)", () => {
+  it("a tab is no indent of up to three spaces: a tab-indented fence is indented code, not a fence", () => {
+    expect(listFences("\t```shapes\n\tbox A size 1\n\t```")).toEqual([]);
+  });
+  it("the closing fence tolerates trailing spaces and tabs, nothing else", () => {
+    expect(listFences("```shapes\nbox A size 1\n```  \t")).toHaveLength(1);
+    expect(findFenceAt("```shapes\nbox A size 1\n``` x\nmore", 3)?.closeLine).toBe(3);
+  });
+  it("a byte-order mark in front of the first line does not hide a fence", () => {
+    expect(listFences("\uFEFF```shapes\nbox A size 1\n```").map((f) => f.lang)).toEqual(["shapes"]);
   });
 });
 

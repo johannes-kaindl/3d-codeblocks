@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listFences } from "../../../src/core/shapes/fence";
+import { listFences } from "../../../src/vendor/kit/fence-scan";
 import { findModelReferences, referenceBlock, shapesBlock, unaccountedMentions } from "../../../src/core/shapes/references";
 
 const TARGET = "Modelle/tisch.shapes";
