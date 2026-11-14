@@ -15,20 +15,20 @@
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "anthropic-wire", "override-guard", { "name": "block-writer", "ref": "0.75.0" }, { "name": "fence-scan", "ref": "0.80.1" }],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": [{ "name": "endpoint-source", "ref": "0.89.0" }, "endpoint-secret-hook", "anthropic-wire", "override-guard", { "name": "block-writer", "ref": "0.75.0" }, { "name": "fence-scan", "ref": "0.80.1" }],
       "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {
       "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
       "modules": [
         "confirm", "folder-suggest", "settings_walker", "help-setting",
-        { "name": "llm-connection", "ref": "0.88.0" }, { "name": "llm-connection-strings", "ref": "0.88.0" }, "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
+        { "name": "llm-connection", "ref": "0.89.0" }, { "name": "llm-connection-strings", "ref": "0.89.0" }, "backend-probe", "chat-client", "chat-transport", { "name": "endpoint-source", "ref": "0.89.0" }, "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
-        "clock", "stream-area", "hub", "version-list", { "name": "endpoint-plumbing", "ref": "0.88.0" }, "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport",
-        { "name": "model-bar", "ref": "0.88.0" }, { "name": "model-bar-strings", "ref": "0.88.0" }, { "name": "thinking-control", "ref": "0.88.0" }, { "name": "write-ports", "ref": "0.75.0" }, { "name": "choice-modal", "ref": "0.76.0" }, { "name": "status-indicator", "ref": "0.76.0" }, { "name": "panel-accept", "ref": "0.80.1" }
+        "clock", "stream-area", "hub", "version-list", { "name": "endpoint-plumbing", "ref": "0.89.0" }, "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport",
+        { "name": "model-bar", "ref": "0.89.0" }, { "name": "model-bar-strings", "ref": "0.89.0" }, { "name": "thinking-control", "ref": "0.89.0" }, { "name": "write-ports", "ref": "0.75.0" }, { "name": "choice-modal", "ref": "0.76.0" }, { "name": "status-indicator", "ref": "0.76.0" }, { "name": "panel-accept", "ref": "0.80.1" }
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },
-    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": ["kit-css", "window-timers", "linear-probe"] }
+    { "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing", "modules": [{ "name": "kit-css", "ref": "0.89.0" }, "window-timers", "linear-probe"] }
   ]
 }
