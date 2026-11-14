@@ -64,7 +64,10 @@ describe("refine replay", () => {
   });
 });
 
-// Die Fixtures MIT dem neuen Prompt (Formwechsel per change, promptSha 71051822eb114cf6): sie tragen die Tabellenzeilen.
+// Die Fixtures MIT dem neuen Prompt (Formwechsel per change, promptSha 875cdf88016d175c, bis Welle 33 71051822eb114cf6): sie tragen die Tabellenzeilen.
+// Die aufgezeichnete Zusammenfassung trägt den Stempel des alten Schemas (System + Vorlage ohne Trenner). Aufzeichnungen werden nicht umgeschrieben;
+// derselbe Prompt hat im Kit-Schema (NUL-Trenner) den Wert `promptSha("refine")`, den die Tabellenzeile trägt.
+const RECORDED_SHA_OLD_SCHEME = "71051822eb114cf6";
 const NEW_FIXTURES = [
   { file: "qwen3.8-27b-refine-2026-10-03-71051822.jsonl", model: "qwen/qwen3.8-27b", good: 8 },
   { file: "gemma-4-e4b-refine-2026-10-03-71051822.jsonl", model: "google/gemma-4-e4b", good: 6 },
@@ -75,7 +78,7 @@ describe("refine replay of the current-prompt runs (backs the table rows)", () =
     it(`${f.model}: ${f.good} of 8 re-derived, outcomes equal the record, row matches`, async () => {
       const recs = load(f.file);
       const summary = recs.find((r) => r.summary === true)!;
-      expect(summary).toMatchObject({ complete: true, dry: false, good: f.good, of: 8, model: f.model, task: "refine", promptSha: promptSha("refine") });
+      expect(summary).toMatchObject({ complete: true, dry: false, good: f.good, of: 8, model: f.model, task: "refine", promptSha: RECORDED_SHA_OLD_SCHEME });
       const out = await replay(recs);
       expect(Object.keys(out)).toHaveLength(8);
       expect(count(out)).toBe(f.good);

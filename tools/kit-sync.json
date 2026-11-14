@@ -10,7 +10,7 @@
         "num", "settings_schema", "secrets", { "name": "redact", "ref": "0.60.0" }, "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "rel-path", "block-lines", { "name": "split-list", "ref": "0.42.0" }, { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "css-color", "ref": "0.56.0" }
+        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "rel-path", "block-lines", { "name": "split-list", "ref": "0.42.0" }, { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "css-color", "ref": "0.56.0" }, { "name": "measured-quality", "ref": "0.55.0" }, { "name": "sha256", "ref": "0.55.0" }
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },

@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **"Apply" in the prompt panel now uses the shared apply step of `obsidian-kit` 0.80.1 (and `code-kit` 0.54.0) instead of the plugin's own copy.** Wording and where the result goes stay the same; the three flaws below are the visible difference.
+- The quality line ("measured: 9 of 10 …") and the hint after a failed answer are now computed by the shared `measured-quality` of `code-kit` 0.55.0 instead of the plugin's own copy. Wording and numbers are unchanged; nothing to notice.
 - **Fences in a note are found with the shared scanner of `obsidian-kit` 0.80.1 instead of the plugin's own copy.** It follows CommonMark more closely: a fence indented with a tab is code, not a model block, a closing fence may be followed by spaces and tabs only, and a byte-order mark in front of the first line no longer hides a fence on line 1. Spaces-indented fences behave as before.
 - Colour values in a model (`#rgb`, `#rrggbb`) are now read by the shared `css-color` of `code-kit` 0.56.0 instead of the plugin's own copy. Behaviour is unchanged; nothing to notice.
 

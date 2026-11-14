@@ -12,8 +12,8 @@ describe("refine prompt pins (an edit needs a new lab run and a new table row)",
   });
 
   it("pins the refine promptSha (the value a refine table row must carry)", () => {
-    expect(promptSha("refine")).toBe("71051822eb114cf6");
-    expect(promptSha("create")).toBe("6d29c7c76d4532f2");
+    expect(promptSha("refine")).toBe("875cdf88016d175c");
+    expect(promptSha("create")).toBe("7822186a04037e50");
   });
 
   it("promptSha is 16 hex chars and differs per task", () => {

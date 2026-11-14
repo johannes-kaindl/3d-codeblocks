@@ -1,10 +1,11 @@
 // Prompt-Fingerabdruck (Test-/Lab-Seite; src bleibt frei von Node-APIs).
-// Regel: promptSha(task) = die ersten 16 Hex-Zeichen von SHA-256 über System-Prompt + Nutzer-Nachricht,
-// beides direkt aneinandergehängt (ohne Trenner), die Nutzer-Nachricht aus der echten build*Messages-Funktion
-// für eine FESTE Eingabe. Ändert sich ein Wort des Prompts oder der Vorlage, ändert sich der Wert, und jede
+// Regel: promptSha(task) = Kit-`promptFingerprint` (code-kit measured-quality): die ersten 16 Hex-Zeichen von
+// SHA-256 über System-Prompt + NUL + Nutzer-Nachricht, die Nutzer-Nachricht aus der echten build*Messages-Funktion
+// für eine FESTE Eingabe. Bis Welle 33 ohne Trenner aneinandergehängt; der NUL-Trenner trennt "ab"+"c" von "a"+"bc". Ändert sich ein Wort des Prompts oder der Vorlage, ändert sich der Wert, und jede
 // Messtabellenzeile mit dem alten Wert ist nicht mehr gedeckt (quality.test.ts).
 import { createHash } from "node:crypto";
 import { buildCreateMessages, buildRefineMessages } from "../../src/core/shapes/protocol";
+import { promptFingerprint } from "../../src/vendor/kit/measured-quality";
 import { REFINE_BASE } from "./shapes-cases";
 
 export const FIXED_CREATE_INPUT = "FIXED-PROMPT";
@@ -20,5 +21,5 @@ export function userTemplateOutput(task: "create" | "refine"): string {
 
 export function promptSha(task: "create" | "refine"): string {
   const m = task === "create" ? buildCreateMessages(FIXED_CREATE_INPUT) : buildRefineMessages(REFINE_BASE, FIXED_REFINE_INSTRUCTION);
-  return sha256(m[0].content + m[1].content).slice(0, 16);
+  return promptFingerprint(m[0].content, m[1].content);
 }

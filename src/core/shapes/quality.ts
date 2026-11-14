@@ -4,8 +4,15 @@
 // die Zahlen leitet quality.test.ts bei jedem Lauf aus den Fixtures neu ab.
 // Die Messungen liefen mit temperature 0.2, max_tokens 14000 und ohne response_format; das Panel muss
 // dasselbe Sampling senden oder neu messen. `promptSha` bindet jede Zeile an den gemessenen Prompt
-// (Regel: tests/helpers/prompt-sha.ts); ändert sich der Prompt, wird die Zeile ungültig und gehört nach
+// (Regel: tests/helpers/prompt-sha.ts, Kit-`promptFingerprint`: System + NUL + Vorlage); ändert sich der Prompt, wird die Zeile ungültig und gehört nach
 // docs/LAB.md in die Liste der zurückgezogenen Zeilen.
+import {
+  failureHint as kitFailureHint,
+  findMeasurement as kitFindMeasurement,
+  qualityLine as kitQualityLine,
+  type QualityOptions,
+  type QualityTexts,
+} from "../../vendor/kit/measured-quality";
 import type { FamilyId } from "../../vendor/kit/sampling-profiles";
 import { t } from "../../i18n/t";
 
@@ -31,21 +38,21 @@ export interface Measurement {
 
 export const MEASUREMENTS: readonly Measurement[] = [
   {
-    model: "qwen/qwen3.8-27b", mode: "structured", task: "create", good: 9, of: 10, measuredAt: "2026-10-01", promptSha: "6d29c7c76d4532f2",
+    model: "qwen/qwen3.8-27b", mode: "structured", task: "create", good: 9, of: 10, measuredAt: "2026-10-01", promptSha: "7822186a04037e50",
     source: "Spike A 2026-10-01, tests/fixtures/shapes-spike/a-q27-dsl.jsonl (+ tests/fixtures/shapes-spike/a-q27-dsl-rerun.jsonl for A04), evaluated via tests/helpers/shapes-spike-eval.ts (golden-spike.test.ts). The lab control run on 2026-10-03 through the production code reproduced 9 of 10 (A07 bad again): tests/fixtures/shapes-lab/qwen3.8-27b-create-2026-10-03.jsonl",
   },
   {
-    model: "google/gemma-4-e4b", mode: "structured", task: "create", good: 4, of: 10, measuredAt: "2026-10-01", promptSha: "6d29c7c76d4532f2",
+    model: "google/gemma-4-e4b", mode: "structured", task: "create", good: 4, of: 10, measuredAt: "2026-10-01", promptSha: "7822186a04037e50",
     source: "Spike A 2026-10-01, tests/fixtures/shapes-spike/a-e4b-dsl.jsonl, evaluated via tests/helpers/shapes-spike-eval.ts (golden-spike.test.ts). The spike recorded 5/10 without the hole check; 4/10 is re-derived (2026-10-03) with the stricter hole check on A01",
   },
   // Verfeinern: gemessen mit dem Prompt nach dem Formwechsel (REFINE_SYSTEM sha16 959905acad152013). Die Zeilen vom
   // 2026-10-03 mit dem alten Prompt (qwen 8/8, gemma 6/8, promptSha 8bd865943b3454d1) sind zurückgezogen (docs/LAB.md).
   {
-    model: "qwen/qwen3.8-27b", mode: "structured", task: "refine", good: 8, of: 8, measuredAt: "2026-10-03", promptSha: "71051822eb114cf6",
+    model: "qwen/qwen3.8-27b", mode: "structured", task: "refine", good: 8, of: 8, measuredAt: "2026-10-03", promptSha: "875cdf88016d175c",
     source: "Lab run 2026-10-03 (n=1 per case, temperature 0.2), tests/fixtures/shapes-lab/qwen3.8-27b-refine-2026-10-03-71051822.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
   },
   {
-    model: "google/gemma-4-e4b", mode: "structured", task: "refine", good: 6, of: 8, measuredAt: "2026-10-03", promptSha: "71051822eb114cf6",
+    model: "google/gemma-4-e4b", mode: "structured", task: "refine", good: 6, of: 8, measuredAt: "2026-10-03", promptSha: "875cdf88016d175c",
     source: "Lab run 2026-10-03 (n=1 per case, temperature 0.2), tests/fixtures/shapes-lab/gemma-4-e4b-refine-2026-10-03-71051822.jsonl, replayed through the production path (quality-refine-replay.test.ts)",
   },
 ];
@@ -53,52 +60,39 @@ export const MEASUREMENTS: readonly Measurement[] = [
 /** Bezugszahl für ungemessene Modelle: das eine gemessene kleine Modell, nie als dessen eigenes Ergebnis gezeigt. */
 const SMALL_MODEL = "google/gemma-4-e4b";
 
-function smallReference(task: QualityTask, table: readonly Measurement[]): Measurement | null {
-  return table.find((x) => x.model === SMALL_MODEL && x.task === task) ?? null;
-}
-
-export function findMeasurement(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS): Measurement | null {
-  const wanted = model.trim().toLowerCase();
-  if (wanted === "") return null;
-  return table.find((m) => m.task === task && m.model.toLowerCase() === wanted) ?? null;
-}
-
-const noun = (task: QualityTask): { measured: string; plural: string } => ({
+const noun = (task: string): { measured: string; plural: string } => ({
   measured: t(`quality.${task}.measured`),
   plural: t(`quality.${task}.plural`),
 });
 
-export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): { measured: boolean; text: string } {
-  // Die Tabelle misst lokale Modelle; die Zahl des kleinen Referenzmodells sagt über ein Cloud-Modell nichts (wie bei `failureHint`: die Familie gewinnt).
-  if (opts?.family === "claude") return { measured: false, text: t("quality.notMeasured") };
-  const m = findMeasurement(model, task, table);
-  if (m) return { measured: true, text: t("quality.measured", m.good, m.of, noun(task).measured, m.model, m.measuredAt, t(task === "refine" ? "quality.perRequest" : "quality.perPrompt")) };
-  // Bezugszahl nur aus derselben Aufgabe: eine Erstellen-Zahl sagt nichts über das Verfeinern.
-  const ref = smallReference(task, table);
-  if (!ref) return { measured: false, text: t("quality.notMeasured") };
-  const shortName = ref.model.slice(ref.model.lastIndexOf("/") + 1);
-  return {
-    measured: false,
-    text: t("quality.reference", shortName, ref.good, ref.of, noun(task).plural),
-  };
+/** Die Sätze in der Sprache der Oberfläche; Suche und Rangfolge liegen im Kit (`measured-quality`), die Tabelle und diese Sätze beim Träger. */
+const TEXTS: QualityTexts = {
+  measured: (m) => t("quality.measured", m.good, m.of, noun(m.task).measured, m.model, m.measuredAt, t(m.task === "refine" ? "quality.perRequest" : "quality.perPrompt")),
+  notMeasured: "",
+  smallReference: (ref, shortName) => t("quality.reference", shortName, ref.good, ref.of, noun(ref.task).plural),
+  failureBase: (task) => t(task === "refine" ? "quality.failRefine" : "quality.failCreate"),
+  failureOwn: (m) => t("quality.failOwn", m.good, m.of, t(m.task === "refine" ? "quality.failNounRefine" : "quality.failNounCreate")),
+  failureBest: (top) => t("quality.failBest", top.model, top.good, top.of, t(top.task === "refine" ? "quality.failNounRefine" : "quality.failNounCreate")),
+};
+
+// Die Cloud-Familie bekommt die schlichten Sätze: die Tabelle misst lokale Modelle, die Zahl des kleinen Referenzmodells sagt über ein Cloud-Modell nichts
+// und „ein größeres Modell“ ist dort kein Rat, den der Nutzer umsetzen kann (die Familie gewinnt vor einem Modellnamen aus der Tabelle).
+const options = (family: FamilyId | null | undefined): QualityOptions => ({
+  // `notMeasured` wird erst beim Aufruf übersetzt: die Sprache steht beim Laden des Moduls noch nicht fest.
+  texts: { ...TEXTS, notMeasured: t("quality.notMeasured") },
+  smallModel: SMALL_MODEL,
+  family: family ?? null,
+  unmeasuredFamilies: ["claude"],
+});
+
+export function findMeasurement(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS): Measurement | null {
+  return (kitFindMeasurement(model, task, table) as Measurement | null);
 }
 
-function best(task: QualityTask, table: readonly Measurement[]): Measurement | null {
-  // Gleichstand: Modellname alphabetisch zuerst (deterministisch).
-  return table.filter((m) => m.task === task)
-    .sort((a, b) => b.good / b.of - a.good / a.of || a.model.localeCompare(b.model))[0] ?? null;
+export function qualityLine(model: string, task: QualityTask, table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): { measured: boolean; text: string } {
+  return kitQualityLine(model, task, table, options(opts?.family));
 }
 
 export function failureHint(model: string, task: QualityTask = "create", table: readonly Measurement[] = MEASUREMENTS, opts?: { family?: FamilyId | null }): string {
-  const base = t(task === "refine" ? "quality.failRefine" : "quality.failCreate");
-  // Die Tabelle misst lokale Modelle; „ein größeres Modell“ ist für ein Cloud-Modell kein Rat, den der Nutzer umsetzen kann.
-  if (opts?.family === "claude") return base;
-  const nounText = t(task === "refine" ? "quality.failNounRefine" : "quality.failNounCreate");
-  const top = best(task, table);
-  if (!top) return base;
-  const own = findMeasurement(model, task, table);
-  if (own && own.model === top.model) {
-    return `${base} ${t("quality.failOwn", own.good, own.of, nounText)}`;
-  }
-  return `${base} ${t("quality.failBest", top.model, top.good, top.of, nounText)}`;
+  return kitFailureHint(model, task, table, options(opts?.family));
 }
