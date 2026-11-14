@@ -8,6 +8,9 @@ describe("Kit-CSS in styles.css", () => {
   it("der Waechter findet gevendorte Konstanten", () => {
     expect(findVendoredCss(vendorDir).length).toBeGreaterThan(0);
   });
+  it("styles.css trägt kein ${…} (ein Rohtext-Kopieren einer Kit-Konstante mit Template-Einsatz wäre ungültiges CSS: Store „Unknown word“)", () => {
+    expect(readFileSync("styles.css", "utf8")).not.toContain("${");
+  });
   it("jede steht wortgleich in styles.css", () => {
     expect(missingKitCss(vendorDir, readFileSync("styles.css", "utf8"))).toEqual([]);
   });
