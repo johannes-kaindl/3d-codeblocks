@@ -38,6 +38,8 @@
  * npm run smoke:gui -- --port <port> --vault 3d-codeblocks
  * npm run smoke:gui -- --port <port> --model weltmodell/3d/eg.gltf --keep
  * npm run smoke:gui -- --section basis --vault outpost-worldbuilding
+ * npm run smoke:gui -- --port <port> --lang de    # Zweitinstanz mit --lang=de gestartet: das Plugin bleibt deutsch (sonst setzt der Treiber en). Texte, die der Treiber auf Englisch vergleicht, werden dann rot.
+ * SMOKE_SHOT_DIR=<ordner> (oder SMOKE_BREITE=1 ohne Bild) npm run smoke:gui -- ...  # Sprachprobe: Bilder (pp2, pp23, sh14, ...) und die Zeilen „[Breite] …“ (abgeschnitten/umgebrochen) im Log
  * ```
  *
  * ⚠️ Ein Handgriff, der beim Start regelmaessig Zeit kostet:
@@ -4148,6 +4150,7 @@ async function sectionShapesFile(cdp: Cdp): Promise<void> {
           ? ` | Split: Trennlinie ${s14?.splitDivider ?? "?"} px, Editor ${s14?.editorH ?? "?"} px, Modell ${s14?.modelH ?? "?"} px ≤ Fläche ${s14?.bodyH ?? "?"} px, is-split ${s14?.split ?? "?"}`
           : " | Split nicht angeboten (Breite < 700 px) — Split-Teil nicht gemessen"),
     );
+    await bildUndBreite(cdp, "sh14-shapes-datei.png");
     if (!wideNow) skipped("SH14b. Trennlinie im Split", "Ansichtsbreite unter 700 px — der Split-Fall wurde nicht gemessen");
     else record("SH14b. Trennlinie im Split", splitEnds?.reached === true, `Trennlinie ${s14?.splitDivider ?? "?"} px, Editor ${s14?.editorH ?? "?"} px, Modell ${s14?.modelH ?? "?"} px ≤ Fläche ${s14?.bodyH ?? "?"} px`);
 
@@ -4803,7 +4806,7 @@ const PP_TITEL = {
   PP26: "Denkblock kopierbar, Gegenprobe: lehnt die Zwischenablage das Schreiben ab, quittiert der Knopf nicht",
   PP27: "Modellzeile: eine Zeile im Panel, das Dropdown trägt „Automatic“ und BEIDE Modelle des Endpunkts, hat einen Namen, Neu laden sagt die Zahl an",
   PP28: "Modellzeile: der Wechsel wirkt, die nächste Anfrage am Endpunkt trägt das gewählte Modell",
-  PP29: "Modellzeile: die Denk-Steuerung steht IN der Zeile, schaltet um, und der gesendete Body ändert sich (Wirkung am Stub)",
+  PP29: "Modellzeile: die Denk-Steuerung (Dropdown mit den Stufen des Modells) steht IN der Zeile, schaltet um, und der gesendete Body ändert sich (Wirkung am Stub)",
   PP30: "Modellzeile: während einer Anfrage gesperrt (Dropdown und Neu laden), danach wieder frei",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
@@ -5082,6 +5085,41 @@ async function ppWaitPanelInside(cdp: Cdp): Promise<boolean> {
   return settled.reached;
 }
 
+
+/** Sichtbare Folge für die Sprachprobe (Welle 34): mit `SMOKE_SHOT_DIR` schreibt der Aufruf ein Bild des Ausschnitts (`selector`, ohne Selektor das ganze Fenster)
+ *  und meldet Knöpfe, Beschriftungen und Auswahlfelder, deren Text abgeschnitten (scrollWidth > clientWidth) oder umgebrochen ist (höher als 1,6 Zeilen).
+ *  Es zählt in keinem Punkt mit: eine Zeile „[Breite] …“ im Log, die der Mensch liest. Ohne die Variable tut es nichts. */
+async function bildUndBreite(cdp: Cdp, name: string, selector?: string): Promise<void> {
+  const dir = process.env.SMOKE_SHOT_DIR;
+  // `SMOKE_BREITE=1` misst ohne Bild (ein Lauf ohne Fokus-Lock: `Page.captureScreenshot` hängt bei verdecktem Fenster).
+  if (!dir && process.env.SMOKE_BREITE !== "1") return;
+  try {
+    const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
+    const maß = await cdp.evaluate<{ lang: string; width: number; abgeschnitten: string[]; umgebrochen: string[]; geprueft: number } | null>(`
+      const root = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : "document.body"};
+      if (!root) return null;
+      const sichtbar = (e) => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
+      const alle = [...root.querySelectorAll("button, label, select, .setting-item-name, .okit-hub-tab-label, .tdcb-prompt-target, .tdcb-prompt-quality, .tdcb-prompt-status, .tdcb-pill, [class*='tdcb-'][class*='-label']")].filter(sichtbar);
+      const abgeschnitten = [], umgebrochen = [];
+      for (const e of alle) {
+        const text = (e.textContent ?? "").trim().replace(/\s+/g, " ");
+        if (e.tagName === "SELECT" ? false : e.scrollWidth > e.clientWidth + 1) abgeschnitten.push((e.className || e.tagName) + ": " + text.slice(0, 50));
+        const cs = getComputedStyle(e);
+        const zeile = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+        if ((e.tagName === "BUTTON" || e.tagName === "LABEL") && text !== "" && e.getBoundingClientRect().height > zeile * 1.6 + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + 2) umgebrochen.push((e.className || e.tagName) + ": " + text.slice(0, 50));
+      }
+      return { lang: document.documentElement.lang, width: Math.round(root.getBoundingClientRect().width), abgeschnitten, umgebrochen, geprueft: alle.length };
+    `);
+    if (maß === null) { console.log(`   [Breite] ${name}: ${selector ?? "Fenster"} nicht gefunden`); return; }
+    console.log(`   [Breite] ${name}: lang=${maß.lang}, ${maß.width} px breit, ${maß.geprueft} Elemente geprüft, ${maß.abgeschnitten.length} abgeschnitten${maß.abgeschnitten.length ? " → " + maß.abgeschnitten.join(" | ") : ""}, ${maß.umgebrochen.length} umgebrochen${maß.umgebrochen.length ? " → " + maß.umgebrochen.join(" | ") : ""}`);
+    if (!dir) return;
+    const box = selector ? await boxOf(cdp, selector, 4) : undefined;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), await capture(cdp, box ?? undefined, 2));
+  } catch (e) {
+    console.log(`   [Breite] ${name}: nicht aufgenommen — ${(e as Error).message}`);
+  }
+}
 
 /** Das Panel frisch öffnen (Blatt zu, Befehl `open-prompt-panel`, Ziel „new“) und warten, bis es steht. */
 async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
@@ -5450,6 +5488,8 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
       );
     }
+
+    if (opened) await bildUndBreite(cdp, "pp2-panel.png", ".tdcb-prompt");
 
     // --- PP3. Erzeugen --------------------------------------------------------
     if (!opened) {
@@ -5952,6 +5992,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         if (!runde.reached) {
           for (const id of ["PP23", "PP24", "PP25"] as const) ppNothing(id, T[id], "die Vorbedingung (eine fertige Runde im Panel) kam nicht zustande");
         } else {
+          await bildUndBreite(cdp, "pp23-panel-mit-runde.png", ".tdcb-prompt");
           const rumpf = ".tdcb-prompt .okit-hub-panel:not(.is-hidden)";
           const opts = {
             selektoren: [".tdcb-prompt-input", ".tdcb-prompt-send", ".tdcb-prompt-apply", ".tdcb-prompt-discard", ".tdcb-prompt-new"],
@@ -5980,7 +6021,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         cdp.evaluate(`
           const root = document.querySelector(".tdcb-prompt");
           const bars = root ? [...root.querySelectorAll(".okit-model-bar")] : [];
-          const sel = bars[0]?.querySelector("select");
+          const sel = bars[0]?.querySelector(".okit-model-bar-select");
           return {
             bars: bars.length,
             options: sel ? [...sel.options].map((o) => o.textContent ?? "") : [],
@@ -5989,13 +6030,13 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
             announce: bars[0]?.querySelector(".okit-model-bar-status")?.textContent ?? "",
             selDisabled: !!sel?.disabled,
             refreshDisabled: !!bars[0]?.querySelector(".okit-model-bar-refresh")?.disabled,
-            toggles: root?.querySelectorAll(".okit-thinking-toggle").length ?? 0,
-            toggleInBar: bars[0]?.querySelectorAll(".okit-thinking-toggle").length ?? 0,
+            toggles: root?.querySelectorAll(".okit-thinking-control select:not(.is-measuring)").length ?? 0,
+            toggleInBar: bars[0]?.querySelectorAll(".okit-thinking-control select:not(.is-measuring)").length ?? 0,
           };
         `);
       const choose = (value: string): Promise<boolean> =>
         cdp.evaluate<boolean>(`
-          const sel = document.querySelector(".tdcb-prompt .okit-model-bar select");
+          const sel = document.querySelector(".tdcb-prompt .okit-model-bar .okit-model-bar-select");
           if (!sel) return false;
           sel.value = ${JSON.stringify(value)};
           sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -6010,7 +6051,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         } else {
           // PP27 — vor dem Klick gibt es keine Ansage (Gegenprobe: die Zahl kommt vom Klick, nicht von einem alten Stand).
           const before = await readBar();
-          await pollState(cdp, `const s = document.querySelector(".tdcb-prompt .okit-model-bar select"); return { n: s ? [...s.options].filter((o) => (o.textContent ?? "").startsWith("smoke-") || (o.textContent ?? "").startsWith("qwen3.8-smoke")).length : 0 };`, (x: { n: number }) => x.n >= 2, 8_000, 250);
+          await pollState(cdp, `const s = document.querySelector(".tdcb-prompt .okit-model-bar .okit-model-bar-select"); return { n: s ? [...s.options].filter((o) => (o.textContent ?? "").startsWith("smoke-") || (o.textContent ?? "").startsWith("qwen3.8-smoke")).length : 0 };`, (x: { n: number }) => x.n >= 2, 8_000, 250);
           await ppClick(cdp, ".okit-model-bar-refresh");
           await pollState(cdp, `const z = document.querySelector(".tdcb-prompt .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models? loaded/.test(x.t), 6_000, 250);
           const bar = await readBar();
@@ -6045,7 +6086,16 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           // PP29 — Denk-Steuerung in der Zeile; ein Klick schaltet, und der nächste Body unterscheidet sich vom vorigen (nur Denk-Felder dürfen es sein).
           const barT = await readBar();
           const level0 = await cdp.evaluate<string>(`const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return p.settings.request.thinking?.structured ?? "off";`);
-          const clickedToggle = await clickReal(cdp, `document.querySelector(".tdcb-prompt .okit-model-bar .okit-thinking-toggle")`);
+          // Seit obsidian-kit 0.88.0 ist die Denkstufe in der Zeile immer ein Dropdown mit den Stufen des Modells: eine andere Stufe wählen und `change` auslösen.
+          const clickedToggle = await cdp.evaluate<boolean>(`
+            const sel = document.querySelector(".tdcb-prompt .okit-model-bar .okit-thinking-control select:not(.is-measuring)");
+            if (!sel || sel.disabled) return false;
+            const andere = [...sel.options].map((o) => o.value).find((v) => v !== sel.value);
+            if (andere === undefined) return false;
+            sel.value = andere;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+            return true;
+          `);
           const level1 = (await pollState(cdp, `const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return { l: p.settings.request.thinking?.structured ?? "off" };`, (x: { l: string }) => x.l !== level0, 5_000, 250)).state?.l;
           const n2 = sub.bodies.length;
           await ppType(cdp, PP_CREATE_PROMPT);
@@ -6057,7 +6107,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
             "PP29",
             T.PP29,
             barT.toggleInBar === 1 && barT.toggles === 1 && clickedToggle && level1 !== undefined && level1 !== level0 && bodyOn !== bodyOff,
-            `Denk-Knopf in der Zeile ${barT.toggleInBar}, im Panel insgesamt ${barT.toggles}; Stufe ${level0} → ${level1 ?? "unverändert"}; Body ohne messages vorher ${bodyOff} · nachher ${bodyOn}`,
+            `Denk-Dropdown in der Zeile ${barT.toggleInBar}, im Panel insgesamt ${barT.toggles}; Stufe ${level0} → ${level1 ?? "unverändert"}; Body ohne messages vorher ${bodyOff} · nachher ${bodyOn}`,
           );
 
           // PP30 — Sperre: eine hängende Anfrage hält das Panel im Lauf.
@@ -6607,7 +6657,7 @@ async function main(): Promise<void> {
     // Ergebnis für den gerade gebauten — aufgefallen 2026-08-14 in der Gegenprobe: eine
     // absichtlich kaputte Version lief mit 13/13 grün durch.
     // Frisches Profil: Vertrauensdialog bestätigen, Restricted Mode aufheben, Plugin laden (Dach-AGENTS § Staging-Vaults).
-    const instanz = await bereiteInstanzVor(cdp, { pluginIds: [PLUGIN_ID], nurVault: "3d-codeblocks", sprache: "en" });
+    const instanz = await bereiteInstanzVor(cdp, { pluginIds: [PLUGIN_ID], nurVault: "3d-codeblocks", sprache: flag("lang") === "de" ? undefined : "en" });
     if (instanz.plugins[PLUGIN_ID] === "fehlt") console.error(`bereiteInstanzVor: ${instanz.hinweis}`);
     const neu = await ladePluginNeu(cdp, PLUGIN_ID, { repoMainJs, melde: console.error });
     if (!neu.geladen) throw new Error(`Plugin ${PLUGIN_ID} ist nicht aktiv — ${neu.hinweis}`);

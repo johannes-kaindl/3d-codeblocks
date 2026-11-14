@@ -39,7 +39,7 @@
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { argv, cwd, env, exit } from "node:process";
 
 import {
@@ -647,7 +647,9 @@ async function main(): Promise<void> {
   // cwd, nicht import.meta.url: der Treiber wird vor dem Lauf nach `.shots.mjs`
   // ins Repo-Root gebundelt — ein Pfad relativ zur Modul-URL zeigte dann daneben.
   const repoRoot = cwd();
-  const outDir = join(repoRoot, OUT_DIR);
+  // `--out <ordner>` schreibt woandershin als in die README-Bilder (etwa die Sprachprobe in der Zweitinstanz mit --lang=de, Welle 34): die getrackten Bilder bleiben unberührt.
+  const outArg = flag("--out");
+  const outDir = outArg ? resolve(repoRoot, outArg) : join(repoRoot, OUT_DIR);
 
   if (argv.includes("--list")) {
     for (const s of SHOTS) console.log(`  ${s.klasse.padEnd(8)} ${s.name}`);
@@ -746,7 +748,7 @@ async function main(): Promise<void> {
   let ok = 0;
   let fehlend = 0;
   for (const shot of SHOTS) {
-    if (nur && shot.name !== nur) continue;
+    if (nur && !nur.split(",").includes(shot.name)) continue;
     try {
       const box = await shot.run(cdp);
       const png = box ? await capture(cdp, box) : null;
@@ -771,13 +773,13 @@ async function main(): Promise<void> {
     }
   }
 
-  if (!nur || nur === "settings.png") {
+  if (!nur || nur.split(",").includes("settings.png")) {
     console.log(`  · ${await settingsBild(cdp, port, {
       outDir, captureWidth: CAPTURE_WIDTH, thumbWidth: THUMB_WIDTH,
     })}`);
   }
 
-  if (!nur || nur === "orbit.gif") {
+  if (!nur || nur.split(",").includes("orbit.gif")) {
     console.log(`  · ${await orbitGif(cdp, outDir)}`);
   }
 
