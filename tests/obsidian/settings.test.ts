@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SettingDefinitionControl, SettingDefinitionItem } from "obsidian";
 import { SettingsTab } from "../../src/obsidian/settings";
+import { setLang } from "../../src/i18n/t";
 import {
   DEFAULT_SETTINGS,
   MAX_CONTEXTS_LIMIT,
@@ -329,11 +330,18 @@ describe("SettingsTab: Model by prompt", () => {
     expect(group.items.some((i: any) => typeof i.render === "function")).toBe(true);
   });
 
-  it("hands the LLM row body to llm.renderSettings without an own strings bundle", () => {
+  it("hands the LLM row body to llm.renderSettings with the language of the interface (the connection shows English without it)", () => {
     const { tab, plugin } = makeTab();
     tab.display();
     expect(plugin.llm.renderSettings).toHaveBeenCalledTimes(1);
-    expect(plugin.llm.renderSettings.mock.calls[0]).toHaveLength(1);
+    expect(plugin.llm.renderSettings.mock.calls[0]?.[1]).toEqual({ lang: "en" });
+    setLang("de");
+    try {
+      tab.display();
+      expect(plugin.llm.renderSettings.mock.calls[1]?.[1]).toEqual({ lang: "de" });
+    } finally {
+      setLang("en");
+    }
   });
 
   it("hide() releases the model lists of the LLM section", () => {

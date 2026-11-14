@@ -21,7 +21,7 @@ import {
 import { MAX_CONTEXTS_LIMIT, validateSettings, type PluginSettings } from "../core/settings-types";
 import type ThreeDCodeblocksPlugin from "../main";
 import { helpTexts } from "../i18n/strings";
-import { t } from "../i18n/t";
+import { getLang, t } from "../i18n/t";
 import { githubHelpUrls, helpSettingDefinition } from "../vendor/kit-obsidian/help-setting";
 import { renderSettingDefinitions, settingBodyHost } from "../vendor/kit-obsidian/settings_walker";
 
@@ -137,7 +137,7 @@ export class SettingsTab extends PluginSettingTab {
             },
           },
           // Texte kommen aus dem Kit (englische Default-Texte) — kein eigenes Buendel.
-          { name: t("settings.llm"), desc: "", render: (setting: Setting) => this.plugin.llm.renderSettings(settingBodyHost(setting)) },
+          { name: t("settings.llm"), desc: "", render: (setting: Setting) => this.plugin.llm.renderSettings(settingBodyHost(setting), { lang: getLang() }) },
         ],
       },
     ];
