@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { makeFakeApp } from "../__mocks__/obsidian";
 import { PromptPanelView } from "../../src/obsidian/prompt-panel";
 import { DEFAULT_SETTINGS } from "../../src/core/settings-types";
 import type { PanelTarget } from "../../src/core/shapes/panel-state";
@@ -31,6 +32,12 @@ function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
     invalidate: vi.fn(),
     setModel: vi.fn(async (m: string) => { chosen.model = m; }),
     modelInUse: vi.fn(() => chosen.model),
+    endpoints: vi.fn(() => []),
+    activeEndpointId: vi.fn(() => undefined),
+    modelsOf: vi.fn(async () => ({ models: [MODEL], reachable: true })),
+    choice: vi.fn(() => ({})),
+    setChoice: vi.fn(async () => undefined),
+    subscribe: vi.fn(() => () => undefined),
     source: vi.fn(() => ({ family: null, familySource: "none", backend: "unknown", backendSource: "none", model: chosen.model, sentModel: chosen.model })),
   };
   const deps = {
@@ -60,7 +67,7 @@ function makeView(complete: Complete, extra: Record<string, unknown> = {}) {
     managerPresent: () => false,
     ...extra,
   };
-  const view = new PromptPanelView({ app: undefined } as never, deps as never);
+  const view = new PromptPanelView({ app: makeFakeApp() } as never, deps as never);
   return { view, deps, llm, loadModel, chosen, think };
 }
 
@@ -656,16 +663,21 @@ describe("PromptPanelView", () => {
       expect(findAll((view as any).contentEl, "okit-model-bar")).toHaveLength(0);
     });
 
-    it("the thinking control stands IN the row and switches through deps.thinking.setLevel", async () => {
+    it("the thinking control stands IN the row as a level dropdown (kit 0.88.0) and switches through deps.thinking.setLevel", async () => {
       const { view, deps, think } = makeView(answer("{}"));
       think.family = "qwen3.8";
       await view.onOpen();
       await tick();
       const bar = one(view, "okit-model-bar");
-      const toggles = findAll(bar, "okit-thinking-toggle");
-      expect(toggles).toHaveLength(1);
-      expect(findAll((view as any).contentEl, "okit-thinking-toggle")).toHaveLength(1);
-      toggles[0].click();
+      const controls = findAll(bar, "okit-thinking-control");
+      expect(controls).toHaveLength(1);
+      expect(findAll((view as any).contentEl, "okit-thinking-control")).toHaveLength(1);
+      // Seit der Modellzeile mit Gruppen ist es immer ein Dropdown mit den Stufen des Modells, kein Zustands-Knopf.
+      expect(findAll(controls[0], "okit-thinking-toggle")).toHaveLength(0);
+      const select = controls[0].children.find((c: any) => c.tagName === "SELECT");
+      expect(select).toBeDefined();
+      select.value = "low";
+      for (const fn of select._listeners.change ?? []) fn();
       await tick();
       expect(deps.thinking.setLevel).toHaveBeenCalledWith("low");
     });

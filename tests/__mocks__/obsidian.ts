@@ -172,6 +172,21 @@ export class TFile {
   parent: any = null;
 }
 
+/** Dropdown wie Obsidians `DropdownComponent` (Kit `thinking-control` baut die Denkstufe der Modellzeile damit). */
+export class DropdownComponent {
+  readonly selectEl: any;
+  private changed: ((v: string) => unknown) | null = null;
+  constructor(containerEl: any) {
+    this.selectEl = containerEl.createEl("select", { cls: "dropdown" });
+    this.selectEl.addEventListener("change", () => { void this.changed?.(this.selectEl.value); });
+  }
+  addOption(value: string, display: string): this { this.selectEl.createEl("option", { text: display, attr: { value } }); return this; }
+  getValue(): string { return this.selectEl.value; }
+  setValue(v: string): this { this.selectEl.value = v; return this; }
+  setDisabled(d: boolean): this { this.selectEl.disabled = d; return this; }
+  onChange(cb: (v: string) => unknown): this { this.changed = cb; return this; }
+}
+
 export class Notice {
   constructor(
     public message: string,
@@ -385,7 +400,8 @@ export class Modal {
 export class ItemView {
   containerEl: any = makeFakeEl();
   contentEl: any = makeFakeEl();
-  constructor(public leaf: any) {}
+  app: any;
+  constructor(public leaf: any) { this.app = leaf?.app; }
   register(): void {}
   registerEvent(): void {}
   onload(): void {}
