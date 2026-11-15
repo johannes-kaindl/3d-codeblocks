@@ -5748,8 +5748,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const editorVorher = await readEditor();
         await ppClick(cdp, ".tdcb-prompt-apply");
         const outcome = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== crlf.round?.status, 10_000, 250);
-        await sleepMs(1500);
-        const disk = await ppReadNote(cdp, SMOKE_NOTE_PP_CRLF);
+        // Der Editor schreibt die Platte erst nach Obsidians Speicher-Verzögerung (gemessen: nach 1,5 s noch die alte Platte mit CRLF, der Editor schon geändert):
+        // auf die Platte warten, bis sie sich vom Ausgang unterscheidet, statt einen festen Wert zu raten.
+        const ausgang = await pollState<{ text: string }>(cdp, `const f = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_CRLF)}); return { text: f ? await app.vault.read(f) : "" };`, (n) => n.text !== crlfBody, 12_000, 500);
+        const disk = ausgang.state?.text ?? (await ppReadNote(cdp, SMOKE_NOTE_PP_CRLF));
         const editorNachher = await readEditor();
         const lf = (x: string | null): string => (x ?? "").replace(/\r\n/g, "\n");
         const before = nonBlank(lf(crlfBody));
