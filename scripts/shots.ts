@@ -44,6 +44,7 @@ import { argv, cwd, env, exit } from "node:process";
 
 import {
   attachTo,
+  bereiteInstanzVor,
   Cdp,
   closeExtraLeaves,
   openExisting,
@@ -705,6 +706,10 @@ async function main(): Promise<void> {
     );
   }
   console.log(`Verbunden auf Port ${port}.\n`);
+  // Ein frisches Profil startet im Restricted Mode, ohne bestätigtes Vertrauen: ohne diesen Schritt ist das Plugin nicht geladen
+  // und der erste Zugriff darauf scheitert („Cannot read properties of undefined (reading 'settings')“, Welle 35).
+  const vorbereitet = await bereiteInstanzVor(cdp, { pluginIds: [PLUGIN_ID], nurVault: REPO_NAME, sprache: "en" });
+  console.log(`Instanz: ${vorbereitet.hinweis}\n`);
   // Sofort nach vorn holen, nicht erst beim Auslösen. Chromium drosselt das Rendering
   // nicht-fokussierter Fenster: steht ein anderes Obsidian-Fenster im Vordergrund,
   // bleibt der Lesebereich hier LEER — kein Codeblock, kein Block, keine Fehlermeldung.

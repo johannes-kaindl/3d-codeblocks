@@ -253,6 +253,7 @@
 
 .tdcb-panel-actions {
   display: flex;
+  flex-wrap: wrap; /* deutsche Beschriftungen sind länger: in der schmalen Seitenleiste rutscht der dritte Knopf in die nächste Zeile, statt rechts abgeschnitten zu werden */
   gap: var(--size-4-2);
 }
 

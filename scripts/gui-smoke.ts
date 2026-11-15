@@ -726,6 +726,8 @@ async function sectionActiveBlock(cdp: Cdp, model: string): Promise<void> {
     buttons.save,
     `${buttons.count} Knöpfe im Panel`,
   );
+  // Sprachprobe (Welle 35): die gefüllte Seitenleiste im Bild und in der Breitenmessung (Knopfzeile „Ansicht speichern“/„Ansicht löschen“ auf Deutsch).
+  await bildUndBreite(cdp, "sb4-seitenleiste.png", ".tdcb-panel");
 
   // --- 5. Der aktive Block ist erkennbar ----------------------------------
   // `f53e88b`: Rahmen kräftiger + Titel im Akzent. Geprüft wird der EFFEKT im
@@ -5095,23 +5097,26 @@ async function bildUndBreite(cdp: Cdp, name: string, selector?: string): Promise
   if (!dir && process.env.SMOKE_BREITE !== "1") return;
   try {
     const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
-    const maß = await cdp.evaluate<{ lang: string; width: number; abgeschnitten: string[]; umgebrochen: string[]; geprueft: number } | null>(`
+    const maß = await cdp.evaluate<{ lang: string; width: number; abgeschnitten: string[]; umgebrochen: string[]; ueberstand: string[]; geprueft: number } | null>(`
       const root = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : "document.body"};
       if (!root) return null;
       const sichtbar = (e) => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
       const alle = [...root.querySelectorAll("button, label, select, .setting-item-name, .okit-hub-tab-label, .tdcb-prompt-target, .tdcb-prompt-quality, .tdcb-prompt-status, .tdcb-pill, [class*='tdcb-'][class*='-label']")].filter(sichtbar);
-      const abgeschnitten = [], umgebrochen = [];
+      const abgeschnitten = [], umgebrochen = [], ueberstand = [];
+      const kante = root.getBoundingClientRect().right;
       for (const e of alle) {
         const text = (e.textContent ?? "").trim().replace(/\s+/g, " ");
         if (e.tagName === "SELECT" ? false : e.scrollWidth > e.clientWidth + 1) abgeschnitten.push((e.className || e.tagName) + ": " + text.slice(0, 50));
         const cs = getComputedStyle(e);
         const zeile = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+        // Ragt der Knopf über die rechte Kante des Ausschnitts (Zeile ohne Umbruch in schmaler Leiste), steht sein Text voll im Knopf und scrollWidth meldet nichts.
+        if (e.getBoundingClientRect().right > kante + 1) ueberstand.push((e.className || e.tagName) + ": " + text.slice(0, 50));
         if ((e.tagName === "BUTTON" || e.tagName === "LABEL") && text !== "" && e.getBoundingClientRect().height > zeile * 1.6 + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + 2) umgebrochen.push((e.className || e.tagName) + ": " + text.slice(0, 50));
       }
-      return { lang: document.documentElement.lang, width: Math.round(root.getBoundingClientRect().width), abgeschnitten, umgebrochen, geprueft: alle.length };
+      return { lang: document.documentElement.lang, width: Math.round(root.getBoundingClientRect().width), abgeschnitten, umgebrochen, ueberstand, geprueft: alle.length };
     `);
     if (maß === null) { console.log(`   [Breite] ${name}: ${selector ?? "Fenster"} nicht gefunden`); return; }
-    console.log(`   [Breite] ${name}: lang=${maß.lang}, ${maß.width} px breit, ${maß.geprueft} Elemente geprüft, ${maß.abgeschnitten.length} abgeschnitten${maß.abgeschnitten.length ? " → " + maß.abgeschnitten.join(" | ") : ""}, ${maß.umgebrochen.length} umgebrochen${maß.umgebrochen.length ? " → " + maß.umgebrochen.join(" | ") : ""}`);
+    console.log(`   [Breite] ${name}: lang=${maß.lang}, ${maß.width} px breit, ${maß.geprueft} Elemente geprüft, ${maß.abgeschnitten.length} abgeschnitten${maß.abgeschnitten.length ? " → " + maß.abgeschnitten.join(" | ") : ""}, ${maß.umgebrochen.length} umgebrochen${maß.umgebrochen.length ? " → " + maß.umgebrochen.join(" | ") : ""}, ${maß.ueberstand.length} über die rechte Kante${maß.ueberstand.length ? " → " + maß.ueberstand.join(" | ") : ""}`);
     if (!dir) return;
     const box = selector ? await boxOf(cdp, selector, 4) : undefined;
     mkdirSync(dir, { recursive: true });
