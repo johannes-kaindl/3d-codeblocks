@@ -87,6 +87,8 @@ export const DE: Record<string, string> = {
   "accept.savedReferenceFailed": "{0} gespeichert, aber der Verweis ließ sich nicht einfügen ({1}). Die Datei existiert.",
   "accept.unclosedFence.selection": "Die Auswahl endet in einem Codeblock, der nie geschlossen wird — es wurde nichts übernommen.",
   "accept.unclosedFence.cursor": "Der Cursor steht in einem Codeblock, der nie geschlossen wird — es wurde nichts übernommen.",
+  "accept.nestedFence.selection": "Die Auswahl endet in einem Codeblock innerhalb eines Zitats, Callouts oder einer Liste — es wurde nichts übernommen. Setze den Cursor außerhalb davon und versuche es erneut.",
+  "accept.nestedFence.cursor": "Der Cursor steht in einem Codeblock innerhalb eines Zitats, Callouts oder einer Liste — es wurde nichts übernommen. Setze ihn außerhalb davon und versuche es erneut.",
   "accept.couldNotApply": "Übernehmen ging nicht: {0} — es wurde nichts übernommen.",
 
   // ── Einstellungen ──

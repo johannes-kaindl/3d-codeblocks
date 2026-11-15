@@ -34,7 +34,8 @@ interface Opts {
   choose?: AcceptEnv["choose"];
   attachments?: string[];
   onCreateFails?: boolean;
-  replaceSelectionThrows?: boolean;
+  /** Der Editor wirft beim Schreiben (kit 0.86.0: `insertAtCursor` schreibt über `replaceRange` am Hauptcursor, nie über `replaceSelection`). */
+  replaceRangeThrows?: boolean;
   noEditorView?: boolean;
   /** Offene ShapesFileView von Anhänge/Tisch.shapes: `data` ist ihr ungespeicherter Puffer. */
   shapesView?: { data: string };
@@ -46,26 +47,27 @@ interface Opts {
 
 function setup(files: Record<string, string>, opts: Opts = {}) {
   const store = { ...files };
-  const selections: string[] = [];
   const tfile = (path: string) =>
     Object.assign(new TFile(), { path, basename: path.split("/").pop()!.replace(/\.[^.]+$/, ""), extension: path.split(".").pop()!, name: path.split("/").pop()! });
   const replaceCalls: string[] = [];
+  // Schreibaufrufe genau an der Cursorstelle ohne Auswahl (früher `replaceSelection`); gezielte Einfügungen hinter Zaun, Auswahl oder Frontmatter zählen nicht.
+  const selections: string[] = [];
   const editor = {
     getValue: () => store["n.md"],
     somethingSelected: () => opts.selection !== undefined,
     getCursor: (which?: string) => (which === "to" && opts.selection ? opts.selection.to : { line: opts.cursorLine ?? 0, ch: 0 }),
     replaceRange: (text: string, from: { line: number; ch: number }, to: { line: number; ch: number } = from) => {
+      if (opts.replaceRangeThrows) throw new Error("editor gone");
       replaceCalls.push(text);
+      const cursor = { line: opts.cursorLine ?? 0, ch: 0 };
+      if (opts.selection === undefined && from.line === cursor.line && from.ch === cursor.ch) selections.push(text);
       const lines = store["n.md"].split("\n");
       const head = [...lines.slice(0, from.line), lines[from.line].slice(0, from.ch)].join("\n");
       const tail = [lines[to.line].slice(to.ch), ...lines.slice(to.line + 1)].join("\n");
       store["n.md"] = head + text + tail;
     },
-    replaceSelection: (text: string) => {
-      if (opts.replaceSelectionThrows) throw new Error("editor gone");
-      selections.push(text);
-      store["n.md"] += text; // Cursor am Ende: genuegt fuer den Test
-    },
+    // Nie gerufen: ein Aufruf wäre der Rückfall auf den Mehrfach-Cursor-Weg (Kit 0.86.0).
+    replaceSelection: () => { throw new Error("replaceSelection darf nicht mehr gerufen werden"); },
   };
   const view = Object.assign(new MarkdownView({} as never), { file: tfile("n.md"), editor });
   (view as unknown as { mode: string }).mode = opts.previewMode ? "preview" : "source";
@@ -423,6 +425,15 @@ describe("acceptPanel — target new", () => {
     expect(selections).toEqual([]);
     expect(store["n.md"]).toBe(note);
   });
+  it("as block with the cursor in a fence inside a quote or callout: refused with the plugin's own text (Kit 0.86.0), nothing written", async () => {
+    const note = ["a", "> ```js", "> x()", "> ```", "b"].join("\n");
+    const { env, store, selections } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.ok).toBe(false);
+    expect(r.message).toBe("The cursor is in a code block inside a quote, callout or list — nothing was applied. Move it outside and try again.");
+    expect(selections).toEqual([]);
+    expect(store["n.md"]).toBe(note);
+  });
   it("as block with the selection ending in a fence that is never closed: refused too", async () => {
     const note = ["a", "```js", "x()"].join("\n");
     const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, selection: { to: { line: 2, ch: 1 } } });
@@ -482,7 +493,7 @@ describe("acceptPanel — target new", () => {
     expect(Object.keys(store)).toHaveLength(2);
   });
   it("as file: a failing reference insert still reports the file as created", async () => {
-    const { env, store } = setup({ "n.md": "intro" }, { settings: { acceptAs: "file" }, replaceSelectionThrows: true });
+    const { env, store } = setup({ "n.md": "intro" }, { settings: { acceptAs: "file" }, replaceRangeThrows: true });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
     expect(r.ok).toBe(true);
     expect(r.message).toContain("Anhänge/Tisch.shapes");

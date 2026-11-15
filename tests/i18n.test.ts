@@ -99,6 +99,7 @@ describe("Deutsch an den Stellen, die der Nutzer sieht", () => {
     expect(ACCEPT_STRINGS.appliedAsBlock("after-frontmatter")).toBe("In der offenen Notiz als Codeblock übernommen, hinter der Frontmatter.");
     expect(ACCEPT_STRINGS.savedFileNoReference("a.shapes", "reading")).toContain("Leseansicht");
     expect(ACCEPT_STRINGS.unclosedFence(true)).toContain("nie geschlossen");
+    expect(ACCEPT_STRINGS.nestedFence?.(false)).toContain("Zitats, Callouts oder einer Liste");
   });
 
   it("die Kit-Bündel (Hilfe-Zeile, Modellzeile) wechseln mit", () => {

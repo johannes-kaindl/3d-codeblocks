@@ -88,6 +88,8 @@ export const EN: Record<string, string> = {
   "accept.savedReferenceFailed": "Saved {0}, but the reference could not be inserted ({1}). The file exists.",
   "accept.unclosedFence.selection": "The selection ends in a code block that is never closed — nothing was applied.",
   "accept.unclosedFence.cursor": "The cursor is in a code block that is never closed — nothing was applied.",
+  "accept.nestedFence.selection": "The selection ends in a code block inside a quote, callout or list — nothing was applied. Move the cursor outside it and try again.",
+  "accept.nestedFence.cursor": "The cursor is in a code block inside a quote, callout or list — nothing was applied. Move it outside and try again.",
   "accept.couldNotApply": "Could not apply: {0} — nothing was applied.",
 
   // ── Einstellungen ──

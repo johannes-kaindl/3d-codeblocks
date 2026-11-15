@@ -1,4 +1,4 @@
-// vendored from code-kit@0.65.0, src/ts/pure/sampling-profiles.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.73.0, src/ts/pure/sampling-profiles.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Request profiles for local and hosted LLM backends: which sampling values, which
  *  reasoning_effort and which minimum token budget a plugin sends, per model family × mode,
  *  and which of those fields a backend actually honours.
@@ -116,6 +116,9 @@ const QWEN_GREEDY = "Qwen docs quickstart (Qwen3): no greedy decoding while thin
 const HARNESS = "llm-benchmark-harness night run 2026-09-19, max reasoning tokens per level, rounded up";
 const GEMMA_LMS = "kitcc-w22 2026-10-14, google/gemma-4-e4b on LM Studio (one model size): none ignored, thought in content; low/minimal/medium/high/no field think into reasoning_content";
 const LMS_EFFORT = "llm-setup 2026-09-18, reasoning tokens none 0 / low 226 / medium 251 / xhigh 930";
+const QWEN36_LMS = "koda-w30 2026-11-03 (one run per level) and kit round 2026-11-14 (three runs per level, one longer question, no tool), qwen/qwen3.6-35b-a3b on LM Studio (MLX 4bit), characters of reasoning_content: none 0/0/0 · low 14132/9673/11649 · medium 4864/7613/4667 · high 8338/16423/5656";
+const QWEN36_LMS_OFF = `${QWEN36_LMS}; none switches thinking off (0 characters in 3 of 3 runs)`;
+const QWEN36_LMS_LEVEL = `${QWEN36_LMS}; the word is accepted and the model thinks, but the length shows no order low < medium < high (effect of the level on length unproven; measured on LM Studio only, one model size)`;
 
 export const FAMILIES: Record<FamilyId, FamilyProfile> = {
   "qwen3.8": {
@@ -138,8 +141,8 @@ export const FAMILIES: Record<FamilyId, FamilyProfile> = {
     thinking: { top_p: u(0.95, "LM Studio hub model.yaml (llm-setup)"), top_k: u(20, "LM Studio hub model.yaml (llm-setup)") },
     noThinking: { top_p: u(0.95, "LM Studio hub model.yaml (llm-setup)"), top_k: u(20, "LM Studio hub model.yaml (llm-setup)") },
     effort: withAbove({
-      off: us("none", "transferred from qwen3.8"), low: us("low", "transferred from qwen3.8"),
-      medium: us("medium", "transferred from qwen3.8"), high: us("high", "transferred from qwen3.8"),
+      off: ms("none", QWEN36_LMS_OFF), low: ms("low", QWEN36_LMS_LEVEL),
+      medium: ms("medium", QWEN36_LMS_LEVEL), high: ms("high", QWEN36_LMS_LEVEL),
     }),
     canTurnOff: true,
     thinkingTemperatureFloor: u(0.6, QWEN_GREEDY),
@@ -346,7 +349,7 @@ export function familyThinking(family: FamilyId, backend: BackendId | undefined)
  *  Anthropic documentation, one `source` per line (page and day). `off` is never on a list: for Claude it is the lowest level, not a
  *  state of its own (`canTurnOff` false). `defaultLevel` is the default OF THE API (what runs when `effort` is omitted), not what the
  *  kit sends: the kit sends the level of the mode (`thinkingFor`). `maxOutput` is the model's synchronous output limit in tokens, or
- *  `null` where no page of the model was read. */
+ *  `null` where neither a model page was read nor the API lists the model (the two Mythos rows). */
 export interface ClaudeModelLevels {
   pattern: RegExp;
   levels: readonly ThinkingLevel[];
@@ -359,9 +362,16 @@ export interface ClaudeModelLevels {
 const EFFORT_PAGE = "https://platform.claude.com/docs/en/build-with-claude/effort";
 const OVERVIEW_PAGE = "https://platform.claude.com/docs/en/models/overview";
 const modelPage = (slug: string): string => `https://platform.claude.com/docs/en/models/${slug}/overview`;
+const API_MEASURED = "GET /v1/models (https://api.anthropic.com/v1/models) 2026-10-27: capabilities.effort.<level>.supported and max_tokens agree with this row (14 of 14 models of the key)";
+/** `measured`: the levels and `max_tokens` of the row agree with `GET /v1/models` (day and call in the source); the two Mythos rows are
+ *  not listed by the API and stay `unmeasured`. `defaultLevel` is never in the API response, it stays read from the documentation. */
 const claudeRow = (
-  pattern: RegExp, levels: readonly ThinkingLevel[], defaultLevel: ThinkingLevel | null, maxOutput: number | null, read: string,
-): ClaudeModelLevels => ({ pattern, levels, defaultLevel, maxOutput, source: `Anthropic docs, retrieved 2026-10-27: ${read}`, evidence: "unmeasured" });
+  pattern: RegExp, levels: readonly ThinkingLevel[], defaultLevel: ThinkingLevel | null, maxOutput: number | null, read: string, measured = true,
+): ClaudeModelLevels => ({
+  pattern, levels, defaultLevel, maxOutput,
+  source: `Anthropic docs, retrieved 2026-10-27: ${read}${measured ? `; ${API_MEASURED}` : ""}`,
+  evidence: measured ? "measured" : "unmeasured",
+});
 const L5: readonly ThinkingLevel[] = ["low", "medium", "high", "xhigh", "max"];
 const L4_MAX: readonly ThinkingLevel[] = ["low", "medium", "high", "max"];
 const L3: readonly ThinkingLevel[] = ["low", "medium", "high"];
@@ -371,18 +381,16 @@ const L3: readonly ThinkingLevel[] = ["low", "medium", "high"];
  *  {@link thinkingLevels} for the family `claude` on the backend `anthropic` only. */
 export const CLAUDE_MODEL_LEVELS: readonly ClaudeModelLevels[] = [
   claudeRow(/claude-mythos-preview/i, ["low", "medium", "high", "max"], "high", null,
-    `${EFFORT_PAGE}: max available, xhigh not; default high. No model page read, output limit unmeasured`),
-  claudeRow(/claude-fable/i, L5, "high", null,
-    `${EFFORT_PAGE}: all five levels on Fable 5 and 5.1, default high; ${OVERVIEW_PAGE}: Fable 5.1 128K; the page of Fable 5 was not read, output limit unmeasured`),
+    `${EFFORT_PAGE}: max available, xhigh not; default high. No model page read, output limit unmeasured; not listed by GET /v1/models`, false),
+  claudeRow(/claude-fable/i, L5, "high", 128000, `${EFFORT_PAGE}: all five levels on Fable 5 and 5.1, default high; ${OVERVIEW_PAGE}: Fable 5.1 128K`),
   claudeRow(/claude-mythos/i, L5, "high", null,
-    `${EFFORT_PAGE}: all five levels on Mythos 5 and 5.1, default high; no model page read, output limit unmeasured`),
+    `${EFFORT_PAGE}: all five levels on Mythos 5 and 5.1, default high; no model page read, output limit unmeasured; not listed by GET /v1/models`, false),
   claudeRow(/claude-opus-5-5/i, L5, "medium", 128000, `${EFFORT_PAGE}: all five levels, default medium; ${OVERVIEW_PAGE}: 128K output`),
-  claudeRow(/claude-opus-5/i, L5, "high", null,
-    `${EFFORT_PAGE}: all five levels, default high, 64k max_tokens suggested at xhigh and max; no model page read, output limit unmeasured`),
-  claudeRow(/claude-opus-4-[78]/i, L5, "high", null,
-    `${EFFORT_PAGE}: all five levels on Opus 4.7 and 4.8, default high; ${modelPage("opus-4-8")}: 4.8 128K; the page of 4.7 was not read, output limit unmeasured`),
-  claudeRow(/claude-sonnet-5/i, L5, "high", null,
-    `${EFFORT_PAGE}: all five levels on Sonnet 5 and 5.5, default high; ${OVERVIEW_PAGE}: Sonnet 5.5 128K; the page of Sonnet 5 was not read, output limit unmeasured`),
+  claudeRow(/claude-opus-5/i, L5, "high", 128000, `${EFFORT_PAGE}: all five levels, default high, 64k max_tokens suggested at xhigh and max`),
+  claudeRow(/claude-opus-4-[78]/i, L5, "high", 128000,
+    `${EFFORT_PAGE}: all five levels on Opus 4.7 and 4.8, default high; ${modelPage("opus-4-8")}: 4.8 128K`),
+  claudeRow(/claude-sonnet-5/i, L5, "high", 128000,
+    `${EFFORT_PAGE}: all five levels on Sonnet 5 and 5.5, default high; ${OVERVIEW_PAGE}: Sonnet 5.5 128K`),
   claudeRow(/claude-haiku-5/i, L5, "medium", 128000, `${EFFORT_PAGE}: all five levels, default medium; ${OVERVIEW_PAGE}: Haiku 5.5 128K output`),
   claudeRow(/claude-opus-4-6/i, L4_MAX, "high", 128000, `${EFFORT_PAGE}: max available, xhigh not; ${modelPage("opus-4-6")}: 128K output, default high`),
   claudeRow(/claude-sonnet-4-6/i, L4_MAX, "high", 128000,
@@ -390,7 +398,7 @@ export const CLAUDE_MODEL_LEVELS: readonly ClaudeModelLevels[] = [
   claudeRow(/claude-opus-4-5/i, L3, "high", 64000,
     `${EFFORT_PAGE}: listed as claude-opus-4-5-20251101 without xhigh and max; ${modelPage("opus-4-5")}: 64K output, default high`),
   claudeRow(/claude-haiku-4-5/i, [], null, 64000, `${EFFORT_PAGE}: not in the list of models with effort; ${modelPage("haiku-4-5")}: default effort not supported, 64K output`),
-  claudeRow(/claude-sonnet-4-5/i, [], null, null, `${EFFORT_PAGE}: not in the list of models with effort; no model page read, output limit unmeasured`),
+  claudeRow(/claude-sonnet-4-5/i, [], null, 64000, `${EFFORT_PAGE}: not in the list of models with effort`),
 ];
 
 /** What a Claude model that is in no row gets (an alias of the endpoint manager, a model that came after this table): the levels all
@@ -469,6 +477,11 @@ export interface ResolveInput {
    *  `max` on Opus 4.5 goes out as `high`, a stored `off` on a Claude model becomes the model's default. Without it the level goes
    *  out as given, as before: on a local family `xhigh` and `max` are then the value of `high`. */
   model?: string;
+  /** Whether the request is streamed (0.66.0, optional). `false` = a full completion in one answer: the reserve of `xhigh` and `max` is then
+   *  the one of `high` (Claude: 16000, not 64000), because a non-streaming request with a large `max_tokens` runs into the request time
+   *  limit (HTTP 504; the SDK refuses it above ~21 000). Absent or `true` = as before. Has no effect on a family whose `xhigh` and `max`
+   *  reserve is already the one of `high` (every local family). */
+  stream?: boolean;
   /** The plugin's budget. Absent = max_tokens is not sent. */
   maxTokens?: number;
   /** Already selected for this mode × family, already validated. */
@@ -567,9 +580,11 @@ export function resolveRequestParams(rawInput: ResolveInput): ResolvedRequest {
   if (base === undefined) {
     candidates.set("max_tokens", "no-value");
   } else {
-    const reserve = think?.reserve[input.thinking];
+    const unstreamedTop = input.stream === false && (input.thinking === "xhigh" || input.thinking === "max");
+    const reserve = think?.reserve[unstreamedTop ? "high" : input.thinking];
     if (reserve && base < reserve.value) {
-      candidates.set("max_tokens", { value: reserve.value, origin: "reserve", source: reserve.source, evidence: reserve.evidence, note: "raised-to-reserve" });
+      const source = unstreamedTop ? `${reserve.source}; non-streaming: the reserve of high instead of that of ${input.thinking}, a large max_tokens runs into the request time limit` : reserve.source;
+      candidates.set("max_tokens", { value: reserve.value, origin: "reserve", source, evidence: reserve.evidence, note: "raised-to-reserve" });
     } else {
       candidates.set("max_tokens", { value: base, origin: typeof ov.max_tokens === "number" ? "override" : "plugin" });
     }
@@ -822,6 +837,13 @@ export type TruncatedPolicy = "error" | "result";
 export function mapTruncated<R extends ChatOutcome>(r: R, policy: TruncatedPolicy): R | Extract<ChatOutcome, { ok: true }> {
   if (policy === "error" || r.ok || r.kind !== "truncated") return r;
   return { ok: true, content: r.partial, reasoning: r.reasoning, finishReason: "length", truncated: true };
+}
+
+/** Whether a response ended at the token limit: the finish reason is exactly `length` (what the OpenAI-style APIs send, and what the
+ *  Anthropic wire writes for `max_tokens`, see `mapTruncated`). One test for the callers that checked `finishReason === "length"` each
+ *  on its own (image-to-markdown, koda-agent, slide-deck, obsidian-kit chat-client, vault-rag). No case folding: `LENGTH` is not `length`. */
+export function isTruncated(finishReason: string | null | undefined): boolean {
+  return finishReason === "length";
 }
 
 /** Deviations between what the profile asked for and what came back. No retry logic here:

@@ -240,7 +240,7 @@ describe("PromptPanelView", () => {
   it("shows the real acceptPanel messages unchanged in the status line (no doubled prefix)", async () => {
     const { acceptPanel, buildAcceptEnv } = await import("../../src/obsidian/accept");
     const inserted: string[] = [];
-    const view0 = { file: { path: "n.md" }, getMode: () => "source", editor: { somethingSelected: () => false, getCursor: () => ({ line: 0, ch: 0 }), getValue: () => "", replaceSelection: (t: string) => { inserted.push(t); } } };
+    const view0 = { file: { path: "n.md" }, getMode: () => "source", editor: { somethingSelected: () => false, getCursor: () => ({ line: 0, ch: 0 }), getValue: () => "", replaceRange: (t: string) => { inserted.push(t); } } };
     const env = buildAcceptEnv({
       app: {} as never,
       ports: { editorFor: () => null, vault: { read: async () => "", process: async () => {} } },

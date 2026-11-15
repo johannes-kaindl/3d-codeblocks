@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.80.1, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.93.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -17,6 +17,7 @@
 //   ein zweites Mal vor dem Schreiben prüft. **Wiederfinden (0.80.1):** steht der Block unverändert woanders (der Nutzer tippt während des Laufs eine Zeile
 //   darüber), findet `locateBlock` ihn nach Inhalt, aber nur bei **genau einem** Zaun gleicher Sprache, Länge und gleichen Rumpfs; die neue Lage kommt als
 //   `retarget` zurück (auch bei `unchanged`). Zwei gleiche Blöcke bleiben `blockMoved`, ein geänderter Rumpf bleibt `blockChanged`.
+//   **Im echten Obsidian gemessen (1.15.1, Live Preview, `pilot/insert-cursor.ts`, 2026-11-12):** ein getippte Zeile über dem Block (`Input.insertText`) steht sofort im Editor (`editorFor(path).getValue()`), die Datei im Vault erst später: deshalb liest `readNoteText` zuerst den Editor. Der Block wird wiedergefunden (`retarget` +1 Zeile), Cmd+Z (und `editor.undo()`) stellt den Rumpf wieder her; zwei gleiche Blöcke bleiben `blockMoved`; ein Block in Callout oder Zitat wird abgelehnt (`blockMoved`, nichts geschrieben). Messfalle: `executeCommandById("editor:undo")` nahm im Treiber nicht einmal ein einfaches Tippen zurück, die Taste und die Editor-API schon.
 // - **Datei:** lesen, `compute(aktueller Text)`, `checkWrite`, dann `beforeWrite(path, alterText)` (der Haken für den Schnappschuss, `file-snapshot`),
 //   dann `vault.process`, das nur schreibt, wenn die Datei seit dem Lesen unverändert ist. Wirft `beforeWrite`, wird nichts geschrieben: ein
 //   Schreibvorgang ohne Rückweg findet nicht statt.
@@ -32,15 +33,20 @@
 // - **Grenzen, die der Aufrufer kennt (Opus-Review 2026-11-04):** (1) **Keine Sperre gegen einen zweiten Aufruf.** Block und Datei lehnen einen gleichzeitigen zweiten
 //   Aufruf ab (`noteChanged`: der Fingerabdruck bzw. der Datei-Stand trägt), das Ziel `new` schreibt aber zweimal. Der Aufrufer sperrt den Knopf während des Laufs und
 //   leert die Runden nach einem Erfolg. (2) **Der Zaun-Scanner liest flach:** ein Zaun in einem Zitat oder Callout (`> ```js`) oder mit vier und mehr Leerzeichen Einzug
-//   ist für ihn keiner. Schreiben in einen solchen Block wird sicher abgelehnt (`blockMoved`/`blockChanged`), Einfügen am Cursor dort landet aber im Zaun des Zitats.
-//   (3) `insertAtCursor` nutzt `replaceSelection`; bei mehreren Cursorn ist das Verhalten ungemessen.
+//   ist für ihn keiner. Schreiben in einen solchen Block wird sicher abgelehnt (`blockMoved`/`blockChanged`); Einfügen am Cursor dort lehnt `insertAtCursor` seit 0.86.0 ab
+//   (`NestedFenceError`, `findNestedFenceAt`), statt im Zaun des Zitats zu landen.
+//   (3) Bei mehreren Cursorn (Mehrfachauswahl) fügt `insertAtCursor` seit 0.86.0 nur am Hauptcursor ein (`replaceRange` statt `replaceSelection`; gemessen 1.15.1: `replaceSelection` fügte an jedem Cursor ein).
 // Nicht Teil des Bausteins: ungespeicherte Puffer einer Plugin-eigenen Dateiansicht (der Aufrufer speichert sie vor `acceptPanel`), die
 // Zwei-Wege-Wahl bei `ask` (`env.choose`, das Kit-`confirm` ist Ja/Nein) und das Zeichnen des Panels.
 
 import { MarkdownView, TFile, getFrontMatterInfo, type App } from "obsidian";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "../kit/block-writer";
-import { findFenceAt, listFences, type Fence } from "../kit/fence-scan";
+import { editAtomic, readNoteText, swapNote } from "../kit/note-edit";
+import { obsidianWritePorts } from "./write-ports";
+import { findFenceAt, findNestedFenceAt, listFences, type Fence } from "../kit/fence-scan";
 import { closesFence } from "../kit/fences";
+import { errorMessage } from "../kit/error-message";
+import { detectEol } from "../kit/text-window";
 import type { Target } from "../kit/panel-session";
 
 export type BlockTarget = Extract<Target, { kind: "block" }>;
@@ -57,6 +63,21 @@ export class UnclosedFenceError extends Error {
     this.selected = selected;
   }
 }
+
+/** Der Zaun am Cursor oder am Ende der Auswahl steht in einem Zitat, Callout oder Listenpunkt (Einzug ab vier Leerzeichen): `insertAtCursor` sieht dort keinen Zaun, und ein Block mitten hinein
+ *  ließe den Callout zerfallen. Abgelehnt statt eingefügt (Opus-Review A3, Empfehlung „zuerst ablehnen“); der Nutzer setzt den Cursor außerhalb. */
+export class NestedFenceError extends Error {
+  readonly selected: boolean;
+  constructor(selected: boolean) {
+    super("the cursor or selection is in a code block inside a quote, callout or list");
+    this.name = "NestedFenceError";
+    this.selected = selected;
+  }
+}
+
+/** Text, wenn die `strings` des Konsumenten `nestedFence` (seit 0.86.0, optional) noch nicht kennen. */
+const NESTED_FENCE_FALLBACK = (selected: boolean): string =>
+  `${selected ? "The selection ends" : "The cursor is"} in a code block inside a quote, callout or list. Nothing was written; move the cursor outside it and try again.`;
 
 export interface AcceptStrings {
   unsupported(label: string): string;
@@ -86,6 +107,8 @@ export interface AcceptStrings {
   savedFileAppended(path: string): string;
   savedFileReferenceFailed(path: string, reason: string): string;
   unclosedFence(selected: boolean): string;
+  /** Seit 0.86.0, optional: Cursor oder Auswahlende liegt in einem Zaun in Zitat, Callout oder Liste (`NestedFenceError`). Fehlt der Text, gilt ein englischer Standard. */
+  nestedFence?(selected: boolean): string;
   couldNotApply(reason: string): string;
 }
 
@@ -118,7 +141,6 @@ export interface AcceptEnv {
 /** `retarget`: nach einem erfolgreichen Block-Apply das neue Ziel (geschriebener Rumpf, neue Schlusszeile), damit das Panel weiterarbeiten kann. */
 export type AcceptOutcome = { ok: true; message: string; retarget?: Target } | { ok: false; message: string };
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Vergleichsform eines Rumpfs: CRLF → LF, ein Zeilenende am Ende zählt nicht. */
 const normBody = (t: string): string => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
@@ -145,7 +167,7 @@ export async function createAttachmentFile(
     const file = typeof o.content === "string" ? await app.vault.create(path, o.content) : await app.vault.createBinary(path, o.content);
     return { ok: true, file, path };
   } catch (error) {
-    return { ok: false, code: "error", path, message: errorText(error) };
+    return { ok: false, code: "error", path, message: errorMessage(error) };
   }
 }
 
@@ -153,22 +175,24 @@ export async function createAttachmentFile(
 
 /** Einfügen, ohne Nutzerinhalt zu zerstören: **die Frontmatter ist Sperrzone** (Cursor oder Auswahlende in ihr, auch `0:0` vor ihr: der Text steht hinter ihrer schließenden
  *  `---`-Zeile, `after-frontmatter`; eine Einfügung davor machte sie zur Nicht-Frontmatter, eine in einer YAML-Zeile zerrisse sie). Was Frontmatter ist, sagt Obsidian
- *  selbst (`getFrontMatterInfo`, gemessen 1.15.1: erste Zeile genau `---`, schließende Zeile genau `---`, ein leerer Block zählt, ohne schließende Zeile gibt es keine). Ein Zaun unter dem Cursor
+ *  selbst (`getFrontMatterInfo`, gemessen 1.15.1: erste Zeile genau `---`, schließende Zeile genau `---`, ein leerer Block zählt, ohne schließende Zeile gibt es keine); `locateFrontmatter` (frontmatter.ts) liest dieselbe Regel für `patchFrontmatter` und `parseFrontmatter` (Pilot `frontmatter-leser`, 2026-11-14). Ein Zaun unter dem Cursor
  *  bzw. am Ende der Auswahl bekommt den Text dahinter (sonst entstünde ein Block im Block); eine Auswahl außerhalb von Frontmatter und Zaun bleibt (Einfügung an ihrem Ende). Ein Zaun, der nie
- *  geschlossen wird, hat kein „dahinter“: `UnclosedFenceError`, nichts geschrieben. Die Zeilenenden der Notiz bleiben einheitlich. */
+ *  geschlossen wird, hat kein „dahinter“: `UnclosedFenceError`, nichts geschrieben. Ein Zaun in einem Zitat, Callout oder Listenpunkt (Einzug ab vier Leerzeichen), den der flache Scanner nicht sieht,
+ *  wird abgelehnt: `NestedFenceError`, nichts geschrieben (seit 0.86.0). Die Zeilenenden der Notiz bleiben einheitlich. */
 export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
   const editor = view.editor;
   const value = editor.getValue();
   const lines = value.split(/\r?\n/);
   const selected = editor.somethingSelected();
   const anchor = selected ? editor.getCursor("to") : editor.getCursor();
-  const eol = value.includes("\r\n") ? "\r\n" : "\n";
+  const eol = detectEol(value);
   const fmEnd = frontmatterCloseLine(value);
   if (fmEnd !== null && anchor.line <= fmEnd) {
     editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fmEnd, ch: (lines[fmEnd] ?? "").length });
     return "after-frontmatter";
   }
   const fence = findFenceAt(value, anchor.line);
+  if (!fence && findNestedFenceAt(value, anchor.line)) throw new NestedFenceError(selected);
   if (fence) {
     if (isUnclosed(fence, lines)) throw new UnclosedFenceError(selected);
     editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
@@ -178,7 +202,9 @@ export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
     editor.replaceRange(text, anchor);
     return "after-selection";
   }
-  editor.replaceSelection(text);
+  // Nicht `replaceSelection`: bei mehreren Cursorn fügt CodeMirror an jedem ein, an den Nebencursorn ohne die Prüfungen oben (gemessen in Obsidian 1.15.1, `pilot/insert-cursor.ts`:
+  // zwei Cursor, zweimal der Block, einer davon mitten in einem Zaun). `replaceRange` am Hauptcursor fügt genau einmal ein, bei einem Cursor wie vorher.
+  editor.replaceRange(text, anchor);
   return "at-cursor";
 }
 
@@ -206,24 +232,20 @@ export function sourceViewOf(last: MarkdownView | null): { view: MarkdownView } 
 
 /* ── Schreiben mit Wächter ──────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-/** `vault.process` mit zwei Ausgängen: `fn` liefert den neuen Text, oder `null` (und derselbe Text) für „nichts schreiben“; ein Wurf in `fn` schreibt
- *  nichts und kommt als `ok: false` zurück. */
+/** Dünne Hülle über `editAtomic` (`pure/note-edit`) für Aufrufer mit `App` und `TFile`: `fn` liefert den neuen Text, oder `null` (und denselben Text) für „nichts schreiben“; ein Wurf in `fn` schreibt
+ *  nichts und kommt als `ok: false` zurück (die Hülle sagt „wirft nie“ zu, und Aufrufer melden eine Ablehnung per Wurf; `editAtomic` selbst lässt ihn durch).
+ *  Ist die Notiz im Quellmodus offen, sieht `fn` den Editorstand (LF, auch ungespeichert) und geschrieben wird dort (Strg+Z wirkt, 0.93.0); die Hülle wartet dann bis zu drei Sekunden, bis die Platte den Text
+ *  trägt, `ok` heißt weiter „steht auf der Platte“ und `persisted` sagt, ob das gelang. */
 export async function processGuarded(
   app: App,
   file: TFile,
   fn: (current: string) => string | null,
-): Promise<{ ok: true; changed: boolean } | { ok: false; message: string }> {
-  let changed = false;
+): Promise<{ ok: true; changed: boolean; persisted: boolean } | { ok: false; message: string }> {
   try {
-    await app.vault.process(file, (current) => {
-      const next = fn(current);
-      if (next === null || next === current) return current;
-      changed = true;
-      return next;
-    });
-    return { ok: true, changed };
+    const r = await editAtomic<null>(obsidianWritePorts(app), file.path, (current) => ({ outcome: null, next: fn(current) }));
+    return r.kind === "error" ? { ok: false, message: errorMessage(r.error) } : { ok: true, changed: r.changed, persisted: r.persisted };
   } catch (error) {
-    return { ok: false, message: errorText(error) };
+    return { ok: false, message: errorMessage(error) };
   }
 }
 
@@ -231,11 +253,6 @@ export async function processGuarded(
 
 /** `relocated`: der Block stand nicht mehr auf den gemerkten Zeilen und wurde an `fence.openLine`/`closeLine` wiedergefunden (0.80.1). */
 export type Located = { fence: Fence; text: string; relocated: boolean } | { problem: "moved" | "changed" };
-
-/** Notiztext aus derselben Quelle wie der Schreiber: offener Quell-Editor, sonst Vault. */
-async function readNoteText(ports: WritePorts, path: string): Promise<string> {
-  return ports.editorFor(path)?.getValue() ?? (await ports.vault.read(path));
-}
 
 /** Zaun des Blocks finden UND prüfen, dass es noch der Block ist, den der Nutzer angeklickt hat: gleiche Öffnungs- und Schlusszeile, gleiche Sprache,
  *  gleicher Rumpf (Fingerabdruck `t.body`). Zeilennummern allein tragen nicht: nach dem Löschen eines Blocks darüber trifft eine veraltete Position
@@ -283,7 +300,7 @@ export async function acceptPanel(env: AcceptEnv, spec: AcceptSpec, target: Targ
     if (target.kind === "file") return await acceptIntoFile(env, spec, target);
     return await acceptAsNew(env, spec);
   } catch (error) {
-    return { ok: false, message: env.strings.couldNotApply(errorText(error)) };
+    return { ok: false, message: env.strings.couldNotApply(errorMessage(error)) };
   }
 }
 
@@ -322,22 +339,21 @@ async function acceptIntoFile(env: AcceptEnv, spec: AcceptSpec, t: Extract<Targe
   const { strings, app } = env;
   const file = app.vault.getAbstractFileByPath(t.path);
   if (!(file instanceof TFile)) return { ok: false, message: strings.fileGone(t.path) };
-  const current = await app.vault.read(file);
-  const result = spec.compute(current);
+  // `readNoteText`, nicht `vault.read`: ist die Notiz im Quellmodus offen, gilt der Editorstand (auch ungespeichert), derselbe, über den `swapNote` schreibt.
+  const seen = await readNoteText(env.ports, t.path);
+  const result = spec.compute(seen);
   if (!result.ok) return { ok: false, message: strings.notApplied(result.problem) };
-  if (result.text === current) return { ok: true, message: strings.unchanged };
+  if (result.text === seen) return { ok: true, message: strings.unchanged };
   const refused = refuse(env, spec, result.text);
   if (refused) return refused;
-  // Der Rückweg zuerst: wirft der Haken, wird nichts geschrieben.
-  await spec.beforeWrite?.(t.path, current);
-  // Geschrieben wird nur, wenn die Datei noch der Text ist, von dem der Schnappschuss und `compute` ausgingen.
-  let stale = false;
-  const written = await processGuarded(app, file, (now) => {
-    if (now !== current) { stale = true; return null; }
-    return result.text;
-  });
-  if (stale) return { ok: false, message: strings.noteChanged };
-  if (!written.ok) return { ok: false, message: strings.couldNotApply(written.message) };
+  // Der Rückweg zuerst: wirft der Haken, wird nichts geschrieben. Der Schnappschuss trägt damit genau den Text, der überschrieben wird.
+  await spec.beforeWrite?.(t.path, seen);
+  // Geschrieben wird nur, wenn die Notiz noch der Text ist, von dem der Schnappschuss und `compute` ausgingen (Vergleich ohne BOM, `\r\n` als `\n`); sonst entsteht höchstens ein Schnappschuss zu viel.
+  // Kein Warten auf die Platte (`persistWaitMs: 0`): wer danach weiterarbeitet, liest mit `readNoteText` aus derselben Quelle.
+  const written = await swapNote(env.ports, t.path, seen, result.text, { persistWaitMs: 0 });
+  if (written.kind === "stale") return { ok: false, message: strings.noteChanged };
+  if (written.kind === "error") return { ok: false, message: strings.couldNotApply(errorMessage(written.error)) };
+  if (written.kind === "same") return { ok: true, message: strings.unchanged };
   return { ok: true, message: strings.appliedTo(t.label) };
 }
 
@@ -362,7 +378,7 @@ async function appendToNote(env: AcceptEnv, path: string, text: string): Promise
   await env.ports.vault.process(path, (cur) => {
     const last = listFences(cur).at(-1);
     if (last && isUnclosed(last, cur.split(/\r?\n/))) throw new UnclosedFenceError(false);
-    const eol = cur.includes("\r\n") ? "\r\n" : "\n";
+    const eol = detectEol(cur);
     const gap = cur === "" ? "" : cur.endsWith("\n") ? eol : eol + eol;
     return `${cur}${gap}${text.replace(/\r?\n/g, eol)}${eol}`;
   });
@@ -377,7 +393,8 @@ async function insertAsBlock(env: AcceptEnv, spec: AcceptSpec, text: string): Pr
     try {
       await appendToNote(env, src.reading.file?.path ?? "", spec.wrap(text));
     } catch (error) {
-      if (error instanceof UnclosedFenceError) return { ok: false, message: strings.unclosedFence(error.selected) };
+      const refusal = fenceRefusal(error, strings);
+      if (refusal !== null) return { ok: false, message: refusal };
       throw error;
     }
     return { ok: true, message: strings.appendedToNote };
@@ -385,9 +402,17 @@ async function insertAsBlock(env: AcceptEnv, spec: AcceptSpec, text: string): Pr
   try {
     return { ok: true, message: strings.appliedAsBlock(insertAtCursor(src.view, `\n${spec.wrap(text)}\n`)) };
   } catch (error) {
-    if (error instanceof UnclosedFenceError) return { ok: false, message: strings.unclosedFence(error.selected) };
+    const refusal = fenceRefusal(error, strings);
+    if (refusal !== null) return { ok: false, message: refusal };
     throw error;
   }
+}
+
+/** Die Meldung zu einer Ablehnung durch einen Zaun (`UnclosedFenceError`, `NestedFenceError`), sonst `null`. */
+function fenceRefusal(error: unknown, strings: AcceptStrings): string | null {
+  if (error instanceof UnclosedFenceError) return strings.unclosedFence(error.selected);
+  if (error instanceof NestedFenceError) return (strings.nestedFence ?? NESTED_FENCE_FALLBACK)(error.selected);
+  return null;
 }
 
 async function createAsFile(env: AcceptEnv, spec: AcceptSpec, text: string): Promise<AcceptOutcome> {
@@ -419,7 +444,7 @@ async function createAsFile(env: AcceptEnv, spec: AcceptSpec, text: string): Pro
     insertAtCursor((now as { view: MarkdownView }).view, `\n${reference}\n`);
     return { ok: true, message: strings.savedFileWithReference(path) };
   } catch (error) {
-    const reason = error instanceof UnclosedFenceError ? strings.unclosedFence(error.selected) : errorText(error);
+    const reason = fenceRefusal(error, strings) ?? errorMessage(error);
     return { ok: true, message: strings.savedFileReferenceFailed(path, reason) };
   }
 }

@@ -109,5 +109,6 @@ export const ACCEPT_STRINGS: AcceptStrings = {
   savedFileAppended: (path) => t("accept.savedAppended", path),
   savedFileReferenceFailed: (path, reason) => t("accept.savedReferenceFailed", path, reason),
   unclosedFence: (selected) => t(selected ? "accept.unclosedFence.selection" : "accept.unclosedFence.cursor"),
+  nestedFence: (selected) => t(selected ? "accept.nestedFence.selection" : "accept.nestedFence.cursor"),
   couldNotApply: (reason) => t("accept.couldNotApply", reason),
 };
