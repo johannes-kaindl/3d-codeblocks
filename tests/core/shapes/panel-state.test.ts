@@ -90,14 +90,14 @@ describe("chainOf", () => {
     const r = chainRounds(refine("a", [], null), refine("b", [], null));
     expect(chainOf(r).map((x) => x.instruction)).toEqual(["b"]);
   });
-  it("cycle: terminates with the exact partial chain", () => {
+  it("cycle: terminates, the broken chain is an empty list (the reason comes from acceptText; the Kit chainOf gives a problem, not a partial chain)", () => {
     const cyc = deepFreeze<Rounds<ShapesRound>>({ rounds: [refine("a", [], 1), refine("b", [], 0)], active: 1 });
-    expect(chainOf(cyc).map((x) => x.instruction)).toEqual(["a", "b"]);
+    expect(chainOf(cyc)).toEqual([]);
   });
-  it("self reference and out-of-range basedOn terminate with the partial chain", () => {
+  it("self reference and out-of-range basedOn terminate with an empty list", () => {
     const self = deepFreeze<Rounds<ShapesRound>>({ rounds: [refine("a", [], 0)], active: 0 });
-    expect(chainOf(self).map((x) => x.instruction)).toEqual(["a"]);
-    expect(chainOf(chainRounds(refine("a", [], 7))).map((x) => x.instruction)).toEqual(["a"]);
+    expect(chainOf(self)).toEqual([]);
+    expect(chainOf(chainRounds(refine("a", [], 7)))).toEqual([]);
   });
 });
 

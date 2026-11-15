@@ -5,7 +5,7 @@
 // scheitert ein Schritt, kommt KEIN Text zurück. Keine Uhr, keine Mutation, wirft nie.
 import { applyChanges } from "./changes";
 import type { RawChange } from "./protocol";
-import { baseTextForRefine as kitBaseTextForRefine, followTarget as kitFollowTarget, sameTarget, type Target } from "../../vendor/kit/panel-session";
+import { acceptChain, baseTextForRefine as kitBaseTextForRefine, chainOf as kitChainOf, followTarget as kitFollowTarget, sameTarget, type ChainIssue, type Target } from "../../vendor/kit/panel-session";
 import { EMPTY_ROUNDS, type Rounds } from "../../vendor/kit/rounds";
 import { t } from "../../i18n/t";
 
@@ -34,80 +34,65 @@ export function followTarget(s: PanelState, t: PanelTarget): { state: PanelState
   return { state, kept: state === s && !sameTarget(s.target, t) };
 }
 
-interface Resolved {
-  /** Wurzel zuerst; `index` ist der Listenindex (das Panel zeigt `index + 1`). */
-  chain: { round: ShapesRound; index: number }[];
-  /** Gesetzt, wenn die Kette nicht sauber zur Wurzel führt (nicht vorhanden, auf sich selbst, nach vorn). */
-  broken: string | null;
-}
-
-function resolveChain(rounds: Rounds<ShapesRound>): Resolved {
-  const chain: Resolved["chain"] = [];
-  if (rounds.active < 0) return { chain, broken: null };
-  let index = rounds.active;
-  const first = Number.isInteger(index) ? rounds.rounds[index] : undefined;
-  if (!first) return { chain, broken: t("core.rounds.missing", index + 1) };
-  // Eine Runde baut nur auf eine FRÜHERE auf (basedOn < eigener Index); damit gibt es keine Zyklen, und die
-  // Schleife endet nach höchstens `active + 1` Schritten.
-  for (;;) {
-    const r: ShapesRound = rounds.rounds[index];
-    chain.unshift({ round: r, index });
-    if (r.kind !== "refine" || r.basedOn === null) break;
-    const n = index + 1;
-    const m = r.basedOn + 1;
-    if (!Number.isInteger(r.basedOn) || r.basedOn < 0 || r.basedOn >= rounds.rounds.length) {
-      return { chain, broken: t("core.rounds.refers", n, m) };
-    }
-    if (r.basedOn === index) return { chain, broken: t("core.rounds.self", n) };
-    if (r.basedOn > index) return { chain, broken: t("core.rounds.forward", n, m) };
-    index = r.basedOn;
+/** Die Meldung zu einem Fehler der Kette, in der Sprache des Plugins (das Kit liefert den Code mit den Listennummern, `issue.code`). */
+function chainMessage(issue: ChainIssue): string {
+  switch (issue.code) {
+    case "missing-round": return t("core.rounds.missing", issue.round);
+    case "missing-ref": return t("core.rounds.refers", issue.round, issue.ref);
+    case "self-ref": return t("core.rounds.self", issue.round);
+    case "forward-ref": return t("core.rounds.forward", issue.round, issue.ref);
+    case "nothing-to-apply": return t("core.rounds.nothing");
+    case "round-failed": return issue.problem;
   }
-  return { chain, broken: null };
 }
 
-/** Runden von der Wurzel bis zur aktiven, entlang `basedOn`. Ein `refine` mit `basedOn === null` verfeinert
- *  den Ziel-Text und beendet die Kette; bei einer kaputten Kette kommt, was bis dahin gelesen wurde. */
+const basedOnOf = (r: ShapesRound): number | null => (r.kind === "refine" ? r.basedOn : null);
+
+/** Runden von der Wurzel bis zur aktiven, entlang `basedOn` (Kit `chainOf`). Ein `refine` mit `basedOn === null` verfeinert
+ *  den Ziel-Text und beendet die Kette; bei einer kaputten Kette kommt eine leere Liste (`acceptText` nennt den Grund). */
 export function chainOf(rounds: Rounds<ShapesRound>): ShapesRound[] {
-  return resolveChain(rounds).chain.map((c) => c.round);
+  const r = kitChainOf(rounds, basedOnOf);
+  return r.ok ? r.chain.map((i) => rounds.rounds[i]) : [];
 }
 
 export type AcceptResult = { ok: true; text: string; unchanged: boolean } | { ok: false; problems: string[] };
 
 /** Text, der beim Übernehmen geschrieben würde. Beginnt die Kette mit `create` (Ziel „neu"), ist deren Text
  *  der Ausgangspunkt und `currentTargetText` wird ignoriert; eine reine Verfeinerungskette braucht den
- *  aktuellen Zieltext (`null` = das Modell ist weg).
+ *  aktuellen Zieltext (`null` = das Modell ist weg). Die Kette und ihre Fehler kommen vom Kit (`acceptChain`).
  *  `applyChanges` statt `applyChangesAnswer`: die Verwerfungsliste des Lesers und „Antwort ändert nichts"
  *  wurden beim Anlegen der Runde geprüft; hier gilt dieselbe Strenge (Round-Trip-Wächter, strenge Werte,
  *  Mehrdeutigkeit), aber „ändert nichts" ist kein Fehler, sondern `unchanged: true`. */
 export function acceptText(rounds: Rounds<ShapesRound>, currentTargetText: string | null): AcceptResult {
-  const { chain, broken } = resolveChain(rounds);
-  if (broken !== null) return { ok: false, problems: [broken] };
-  if (chain.length === 0) return { ok: false, problems: [t("core.rounds.nothing")] };
-  let text: string;
-  let rest = chain;
-  const root = chain[0].round;
-  if (root.kind === "create") {
-    text = root.text;
-    rest = chain.slice(1);
-  } else {
-    if (currentTargetText === null) return { ok: false, problems: [t("core.rounds.gone")] };
-    text = currentTargetText;
-  }
-  // Nach dem Wurzelschritt kann nur noch `refine` folgen: die Kette endet an der ersten `create`-Runde.
-  for (const { round, index } of rest) {
-    const label = t("core.rounds.label", index + 1);
-    const r = round as Extract<ShapesRound, { kind: "refine" }>;
-    let applied;
-    try {
-      applied = applyChanges(text, r.changes);
-    } catch {
-      return { ok: false, problems: [t("core.rounds.unreadable", label)] };
-    }
-    // Listennummer wie im Panel, nicht die Position in der Kette.
-    if (!applied.ok) return { ok: false, problems: applied.problems.map((p) => `${label}: ${p}`) };
-    text = applied.text;
-  }
-  return { ok: true, text, unchanged: currentTargetText !== null && text === currentTargetText };
+  // Die Probleme einer scheiternden Runde kommen als Liste (mehrere Änderungen können scheitern); das Kit trägt nur einen Text, die Liste bleibt hier.
+  let failed: string[] | null = null;
+  const chain = kitChainOf(rounds, basedOnOf);
+  if (!chain.ok) return { ok: false, problems: [chainMessage(chain.issue)] };
+  const rootIndex = chain.chain[0];
+  const root = rootIndex === undefined ? undefined : rounds.rounds[rootIndex];
+  if (root?.kind === "refine" && currentTargetText === null) return { ok: false, problems: [t("core.rounds.gone")] };
+  const r = acceptChain(rounds, currentTargetText, {
+    basedOnOf,
+    applyRound: (text, round, index) => {
+      if (round.kind === "create") return { ok: true, text: round.text };
+      // Listennummer wie im Panel, nicht die Position in der Kette.
+      const label = t("core.rounds.label", index + 1);
+      let applied;
+      try {
+        applied = applyChanges(text ?? "", round.changes);
+      } catch {
+        failed = [t("core.rounds.unreadable", label)];
+        return { ok: false, problem: "unreadable" };
+      }
+      if (!applied.ok) {
+        failed = applied.problems.map((p) => `${label}: ${p}`);
+        return { ok: false, problem: applied.problems.join("; ") };
+      }
+      return { ok: true, text: applied.text };
+    },
+  });
+  if (!r.ok) return { ok: false, problems: failed ?? [chainMessage(r.issue)] };
+  return { ok: true, text: r.text, unchanged: currentTargetText !== null && r.text === currentTargetText };
 }
 
 /** Grundlage der nächsten Verfeinerung: der Text der aktiven Runde (das, was der Nutzer sieht), sonst der
