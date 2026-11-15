@@ -4772,7 +4772,8 @@ const SMOKE_NOTE_PP_NEW = "_tdcb-gui-smoke-pp-new.md";
 const SMOKE_NOTE_PP_EDIT = "_tdcb-gui-smoke-pp-edit.md";
 const SMOKE_NOTE_PP_STALE = "_tdcb-gui-smoke-pp-stale.md";
 const SMOKE_NOTE_PP_BLANK = "_tdcb-gui-smoke-pp-blank.md";
-const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK];
+const SMOKE_NOTE_PP_CRLF = "_tdcb-gui-smoke-pp-crlf.md";
+const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK, SMOKE_NOTE_PP_CRLF];
 const PP_ENDPOINT_ID = "tdcb-smoke-ep";
 const PP_MODEL = "smoke-model";
 /** Zweites Modell des Ersatz-Endpunkts (Modellzeile, PP27–PP30). Der Name trägt die Familie qwen3.8, damit die Denk-Steuerung einen Zustand hat, der den Body ändert. */
@@ -4780,7 +4781,7 @@ const PP_MODEL_B = "qwen3.8-smoke-b";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30", "PP31"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
@@ -4810,6 +4811,7 @@ const PP_TITEL = {
   PP28: "Modellzeile: der Wechsel wirkt, die nächste Anfrage am Endpunkt trägt das gewählte Modell",
   PP29: "Modellzeile: die Denk-Steuerung (Dropdown mit den Stufen des Modells) steht IN der Zeile, schaltet um, und der gesendete Body ändert sich (Wirkung am Stub)",
   PP30: "Modellzeile: während einer Anfrage gesperrt (Dropdown und Neu laden), danach wieder frei",
+  PP31: "Übernehmen in eine im Quellmodus offene CRLF-Notiz (Kit 0.93.0 note-edit): wendet an, schreibt im Editor (Editorstand = Platte, Strg+Z nimmt es zurück), nur die Platte-Zeile ändert sich",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
@@ -5715,6 +5717,63 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         safeApplied || safeRefused,
         `Ausgang: ${ok ? "angewendet" : "abgelehnt"} — Meldung „${message}“ · Rumpf-Fingerabdruck des Panels: ${target ? `${target.len} Zeichen, endet mit Zeilenumbruch: ${target.endsWithNewline}, Ende ${target.tail}` : "nicht lesbar"} · Notiz: ${noteNow === blankBody ? "unverändert" : `geändert (nicht-leere Zeilen ${before.length}→${now.length}, abweichend ${differing.length}, Leerzeile am Ende ${/\n\n```\n?$/.test(noteNow) ? "erhalten" : "weg"})`}`,
       );
+    }
+
+    // --- PP31. Übernehmen in eine im Quellmodus offene CRLF-Notiz (obsidian-kit 0.93.0, `note-edit`) ------------------------
+    // Das Kit schreibt bei einer im Quellmodus offenen Notiz im Editor (nicht auf der Platte) und liest den Editorstand; Obsidian 1.15.1 speichert eine solche
+    // CRLF-Notiz als LF. Gemessen wird: angewendet, nur die Platte-Zeile ändert sich (Zeilenenden nicht mitgezählt), der Editorstand gleicht der Platte, und ein
+    // Rückgängig im Editor (`editor.undo()`) stellt die alte Platte-Zeile im Editor wieder her. Die Zeilenenden auf der Platte stehen im Detail (LF erwartet, nicht gewertet).
+    const crlfBody = ppBlockNote("PP31").replace(/\n/g, "\r\n");
+    const crlf = await ppRefineRound(cdp, SMOKE_NOTE_PP_CRLF, crlfBody);
+    if (!crlf.ready) {
+      ppNothing("PP31", T.PP31, crlf.reason);
+    } else {
+      // Quellmodus herstellen, bevor übernommen wird: das Panel bleibt stehen, das Blatt der Notiz wechselt vom Lesemodus in den Editor.
+      const quell = await cdp.evaluate<string>(`
+        const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view?.file?.path === ${JSON.stringify(SMOKE_NOTE_PP_CRLF)});
+        if (!leaf) return "kein Blatt";
+        const st = leaf.getViewState();
+        await leaf.setViewState({ ...st, state: { ...st.state, mode: "source", source: true } });
+        await new Promise((r) => setTimeout(r, 600));
+        const v = leaf.view;
+        return v?.getMode?.() === "source" && v?.editor ? "ok" : "Modus " + (v?.getMode?.() ?? "?");
+      `);
+      if (quell !== "ok") {
+        ppNothing("PP31", T.PP31, `Quellmodus nicht herzustellen (${quell})`);
+      } else {
+        const readEditor = (): Promise<string | null> => cdp.evaluate<string | null>(`
+          const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view?.file?.path === ${JSON.stringify(SMOKE_NOTE_PP_CRLF)});
+          return leaf?.view?.editor ? leaf.view.editor.getValue() : null;
+        `);
+        const editorVorher = await readEditor();
+        await ppClick(cdp, ".tdcb-prompt-apply");
+        const outcome = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== crlf.round?.status, 10_000, 250);
+        await sleepMs(1500);
+        const disk = await ppReadNote(cdp, SMOKE_NOTE_PP_CRLF);
+        const editorNachher = await readEditor();
+        const lf = (x: string | null): string => (x ?? "").replace(/\r\n/g, "\n");
+        const before = nonBlank(lf(crlfBody));
+        const now = nonBlank(lf(disk));
+        const differing = before.map((_, i) => i).filter((i) => before[i] !== now[i]);
+        const platte = now.find((l) => l.startsWith("box Platte "));
+        const applied = outcome.state?.phase === "ok" && now.length === before.length && differing.length === 1 && platte !== undefined && platte.includes(" 0.925 ");
+        const editorGleich = editorNachher !== null && lf(editorNachher) === lf(disk);
+        const rueck = await cdp.evaluate<string | null>(`
+          const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view?.file?.path === ${JSON.stringify(SMOKE_NOTE_PP_CRLF)});
+          const ed = leaf?.view?.editor;
+          if (!ed) return null;
+          ed.undo();
+          await new Promise((r) => setTimeout(r, 400));
+          return ed.getValue();
+        `);
+        const rueckOk = rueck !== null && /box Platte [^\n]* 0\.725 /.test(rueck);
+        ppRecord(
+          "PP31",
+          T.PP31,
+          applied && editorGleich && rueckOk,
+          `Ausgang: ${outcome.state?.phase === "ok" ? "angewendet" : "abgelehnt"} — Meldung „${outcome.state?.status ?? ""}“ · Platte-Zeile „${platte ?? "fehlt"}“, abweichende Zeilen ${differing.length} (erwartet 1) · Editorstand gleich Platte (Zeilenenden ignoriert): ${editorGleich} · Zeilenenden vorher Editor ${editorVorher === null ? "?" : /\r\n/.test(editorVorher) ? "CRLF" : "LF"}, Platte nachher ${/\r\n/.test(disk) ? "CRLF" : "LF"} (LF erwartet, nicht gewertet) · nach Rückgängig steht die alte Platte-Zeile im Editor: ${rueckOk}`,
+        );
+      }
     }
 
     // --- PP11. Panel mit zwei Runden und Diff-Liste: nichts abgeschnitten, nichts ueberlagert --------

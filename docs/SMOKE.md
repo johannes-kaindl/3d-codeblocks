@@ -613,7 +613,7 @@ Der Abschnitt räumt vor sich selbst nur Dateien einer Weißliste ab (die exakte
 
 ### Prompt-Panel (Plan 3b)
 
-> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP30, plus Abschnitt `claude` (CL1–CL4), eigener Abschnitt)
+> [!info] Automatisiert — `npm run smoke:gui -- --section promptpanel` (Punkte PP1–PP31, plus Abschnitt `claude` (CL1–CL4), eigener Abschnitt)
 
 The substitute endpoint checks the wiring, not the LLM.
 
@@ -638,6 +638,7 @@ Vor dem Lauf, am Abschnittsende und im Aufräumen (auch bei Abbruch) wird zurüc
 | PP28 | Modellzeile: der Wechsel wirkt. Die erste Anfrage trägt das Zeilen-Modell A (der Stub schneidet den Body mit), nach der Wahl von B im Dropdown meldet `llm.modelInUse()` B, und die nächste Anfrage trägt B |
 | PP29 | Modellzeile: die Denk-Steuerung steht in der Zeile (ein Knopf in der Zeile, einer im Panel insgesamt), ein echter Klick ändert die Stufe in den Einstellungen, und der nächste gesendete Body (ohne `messages`) unterscheidet sich vom vorigen — **die Wirkung wird am Stub gemessen, nicht angenommen** (das Panel sendet JSON, `restoreContent: "json"`; die Form des Bodys mit Denken steht im Detail) |
 | PP30 | Modellzeile: während einer (hängenden) Anfrage sind Dropdown und „Reload models“ gesperrt, davor und nach „Stop“ frei (gelesen am echten DOM) |
+| PP31 | Übernehmen in eine im Quellmodus offene CRLF-Notiz (obsidian-kit 0.93.0, `note-edit`): angewendet, nur die Platte-Zeile ändert sich, der Editorstand gleicht der Platte, ein Rückgängig im Editor stellt die alte Platte-Zeile wieder her; die Zeilenenden auf der Platte stehen im Detail (Obsidian 1.15.1 speichert LF) |
 
 **PP12 (2026-10-11, Welle 17):** Ein Altwert `llmModel` im `data.json` zieht beim Laden (Plugin aus- und wieder einschalten) in die Zeile ohne Modell, der Schlüssel ist danach weg, die Einstellungen kennen weder eine Zeile „Model“ noch die Option „global model“. Gegenprobe mit dem Build davor: PP12 rot („Schlüssel llmModel weg: NEIN · Option global model: VORHANDEN“), alles andere im Abschnitt grün. **Bilanz Gesamtlauf (Zweitinstanz Port 9387, Obsidian 1.14.4, frischer Prozess): vorher 99 grün · 0 rot · 8 übersprungen · 1 nichts gemessen von 108, nachher 101 grün · 0 rot · 8 übersprungen · 0 nichts gemessen von 109.**
 
