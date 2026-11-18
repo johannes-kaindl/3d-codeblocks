@@ -61,6 +61,8 @@ export const ACCEPT_STRINGS: AcceptStrings = {
   get blockChanged() { return t("accept.blockChanged"); },
   get noteChanged() { return t("accept.noteChanged"); },
   get closesFence() { return t("accept.closesFence"); },
+  /** Block hinter einem Listenmarker (`- ```shapes`, seit code-kit 0.78.0 gefunden): das Kit lehnt ab, bevor etwas geschrieben wird. */
+  get blockInList() { return t("accept.blockInList"); },
   get cancelled() { return t("accept.cancelled"); },
   get noNoteOpen() { return PANEL_TEXTS.noNoteOpen; },
   get noteInReadingView() { return PANEL_TEXTS.noteInReadingView; },

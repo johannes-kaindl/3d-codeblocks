@@ -198,6 +198,7 @@ export const DE: Record<string, string> = {
 
   // ── Umwandeln Block ↔ Datei ──
   "conv.indented": "Der ```shapes-Block ist eingerückt (wohl in einer Liste oder einem Zitat). Ein Dateiverweis kann ihn dort nicht ersetzen, ohne die Struktur zu zerstören — es wurde nichts geändert.",
+  "accept.blockInList": "Dieser Block steht in einer Liste; das Panel schreibt nur in Blöcke, die am Zeilenanfang stehen. Es wurde nichts geschrieben.",
   "conv.noClose": "Der ```shapes-Block hat keinen schließenden Zaun — schließe ihn zuerst. Es wurde nichts geändert.",
   "conv.empty": "Der ```shapes-Block ist leer — es gibt nichts, was sich in eine Datei verschieben ließe.",
   "conv.placeCursor": "Setze den Cursor in einen ```shapes-Block (Bearbeitungsansicht), um ihn in eine .shapes-Datei zu verschieben.",

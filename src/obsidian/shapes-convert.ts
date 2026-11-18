@@ -51,7 +51,8 @@ function checkedFence(text: string, fence: Fence): { fence: Fence; lines: string
   const lines = text.split(/\r?\n/);
   // BOM auf Zeile 0 gehoert nicht zur Einrueckung.
   const open = lines[fence.openLine].replace(/^\uFEFF/, "");
-  if (/^\s/.test(open)) {
+  // Eingerückt oder hinter einem Listen-/Zitatmarker (`- ```shapes`, seit code-kit 0.78.0 als Zaun gefunden): die Öffnungszeile beginnt nicht mit dem Zaun.
+  if (/^\s/.test(open) || !/^(`{3,}|~{3,})/.test(open)) {
     return { problem: t("conv.indented") };
   }
   if (fence.closeLine <= fence.openLine || !closesFence(lines[fence.openLine], lines[fence.closeLine])) {

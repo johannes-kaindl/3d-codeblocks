@@ -276,6 +276,16 @@ describe("convertBlockAt (no cursor, lines from the post processor)", () => {
     expect(events).toEqual(["create", "replace"]);
   });
 
+  it("a block behind a list marker is refused with the indentation message, nothing created, nothing changed (code-kit 0.78.0 finds it as a fence)", async () => {
+    const note = ["# Möbel", "- ```shapes", "  title: Tisch", "  box A size 1", "  ```", "nach"].join("\n");
+    const { env, store, notices } = setup({ "n.md": note }, { activeFile: "n.md" });
+    expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(false);
+    expect(store["n.md"]).toBe(note);
+    expect(Object.keys(store)).toEqual(["n.md"]);
+    // Früher hieß es hier „kein schließender Zaun“ (die Schlusszeile trägt den Einzug); jetzt der wahre Grund.
+    expect(notices[0]).toContain("indented");
+  });
+
   it("also works with the note open in an editor", async () => {
     const { env, store } = setup({ "n.md": NOTE });
     expect(await convertBlockAt(env, "n.md", 1, 4, BODY)).toBe(true);

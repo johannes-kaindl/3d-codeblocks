@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.96.0, src/obsidian/prompt-panel.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.98.0, src/obsidian/prompt-panel.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Rahmen der Auftrags-Fenster (K9, Welle 36): zeichnet die acht Stationen eines Fensters, das einen Auftrag an ein Modell gibt, das Ergebnis zeigt und es auf Knopfdruck schreibt.
 // Herkunft: svg-studio@0.1.4 `src/obsidian/panel/shell.ts` (`buildPanelShell`, 628 Zeilen), verschoben und auf den Halter umgebaut; die Tests stammen aus `tests/obsidian/panel-shell.test.ts`
 // (17 Tests, von happy-dom auf das Fake-DOM des Kits umgeschrieben). Spec: Cockpit `_SDD/2026-11-15-auftrags-fenster-rahmen-design`, Plan `…-plan-etappe-1-3`.
@@ -20,6 +20,10 @@
 //   wird überschrieben, und es gibt keinen Parameter, der den Schnappschuss abschaltet. Wirft `way.prepare`, wird nichts geschrieben. Ein Doppelklick schreibt einmal (Sperre im Halter).
 // - **Eingaben gehen nie verloren.** Das Auftragsfeld wird aus `live().draft` nur beim Aufbau und nach einem Ergebnis gefüllt, das eine Runde ist (dann ist der Entwurf leer), nie bei einem anderen Ereignis.
 //   Bei Fehler und Abbruch bleibt der Text im Feld.
+// - **Prüfliste und Felder werden am Ende jedes Laufs und jedes Schreibens neu gezeichnet** (Übergang von `busy()` wahr nach falsch, über `run` und `apply`; Erfolg, Abbruch, Fehler, fehlgeschlagenes Übernehmen),
+//   damit ihre Slots den Zustand selbst bestimmen: Sperren, die ein Slot setzt, bleiben seine Sache. Der Rahmen selbst sperrt beide im Lauf nur zu, nie auf (`renderControls`), und das Ereignis `session` kommt noch im
+//   Lauf, zeichnet sie also gesperrt. Ohne das Neuzeichnen blieben nach jedem Verfeinern der Ablehnen-Knopf und die Zahlenfelder gesperrt (gemessen von svg-studio am Rahmen 0.96.0). Die Vorschau wird dabei nicht
+//   neu gezeichnet (teuer, und ein neues Ticket verwürfe ein laufendes Zeichnen); die Felder bekommen den Text, den die Vorschau zeigt, Runde oder Bestand.
 // - **Ids sind je Rahmen eindeutig** (Zähler im Modul): die Hinweise an gesperrten Schreibwegen tragen `okit-prompt-panel-<n>-…`.
 // - **Eine asynchrone Vorschau, die nach einem neueren Zeichnen fertig wird, schreibt nicht mehr in den Platz:** jedes Zeichnen bekommt ein eigenes Wurzelelement, das beim nächsten Zeichnen
 //   mit dem alten Inhalt abgehängt wird; dazu sagt `ctx.current()` dem Slot, ob sein Zeichnen noch gilt.
@@ -34,6 +38,8 @@
 //   `onClose` baut (Etappe 3), ruft `void panel.requestClose()` und danach `panel.destroy()`; ein Rückgabewert, der über das Schließen entschiede, gäbe es nicht mehr zu entscheiden.
 // - **Jedes Zeichnen der Vorschau bekommt ein eigenes Wurzelelement.** Grund: `ctx.current()` schützt nur einen Slot, der es nach dem `await` fragt; das Element schützt auch einen, der es vergisst (Spec § 11: eine späte
 //   Vorschau schreibt nicht mehr in den Platz).
+// - **Keine Abweichung mehr beim Entsperren:** `shell.ts` zeichnete nach jedem Laufende alles neu (`runInner` `finally`, `stop()`: `settle(); renderAll()`); der erste Stand dieses Rahmens zeichnete nur die Bedienteile
+//   (ein Fehler, keine gewollte Abweichung). Seit dem Fix zeichnet er Prüfliste und Felder neu und die Vorschau nicht; das ist der einzige Unterschied zum Neuzeichnen von allem, und er hat den Grund oben (die Vorschau ist teuer).
 // - **Die Rundenliste erscheint ab zwei Runden** (`minItems` des Bausteins `buildVersionList`, Standard 2) wie in svg-studio, dem besten Exemplar; bei einer Runde zeigt die Vorschau sie ohnehin.
 //
 // ## Gemessen im echten Obsidian
@@ -123,7 +129,7 @@ export interface PromptPanelSlots<R, S extends PanelSession<R>> {
   renderPreview(host: HTMLElement, round: R | null, text: string | null, ctx: PreviewCtx): void | Promise<void>;
   /** Darf der Text des Ziels ohne Runde als Vorschau stehen? Fehlt der Slot, zeigt das Fenster ohne Runde keine Vorschau. */
   canPreviewBase?(text: string): boolean;
-  /** Die Änderungen der aktiven Runde (die Prüfliste). */
+  /** Die Änderungen der aktiven Runde (die Prüfliste). Wird auch am Ende jedes Laufs und Schreibens neu gezeichnet (nicht nur bei einem neuen Ergebnis); `ctx.busy()` sagt, ob gesperrt zu zeichnen ist. */
   renderChanges(host: HTMLElement, round: R | null, session: S, ctx: ChangesCtx<S>): void;
   roundLabel(round: R, index: number): string;
   roundMeta(round: R): string;
@@ -138,7 +144,7 @@ export interface PromptPanelSlots<R, S extends PanelSession<R>> {
   instructionOptional?: boolean;
   /** Hinweise zum Text, auf dem die Sitzung steht, mit Knöpfen, die über `ctx` eine Regelrunde setzen oder einen Lauf starten. Wird bei jedem Zeichnen mit leerem `host` gerufen. */
   notices?(host: HTMLElement, ctx: NoticeCtx<S>): void;
-  /** Die Felder unter der Vorschau für den Text, den die Vorschau zeigt. */
+  /** Die Felder unter der Vorschau für den Text, den die Vorschau zeigt. Wird wie `renderChanges` am Ende jedes Laufs und Schreibens neu gezeichnet, ohne dass die Vorschau neu gezeichnet wird. */
   renderFields?(host: HTMLElement, text: string | null, session: S, ctx: ChangesCtx<S>): void;
   dispose?(): void;
 }
@@ -188,6 +194,8 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
   let previewTicket = 0;
   const previewWork = new Set<Promise<void>>();
   let wasRunning = host.running();
+  /** `busy()` beim letzten Zeichnen: der Übergang wahr nach falsch entsperrt Prüfliste und Felder (`releaseAfterBusy`). */
+  let wasBusy = host.busy();
 
   root.addClass("okit-prompt-panel-host");
   const panelEl = root.createDiv({ cls: "okit-prompt-panel" });
@@ -427,7 +435,7 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     discardBtn.disabled = n === 0 || busy;
     newBtn.disabled = busy;
     for (const b of Array.from(noticesHost.querySelectorAll<HTMLButtonElement>("button"))) b.disabled = busy;
-    // Die Prüfliste sperrt der Kit-Baustein selbst (gesperrte Karten bleiben gesperrt): hier nur zusperren, nie aufsperren.
+    // Die Prüfliste sperrt der Kit-Baustein selbst (gesperrte Karten bleiben gesperrt): hier nur zusperren, nie aufsperren. Aufgesperrt wird durch Neuzeichnen am Ende des Laufs (`releaseAfterBusy`).
     if (busy) lock(changesHost, "button");
     // Die Zahlenfelder ebenso: Enter in einem Feld darf während eines Laufs oder Übernehmens keine zweite Änderung auslösen.
     if (busy) lock(fieldsHost, "input");
@@ -541,6 +549,25 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     slots.renderChanges(changesHost, activeRound(), session(), changesCtx());
   }
 
+  /** Die Felder allein, mit dem Text, den die Vorschau gerade zeigt (Runde, sonst der Stand des Ziels); ohne beides bleiben sie leer wie nach `clearBase`. Die Vorschau selbst bleibt unberührt. */
+  function renderFieldsOnly(): void {
+    const round = activeRound();
+    const text = round !== null ? slots.roundText(round) : baseShown;
+    fieldsHost.empty();
+    if (text !== null) slots.renderFields?.(fieldsHost, text, session(), changesCtx());
+  }
+
+  /** Beim Übergang von `busy()` wahr nach falsch zeichnen Prüfliste und Felder neu, damit ihre Slots den Zustand selbst bestimmen: gesperrt wird sonst nur zu (`renderControls`), und das Ereignis
+   *  `session` kommt noch im Lauf (der Halter beendet ihn erst danach), zeichnet beide also gesperrt. Gilt für Erfolg, Abbruch, Fehler und ein fehlgeschlagenes Übernehmen. */
+  function releaseAfterBusy(): void {
+    const busy = host.busy();
+    const released = wasBusy && !busy;
+    wasBusy = busy;
+    if (!released) return;
+    renderChanges();
+    renderFieldsOnly();
+  }
+
   let noticeTicket = 0;
   function renderNotices(): void {
     noticesHost.empty();
@@ -591,12 +618,14 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
         return;
       case "run":
         renderControlsSlot();
+        releaseAfterBusy();
         renderControls();
         if (wasRunning && !host.running()) input.focus();
         wasRunning = host.running();
         return;
       case "apply":
         renderControlsSlot();
+        releaseAfterBusy();
         renderControls();
         return;
     }

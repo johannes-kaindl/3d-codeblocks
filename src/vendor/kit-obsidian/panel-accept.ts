@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.96.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.98.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -27,15 +27,14 @@
 //
 // - **Schnappschuss-Regel.** `spec.beforeWrite(path, alterText)` läuft vor **jedem Überschreiben von vorhandenem Inhalt**: beim Ersetzen einer Datei (schon vorher) und beim Ersetzen eines Blocks (neu), mit dem **ganzen alten Notiztext**,
 //   nach allen Ablehnungen (`compute`, `checkWrite`/`refuse`, `closesFence`, Fingerabdruck) und direkt vor dem Schreiben: ein Schnappschuss ohne Schreiben wäre Platzverbrauch. Wirft der Haken, wird nichts geschrieben, und die Meldung kommt über
-//   `couldNotApply`. **Kein Haken** beim reinen Hinzufügen: Einfügen an der Schreibmarke, neue Datei, und `appendToNote` im Lesemodus (es hängt nur an und überschreibt nichts; es liefert deshalb auch kein `retarget`, der Rahmen beginnt dann auf dem
-//   bisherigen Ziel neu). Den Haken setzt der Rahmen ein: `snapshotBeforeWrite(app, pluginId, failed)` macht aus `snapshotFile` einen Haken, dessen `ok: false` ein Wurf ist; ein Plugin kann ihn so nicht auslassen. Der Fingerabdruck des Blocks bleibt der Rumpf:
+//   `couldNotApply`. **Kein Haken** beim reinen Hinzufügen: Einfügen an der Schreibmarke, neue Datei, und `appendToNote` im Lesemodus (es hängt nur an und überschreibt nichts; ein Schnappschuss entfiele also; das `retarget` auf den angehängten Block liefert es trotzdem, siehe „`retarget` für Neues“). Den Haken setzt der Rahmen ein: `snapshotBeforeWrite(app, pluginId, failed)` macht aus `snapshotFile` einen Haken, dessen `ok: false` ein Wurf ist; ein Plugin kann ihn so nicht auslassen. Der Fingerabdruck des Blocks bleibt der Rumpf:
 //   Tippen außerhalb des Blocks zwischen Haken und Schreiben verhindert das Schreiben nicht, der Schnappschuss trägt dann den Stand von `locateBlock` (sicher den alten Rumpf, den Rest im Stand von dort).
 // - **CRLF-Notiz offen im Editor.** `locateBlock` liest mit `readNoteText`; ist die Notiz im Quellmodus offen, ist das der Editorstand (LF, gegebenenfalls ungespeichert), nicht die Bytes der Platte. Der Schnappschuss trägt dann diesen Stand: gewollt, denn überschrieben
 //   wird der Editorstand; eine geschlossene CRLF-Notiz sichert die Platte mit ihrem CRLF. (Obsidian speichert eine offene CRLF-Notiz ohnehin als LF, siehe Kopf von `note-edit.ts`, P5.)
 // - **`where`.** `acceptPanel(env, spec, target, kind, where?)`: für das Ziel `new` legt `where` (`"block"` am Cursor, `"file"` als Anhang) den Schreibweg ausdrücklich fest; mit `where` werden `env.settings` und `env.choose` nie gerufen. Beide sind optional und nur noch für Aufrufer
 //   ohne `where`; fehlen sie dort, gilt `"block"`. Der Rahmen kennt die Einstellung seines Plugins nicht und übergibt `where` immer.
 // - **`retarget` für Neues.** Eine neue Datei liefert `retarget: { kind: "file", path, label: <Dateiname> }` in jedem `ok`-Ausgang nach dem Anlegen (auch ohne gesetzten Verweis: das Panel arbeitet auf der Datei weiter, statt eine zweite anzulegen); ein neuer Block liefert
-//   `retarget` auf den eingefügten Zaun (`blockAfterInsert`, aus `svg-studio/src/obsidian/accept.ts` hierher verschoben; Text vorher und nachher mit `readNoteText`, kein Treffer heißt kein `retarget`, nichts geraten). Die Beschriftung des Blocks kommt von
+//   `retarget` auf den eingefügten Zaun, **auch im Lesemodus mit `readingMode: "append"`** (der Text wird aus dem Pfad der Notiz gelesen, in die angehängt wurde, vorher und nachher; wechselt die aktive Notiz währenddessen, bleibt das Ziel in der beschriebenen; ohne diese Zeile sprang der Halter auf „neu“ und die nächste Runde legte ein zweites Bild an; verlorene Fähigkeit gegenüber svg-studio `d67cfd4`) (`blockAfterInsert`, aus `svg-studio/src/obsidian/accept.ts` hierher verschoben; Text vorher und nachher mit `readNoteText`, kein Treffer heißt kein `retarget`, nichts geraten). Die Beschriftung des Blocks kommt von
 //   `spec.blockLabel?(path, openLine, body)`, Standard `<Notizname ohne .md>:<Zeile + 1>` (nicht formatneutral: svg-studio zeigt `Notiz:Zeile`, 3d-codeblocks den Titel der Form). Grund: svg-studio erfuhr den Pfad einer neuen Datei bisher nur, indem es die Meldungstexte des Bausteins abfing.
 // - **Frontmatter ist Sperrzone (0.79.2):** `insertAtCursor` setzt den Text hinter die schließende `---`-Zeile, wenn der Cursor (bei einer Auswahl: deren Ende) in oder vor der Frontmatter
 //   steht (`0:0`, eine YAML-Zeile). Was Frontmatter ist, sagt Obsidians `getFrontMatterInfo`; gemessen in 1.15.1: Obsidian öffnet eine Notiz mit Frontmatter mit dem Cursor auf der ersten Zeile
@@ -47,9 +46,13 @@
 //
 // - **Grenzen, die der Aufrufer kennt (Opus-Review 2026-11-04):** (1) **Keine Sperre gegen einen zweiten Aufruf.** Block und Datei lehnen einen gleichzeitigen zweiten
 //   Aufruf ab (`noteChanged`: der Fingerabdruck bzw. der Datei-Stand trägt), das Ziel `new` schreibt aber zweimal. Der Aufrufer sperrt den Knopf während des Laufs und
-//   leert die Runden nach einem Erfolg. (2) **Der Zaun-Scanner liest flach:** ein Zaun in einem Zitat oder Callout (`> ```js`) oder mit vier und mehr Leerzeichen Einzug
-//   ist für ihn keiner. Schreiben in einen solchen Block wird sicher abgelehnt (`blockMoved`/`blockChanged`); Einfügen am Cursor dort lehnt `insertAtCursor` seit 0.86.0 ab
-//   (`NestedFenceError`, `findNestedFenceAt`), statt im Zaun des Zitats zu landen.
+//   leert die Runden nach einem Erfolg. (2) **Leser und Schreiber lesen nicht dasselbe (seit code-kit 0.78.0).** `locateBlock` liest mit `listFences` flach und sieht seit 0.78.0 auch einen Zaun auf der Zeile eines Listenmarkers
+//   (`- ```svg`, `1. ```svg`, Tilde); sein Rumpf trägt den Einzug des Punkts nicht. `Fence` hat dafür kein Feld, und der Schreiber (`writeBlockBody`, `replaceLines`) prüft die Öffnungszeile mit `FENCE_LINE` und kennt nur eine
+//   Zeile, die mit dem Zaun beginnt. Schriebe `acceptPanel` dorthin, läge der Schnappschuss schon, und `writeBlockBody` würfe `BlockChangedError`, übersetzt in die irreführende Meldung `noteChanged`. Deshalb lehnt
+//   `acceptIntoBlock` einen Block, dessen Öffnungszeile (gelesen aus dem Notiztext) nach dem Leerraum nicht mit dem Zaun beginnt, ausdrücklich ab (`strings.blockInList`, Standard `BLOCK_IN_LIST_TEXT`): vor `compute`,
+//   `checkWrite` und `beforeWrite`, ohne Schnappschuss, ohne Schreiben. Lesen darf der Rahmen den Block weiter (`readBlockText`, `retarget`, Vorschau). Ein späterer Schreibweg für Listenblöcke bräuchte den Einzug
+//   des Punkts als Wert, den `Fence` trägt. Ein Zaun in einem **Zitat oder Callout** (`> ```js`, `> - ```js`) sieht `locateBlock` weiterhin nicht (`blockMoved`, nichts geschrieben), ebenso einen mit vier und mehr
+//   Leerzeichen Einzug ohne Listenpunkt; Einfügen am Cursor dort lehnt `insertAtCursor` seit 0.86.0 ab (`NestedFenceError`, `findNestedFenceAt`), statt im Zaun des Zitats zu landen.
 //   (3) Bei mehreren Cursorn (Mehrfachauswahl) fügt `insertAtCursor` seit 0.86.0 nur am Hauptcursor ein (`replaceRange` statt `replaceSelection`; gemessen 1.15.1: `replaceSelection` fügte an jedem Cursor ein).
 // Nicht Teil des Bausteins: **ungespeicherte Puffer einer Plugin-eigenen Dateiansicht** (etwa eine `.shapes`-Ansicht mit nicht gespeichertem Stand; der Aufrufer speichert sie vor `acceptPanel`, im Rahmen über `prepare`), die
 // Zwei-Wege-Wahl bei `ask` (`env.choose`, das Kit-`confirm` ist Ja/Nein) und das Zeichnen des Panels.
@@ -94,6 +97,15 @@ export class NestedFenceError extends Error {
 const NESTED_FENCE_FALLBACK = (selected: boolean): string =>
   `${selected ? "The selection ends" : "The cursor is"} in a code block inside a quote, callout or list. Nothing was written; move the cursor outside it and try again.`;
 
+/** Die Meldung, wenn der Block hinter einem Listenmarker steht (`AcceptStrings.blockInList`): Folge, nicht Mechanismus. Zum Übernehmen in die eigenen Texte. */
+export const BLOCK_IN_LIST_TEXT = {
+  en: "This block sits in a list item; the panel only writes into blocks that start at the beginning of a line. Nothing was written.",
+  de: "Dieser Block steht in einer Liste; das Panel schreibt nur in Blöcke, die am Zeilenanfang stehen. Es wurde nichts geschrieben.",
+} as const;
+
+/** Öffnungszeile eines Blocks, in den geschrieben werden darf: nach dem Leerraum steht der Zaun (dieselbe Regel wie `FENCE_LINE` in `pure/block-writer`, deren Schreiber sonst mit `BlockChangedError` ablehnt). */
+const OPENS_WITH_FENCE = /^\s*(?:`{3,}|~{3,})/;
+
 export interface AcceptStrings {
   unsupported(label: string): string;
   /** Umschlag um ein Problem aus `compute`/`checkWrite` („… — nothing was applied.“). Das Problem selbst kommt unverändert an. */
@@ -124,6 +136,9 @@ export interface AcceptStrings {
   unclosedFence(selected: boolean): string;
   /** Seit 0.86.0, optional: Cursor oder Auswahlende liegt in einem Zaun in Zitat, Callout oder Liste (`NestedFenceError`). Fehlt der Text, gilt ein englischer Standard. */
   nestedFence?(selected: boolean): string;
+  /** Seit 0.98.0, optional: der Block, in den geschrieben werden soll, öffnet nicht mit dem Zaun, sondern hinter einem Listenmarker (`- ```svg`). Das Panel liest ihn (Vorschau), schreibt aber nicht hinein; nichts wurde
+   *  geschrieben, kein Schnappschuss gemacht. Fehlt der Text, gilt der englische Standard (`BLOCK_IN_LIST_TEXT.en`); `BLOCK_IN_LIST_TEXT.de` ist die deutsche Fassung zum Übernehmen. */
+  blockInList?: string;
   couldNotApply(reason: string): string;
 }
 
@@ -353,6 +368,9 @@ async function acceptIntoBlock(env: AcceptEnv, spec: AcceptSpec, t: BlockTarget)
   const found = await locateBlock(env.ports, t, spec.fenceLang);
   if ("problem" in found) return { ok: false, message: found.problem === "moved" ? strings.blockMoved : strings.blockChanged };
   const { fence, text } = found;
+  // Ein Block hinter einem Listenmarker (`- ```svg`) wird gelesen (Vorschau, `retarget`), aber nicht beschrieben: `Fence` trägt den Einzug des Punkts nicht, der Schreiber prüft die Öffnungszeile und
+  // würfe `BlockChangedError`, nachdem der Schnappschuss schon liegt. Die Prüfung steht vor `compute`, `checkWrite` und `beforeWrite`: kein Schnappschuss, kein Schreiben, eine ehrliche Meldung.
+  if (!OPENS_WITH_FENCE.test(text.split(/\r?\n/)[fence.openLine] ?? "")) return { ok: false, message: strings.blockInList ?? BLOCK_IN_LIST_TEXT.en };
   const result = spec.compute(fence.body);
   if (!result.ok) return { ok: false, message: strings.notApplied(result.problem) };
   // Wiedergefundener Block: auch ohne Schreiben bekommt der Aufrufer die neue Lage, sonst sucht das Panel in der nächsten Runde wieder an der alten Stelle.
@@ -434,14 +452,20 @@ async function insertAsBlock(env: AcceptEnv, spec: AcceptSpec, text: string): Pr
   if ("none" in src) return { ok: false, message: strings.noNoteOpen };
   if ("reading" in src) {
     if (env.readingMode === "refuse") return { ok: false, message: strings.noteInReadingView };
+    // Der Pfad wird einmal gemerkt: Vorher, Anhängen und Nachher gelten derselben Notiz, auch wenn die zuletzt aktive Notiz während der `await`s wechselt (svg-studio d67cfd4 las `before` und `after` ebenso aus dem Pfad
+    // der beschriebenen Notiz). Der Text vorher und nachher kommt mit `readNoteText` aus derselben Quelle wie in `insertAsBlock` im Quellmodus; kein Treffer heißt kein `retarget`, nichts geraten.
+    const appendPath = src.reading.file?.path ?? "";
+    const before = appendPath === "" ? null : await readNoteText(env.ports, appendPath).catch(() => null);
     try {
-      await appendToNote(env, src.reading.file?.path ?? "", spec.wrap(text));
+      await appendToNote(env, appendPath, spec.wrap(text));
     } catch (error) {
       const refusal = fenceRefusal(error, strings);
       if (refusal !== null) return { ok: false, message: refusal };
       throw error;
     }
-    return { ok: true, message: strings.appendedToNote };
+    const after = appendPath === "" || before === null ? null : await readNoteText(env.ports, appendPath).catch(() => null);
+    const appended = after === null || before === null ? null : blockAfterInsert(spec, appendPath, before, after, text);
+    return appended !== null ? { ok: true, message: strings.appendedToNote, retarget: appended } : { ok: true, message: strings.appendedToNote };
   }
   const notePath = src.view.file?.path ?? null;
   // Text VOR dem Einfügen merken: nur der Vergleich vorher/nachher findet den neuen Block. Gelesen mit `readNoteText` (Editor zuerst), aus derselben Quelle wie das Einfügen.

@@ -199,6 +199,7 @@ export const EN: Record<string, string> = {
 
   // ── Umwandeln Block ↔ Datei ──
   "conv.indented": "The ```shapes block is indented (probably inside a list or quote). A file reference cannot replace it there without breaking the structure — nothing was changed.",
+  "accept.blockInList": "This block sits in a list item; the panel only writes into blocks that start at the beginning of a line. Nothing was written.",
   "conv.noClose": "The ```shapes block has no closing fence — close it first. Nothing was changed.",
   "conv.empty": "The ```shapes block is empty — there is nothing to move into a file.",
   "conv.placeCursor": "Place the cursor in a ```shapes block (editing view) to move it into a .shapes file.",

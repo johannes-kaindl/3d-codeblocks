@@ -393,6 +393,18 @@ describe("acceptPanel — target shapes-file", () => {
   });
 });
 
+describe("acceptPanel — block behind a list marker (kit 0.98.0)", () => {
+  it("refuses with the plugin's own text before anything is computed or written", async () => {
+    const note = ["intro", "- ```shapes", `  ${TABLE.split("\n")[0]}`, "  ```", "outro"].join("\n");
+    const { env, store, processCalls } = setup({ "n.md": note });
+    const r = await acceptPanel(env, stateOf({ kind: "block", path: "n.md", lineStart: 1, lineEnd: 3, label: "Tisch", body: TABLE.split("\n")[0]! }, refine(UP)));
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("sits in a list item");
+    expect(store["n.md"]).toBe(note);
+    expect(processCalls).toEqual([]);
+  });
+});
+
 describe("acceptPanel — target new", () => {
   const NEW: PanelTarget = { kind: "new" };
   const MODEL = "title: Tisch\nbox Platte size 1 1 1 at 0 0 0";

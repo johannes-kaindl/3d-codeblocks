@@ -101,6 +101,8 @@ describe("Deutsch an den Stellen, die der Nutzer sieht", () => {
     expect(ACCEPT_STRINGS.savedFileNoReference("a.shapes", "reading")).toContain("Leseansicht");
     expect(ACCEPT_STRINGS.unclosedFence(true)).toContain("nie geschlossen");
     expect(ACCEPT_STRINGS.nestedFence?.(false)).toContain("Zitats, Callouts oder einer Liste");
+    // Kit 0.98.0: der Block hinter einem Listenmarker wird abgelehnt; der Text gehört dem Plugin (der Kit-Standard wäre Englisch).
+    expect(ACCEPT_STRINGS.blockInList).toContain("steht in einer Liste");
   });
 
   it("die Kit-Bündel (Hilfe-Zeile) und die Texte, die das Plugin im Kit-Rahmen selbst sagt, wechseln mit", () => {
