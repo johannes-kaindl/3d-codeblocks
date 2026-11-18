@@ -80,8 +80,6 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       capability: "chat",
       mode: "structured",
       lang: () => getLang(),
-      // Das Panel zeigt die Stufenwahl in der Modellzeile (Denk-Steuerung, UI-STANDARD §8): der Schalter wirkt hier.
-      levelPicker: true,
       // Opt-in fuer den Anthropic-Transport: ohne ihn bleibt ein Claude-Eintrag des Managers fuer dieses Plugin unsichtbar. Mit ihm
       // geht der Prompt des Panels an Anthropic, sobald der Manager einen Claude-Eintrag zuerst liefert (Auswahl "Automatisch").
       transports: { anthropic: true },

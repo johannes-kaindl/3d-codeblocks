@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The setting "Level picker in chat" no longer appears in the settings: the prompt panel's model line has shown the thinking levels as a dropdown since `obsidian-kit` 0.73.0, so the switch had no effect. The stored value stays in the data file, harmless.
 - **"Apply" in the prompt panel now uses the shared apply step of `obsidian-kit` 0.80.1 (and `code-kit` 0.54.0) instead of the plugin's own copy.** Wording and where the result goes stay the same; the three flaws below are the visible difference.
 - The quality line ("measured: 9 of 10 …") and the hint after a failed answer are now computed by the shared `measured-quality` of `code-kit` 0.55.0 instead of the plugin's own copy. Wording and numbers are unchanged; nothing to notice.
 - **The model row of the prompt panel is the new one of `obsidian-kit` 0.88.0:** with several endpoints the dropdown lists the models grouped by endpoint (choosing a model also chooses its endpoint), "Reload" reloads every endpoint, and the row redraws itself when the endpoint or the model changes elsewhere. The thinking level in the row is always a dropdown with the levels of the model (before: a toggle button for models without levels); on narrow panels it shrinks to its symbol. Needs `sampling-profiles` of `code-kit` 0.65.0 (more thinking levels, among them `minimal`, `xhigh` and `max`). Not measured on iPhone yet.
