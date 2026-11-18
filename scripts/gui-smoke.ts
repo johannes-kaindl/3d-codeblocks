@@ -12,20 +12,11 @@
  *
  * ## Voraussetzung
  *
- * ⚠️ **Nur gegen eine eigene Zweitinstanz fahren, nie gegen die reguläre.** Vorher prüfen, dass der Port frei ist:
- *
- * ```bash
- * lsof -nP -iTCP:<port> -sTCP:LISTEN >/dev/null && echo "Port belegt — anderen wählen"
- * ```
- *
  * Obsidian läuft als **Zweitinstanz** mit eigenem Profil und eigenem Debug-Port (die reguläre Instanz
  * fasst der Treiber nie an; `--port` ist Pflicht):
  *
- * ```bash
- * UD=/tmp/obs-test-3d-codeblocks    # Profil je Repo; .asar der regulären Instanz hineinkopieren,
- *                                   # Vault und "language":"en" in $UD/obsidian.json eintragen
- * /Applications/Obsidian.app/Contents/MacOS/Obsidian --user-data-dir="$UD" --remote-debugging-port=<port> &
- * ```
+ * Lauf: `tools/obsidian-cdp/messlauf.sh` (Dach, README § Messlauf in einem Aufruf) startet die Zweitinstanz, hält den Lock (`--exclusive focus`, davor, mit `export`)
+ * und räumt auf; das Rezept steht nur dort. Für diesen Treiber: `REPO=3d-codeblocks OHNE_SETUP=1`.
  *
  * Vertrauensdialog und Restricted Mode erledigt `bereiteInstanzVor` im Treiber.
  *
