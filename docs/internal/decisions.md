@@ -4,9 +4,9 @@ Das Warum hinter Bauentscheidungen, die man dem Code nicht ansieht. Eine Entsche
 
 ## Zaun-Scanner aus dem Kit, Rundenkette teils beim Träger (2026-11-14)
 
-Anlass: Der Eigenbau `src/core/shapes/fence.ts` und die Kette in `src/core/shapes/panel-state.ts` waren die Vorlage für `fence-scan` (obsidian-kit 0.80.1) und `panel-session` (code-kit 0.54.0); beide Fassungen liefen parallel (Drift-Gefahr, Bibliothek ab Eins). Verglichen wurde Zeile für Zeile.
+Anlass: Der Eigenbau `fence.ts` (entfallen) und die Kette in `panel-state.ts` (Ordner `src/core/shapes/`) waren die Vorlage für `fence-scan` (obsidian-kit 0.80.1) und `panel-session` (code-kit 0.54.0); beide Fassungen liefen parallel (Drift-Gefahr, Bibliothek ab Eins). Verglichen wurde Zeile für Zeile.
 
-Zaun-Scanner (`fence.ts` entfällt, `listFences`/`findFenceAt` kommen aus `vendor/kit/fence-scan`, `fenceFor` aus `vendor/kit/fences`). Drei Unterschiede, alle zugunsten der Kit-Fassung angeglichen, weil sie CommonMark genauer folgt und der Eigenbau an keiner Stelle absichtlich lockerer war:
+Zaun-Scanner (`fence.ts` entfällt, `listFences`/`findFenceAt`/`fenceFor` kommen aus `vendor/kit/fences`; bis obsidian-kit 0.95.0 lag der Leser als `fence-scan` im Kit). Drei Unterschiede, alle zugunsten der Kit-Fassung angeglichen, weil sie CommonMark genauer folgt und der Eigenbau an keiner Stelle absichtlich lockerer war:
 
 - Einzug des Zauns: Eigenbau `\s{0,3}` (ein Tabulator zählte als Einzug), Kit ` {0,3}`. In CommonMark ist ein Tabulator vier Spalten, der Zaun wäre ein eingerückter Codeblock. Ein mit Tabulator eingerückter Zaun wird nicht mehr als Block gefunden.
 - Schlusszaun: Eigenbau `\s*` hinter dem Zaun, Kit `[ \t]*`. Das Kit lässt nur Leerzeichen und Tabulatoren zu, wie CommonMark.
