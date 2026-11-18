@@ -353,32 +353,66 @@ describe("lastEditor prefers the most recent main-area leaf (view instance repla
 });
 
 describe("prompt panel follows the active viewport", () => {
-  it("follows a shapes controller but keeps its target when the active controller goes away", async () => {
+  // K9 Review Focus 4: der Zielwechsel geht direkt an den Halter, auch wenn keine Ansicht offen ist (früher nur an offene Ansichten).
+  it("offers the target of a shapes controller to the host with no panel open, and keeps its target when the active controller goes away", async () => {
     const app = makeFakeApp();
-    const view = new PromptPanelView({ app: undefined } as never, {} as never);
-    const setTarget = vi.spyOn(view, "setTarget").mockImplementation(() => {});
-    app.workspace.getLeavesOfType = vi.fn((t: string) => (t === VIEW_TYPE_PROMPT ? [{ view }] : []));
+    app.workspace.getLeavesOfType = vi.fn(() => []);
     const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
     await plugin.onload();
+    const offer = vi.spyOn(plugin.promptHost, "offer");
     const t = { kind: "file", path: "a.shapes", label: "a" } as const;
     plugin.active.set({ shapesTarget: () => t, label: () => "a" } as never);
-    expect(setTarget).toHaveBeenLastCalledWith(t);
-    setTarget.mockClear();
+    expect(offer).toHaveBeenLastCalledWith(t);
+    // Ohne Runden gilt das Ziel sofort: ein Fenster, das jetzt aufgeht, findet es.
+    expect(plugin.promptHost.session().target).toEqual(t);
+    offer.mockClear();
     plugin.active.set(null);
-    expect(setTarget).not.toHaveBeenCalled();
+    expect(offer).not.toHaveBeenCalled();
     // Ein Controller ohne shapesTarget bleibt „other“.
     plugin.active.set({ label: () => "glTF" } as never);
-    expect(setTarget).toHaveBeenLastCalledWith({ kind: "other", label: "glTF" });
+    expect(offer).toHaveBeenLastCalledWith({ kind: "other", label: "glTF" });
+  });
+});
+
+describe("prompt panel host (K9)", () => {
+  it("is built in onload, the status-bar switch comes from the settings, and onunload destroys it", async () => {
+    const app = makeFakeApp();
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    await plugin.onload();
+    expect(plugin.promptHost).toBeDefined();
+    expect(plugin.settings.showStatusBar).toBe(true);
+    // Ein Lauf ohne Ansicht überlebt, weil der Halter dem Plugin gehört, nicht der Ansicht (früher brach das Schließen der Ansicht ihn ab).
+    const gate = { release: () => {} };
+    const ran = new Promise<void>((resolve) => { gate.release = resolve; });
+    vi.spyOn(plugin.llm, "complete").mockImplementation((async (_req: unknown, h: { onToken?: (t: string) => void }) => {
+      h.onToken?.('{"parts":[{"name":"A","shape":"box","size":[1]}]}');
+      await ran;
+      return { ok: true, content: '{"parts":[{"name":"A","shape":"box","size":[1]}]}', reasoning: "", toolCalls: [], truncated: false, streamed: true, timing: { startedAt: 0, firstTokenAt: 0, endedAt: 0 }, facts: null, deviations: [], source: {} };
+    }) as never);
+    expect(plugin.promptHost.start("a box")).toBe(true);
+    expect(plugin.promptHost.running()).toBe(true);
+    gate.release();
+    await plugin.promptHost.settled();
+    expect(plugin.promptHost.session().rounds.rounds).toHaveLength(1);
+    // Zweites Senden im Lauf startet keinen zweiten Lauf; nach dem Ende von onunload ändert ein Aufruf nichts.
+    plugin.onunload();
+    expect(plugin.promptHost.start("again")).toBe(false);
+    expect(plugin.promptHost.session().rounds.rounds).toHaveLength(0);
+  });
+
+  it("a stored acceptAs of \"ask\" counts as \"block\", without a notice, and a missing showStatusBar is on", async () => {
+    const app = makeFakeApp();
+    const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    plugin.loadData = vi.fn(async () => ({ acceptAs: "ask" })) as never;
+    await plugin.onload();
+    expect(plugin.settings.acceptAs).toBe("block");
+    expect(plugin.settings.showStatusBar).toBe(true);
   });
 });
 
 describe("openPromptPanel", () => {
-  /** Echte View (der Opener prueft per instanceof), setTarget als Spion. */
-  const spiedView = () => {
-    const v = new PromptPanelView({ app: undefined } as never, {} as never);
-    vi.spyOn(v, "setTarget").mockImplementation(() => {});
-    return v;
-  };
+  /** Echte View (der Opener prueft per instanceof); das Ziel geht seit K9 an den Halter, nicht an die Ansicht. */
+  const spiedView = () => new PromptPanelView({ app: undefined } as never, {} as never);
   const target = { kind: "file", path: "a.shapes", label: "a" } as const;
   function setup(opts: { registered?: boolean; existing?: any } = {}) {
     const app = makeFakeApp();
@@ -389,16 +423,18 @@ describe("openPromptPanel", () => {
     app.workspace.getRightLeaf = vi.fn(() => leaf);
     app.workspace.revealLeaf = vi.fn(async () => {});
     const plugin = new ThreeDCodeblocksPlugin(app, {} as any);
+    // Ohne onload: der Halter wird durch einen Spion ersetzt.
+    (plugin as any).promptHost = { offer: vi.fn() };
     return { plugin, app, leaf, view };
   }
 
   it("opens a leaf of the prompt view in the right sidebar, reveals it and hands over the target", async () => {
-    const { plugin, app, leaf, view } = setup();
+    const { plugin, app, leaf } = setup();
     await plugin.openPromptPanel(target);
     expect(app.workspace.getRightLeaf).toHaveBeenCalledWith(false);
     expect(leaf.setViewState).toHaveBeenCalledWith({ type: VIEW_TYPE_PROMPT, active: true });
     expect(app.workspace.revealLeaf).toHaveBeenCalledWith(leaf);
-    expect(view.setTarget).toHaveBeenCalledWith(target);
+    expect((plugin as any).promptHost.offer).toHaveBeenCalledWith(target);
   });
 
   it("reuses an open panel instead of creating a second leaf", async () => {
@@ -408,13 +444,14 @@ describe("openPromptPanel", () => {
     expect(app.workspace.getRightLeaf).not.toHaveBeenCalled();
     expect(existing.setViewState).not.toHaveBeenCalled();
     expect(app.workspace.revealLeaf).toHaveBeenCalledWith(existing);
-    expect(existing.view.setTarget).toHaveBeenCalledWith(target);
+    expect((plugin as any).promptHost.offer).toHaveBeenCalledWith(target);
   });
 
-  it("is harmless when the opened view has no setTarget", async () => {
-    const { plugin, leaf } = setup();
-    (leaf as any).view = {};
-    await expect(plugin.openPromptPanel(target)).resolves.toBeUndefined();
+  it("opens without a target (click on the status-bar entry) and leaves the target of the host as it is", async () => {
+    const { plugin, app, leaf } = setup();
+    await plugin.openPromptPanel();
+    expect(app.workspace.revealLeaf).toHaveBeenCalledWith(leaf);
+    expect((plugin as any).promptHost.offer).not.toHaveBeenCalled();
   });
 
   it("says so and creates no leaf while the view type is not registered", async () => {

@@ -80,6 +80,10 @@ export function makeFakeEl(): any {
         .join(" ");
     },
     toggleClass: (cls: string, on: boolean) => (on ? el.addClass(cls) : el.removeClass(cls)),
+    // Statusleisten-Eintrag des Kits (`createStatusBarItem`): Obsidians hide()/show().
+    hidden: false,
+    hide: () => { el.hidden = true; },
+    show: () => { el.hidden = false; },
     // Registriert weiterhin ueber vi.fn (bestehende Tests lesen `.mock.calls`), fuehrt
     // den Handler aber auch wirklich aus — sonst bleibt `click()` unten wirkungslos.
     addEventListener: vi.fn((type: string, fn: (event?: any) => void) => {
@@ -187,6 +191,9 @@ export class DropdownComponent {
   onChange(cb: (v: string) => unknown): this { this.changed = cb; return this; }
 }
 
+/** Desktop; ein Test, der den Handy-Weg braucht, setzt `Platform.isMobile`. */
+export const Platform = { isMobile: false, isDesktop: true };
+
 export class Notice {
   constructor(
     public message: string,
@@ -208,6 +215,15 @@ export class Plugin {
     return Promise.resolve();
   }
   addSettingTab(_tab: any) {}
+  /** Statusleisten-Eintrag (Prompt-Panel-Halter, K9): jede Anfrage legt ein Element an; `statusBarItems` zeigt, was die Leiste trägt. */
+  statusBarItems: any[] = [];
+  addStatusBarItem(): any {
+    const item = makeFakeEl();
+    this.statusBarItems.push(item);
+    const remove = item.remove;
+    item.remove = () => { this.statusBarItems = this.statusBarItems.filter((e) => e !== item); remove(); };
+    return item;
+  }
   registerMarkdownCodeBlockProcessor(_lang: string, _handler: any) {}
   registerEvent(_ref: any) {}
   register(_cb: any) {}
@@ -259,6 +275,8 @@ export class Setting {
   private widget(type: string, extra: Record<string, any> = {}) {
     const w: any = {
       type,
+      // TextComponent/SliderComponent haben ein Eingabeelement; der Walker des Kits setzt `type` und Grenzen daran.
+      inputEl: makeFakeEl(),
       value: undefined as unknown,
       onChangeHandler: undefined as ((v: any) => void) | undefined,
       ...extra,

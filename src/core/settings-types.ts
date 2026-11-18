@@ -29,8 +29,8 @@ import {
 
 export type ViewMode = "immediate" | "on-click";
 
-/** Wohin das Prompt-Panel ein neues Modell schreibt, wenn man "Apply" klickt. */
-export type AcceptAs = "block" | "file" | "ask";
+/** Welcher Schreibweg beim neuen Ziel der Hauptknopf des Prompt-Panels ist. Beide Wege stehen als Knöpfe da; ein früher gespeichertes "ask" (Dialog) gilt als "block". */
+export type AcceptAs = "block" | "file";
 
 export interface PluginSettings {
   viewMode: ViewMode;
@@ -53,6 +53,8 @@ export interface PluginSettings {
   /** Sampling-Einstellungen der LLM-Anbindung. */
   request: RequestSettings;
   acceptAs: AcceptAs;
+  /** Eintrag des Prompt-Panels in der Statusleiste (Lauf ohne Fenster, Ergebnis wartet). */
+  showStatusBar: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   endpointChoice: undefined,
   request: DEFAULT_REQUEST_SETTINGS,
   acceptAs: "block",
+  showStatusBar: true,
 };
 
 export const MAX_CONTEXTS_LIMIT = 12;
@@ -133,7 +136,8 @@ const SETTINGS_SCHEMA: SettingsSchema<PluginSettings> = {
   // Anders als `defaultHeight`: eine vorhandene Zahl wird geklemmt, nicht verworfen —
   // wer 0 oder 999 eintraegt, meint "so wenig/viel wie moeglich".
   maxContexts: clampContexts,
-  acceptAs: oneOf(["block", "file", "ask"] as const),
+  // Ein gespeichertes "ask" (früher: Dialog bei jedem Übernehmen) gilt als Standard dieses Plugins; es wird ohne Meldung angenommen.
+  acceptAs: (raw, fallback) => (raw === "file" ? "file" : raw === "block" || raw === "ask" ? "block" : fallback),
   // Die Kit-Migration ist die einzige Stelle, die die Zeilenform kennt: sie reicht `id` und
   // `secretId` durch (sonst ginge der Schluesselbund-Verweis beim Neustart verloren, waehrend der
   // Schluessel schon aus data.json entfernt ist) und laesst einen Klartext-`apiKey` fuer die

@@ -9,7 +9,6 @@ import {
   LLM_CONNECTION_STRINGS_EN,
   managerErrorText,
 } from "../vendor/kit-obsidian/llm-connection-strings";
-import { MODEL_BAR_STRINGS_DE, MODEL_BAR_STRINGS_EN, type ModelBarStrings } from "../vendor/kit-obsidian/model-bar-strings";
 import { getLang, t } from "./t";
 
 /** Die Hilfe-Zeile der Einstellungen in der Sprache des Plugins (Kit-Vorgabe, kein eigener Text). */
@@ -17,64 +16,31 @@ export function helpTexts(): HelpSettingTexts {
   return getLang() === "de" ? HELP_SETTING_TEXTS_DE : HELP_SETTING_TEXTS_EN;
 }
 
-/** Die Texte der Modellzeile (Kit `model-bar`) in der Sprache des Plugins. */
-export function modelBarStrings(): ModelBarStrings {
-  return getLang() === "de" ? MODEL_BAR_STRINGS_DE : MODEL_BAR_STRINGS_EN;
-}
-
 /** Texte des Prompt-Panels (Plan 3b, Task 6). Die LLM-Einstellungen tragen die Kit-Texte. */
 export const PANEL_TEXTS = {
   get title() { return t("panel.title"); },
-  get tabPrompt() { return t("panel.tabPrompt"); },
-  get tabVersions() { return t("panel.tabVersions"); },
   get targetNew() { return t("panel.targetNew"); },
-  targetEdit: (label: string) => t("panel.targetEdit", label),
-  targetKept: (label: string) => t("panel.targetKept", label),
-  get newButton() { return t("panel.newButton"); },
   get placeholderCreate() { return t("panel.placeholderCreate"); },
   get placeholderRefine() { return t("panel.placeholderRefine"); },
-  get create() { return t("panel.create"); },
-  get refine() { return t("panel.refine"); },
-  get abort() { return t("panel.abort"); },
   get accept() { return t("panel.accept"); },
-  get discard() { return t("panel.discard"); },
-  get rounds() { return t("panel.rounds"); },
-  get reasoning() { return t("panel.reasoning"); },
-  get copyReasoning() { return t("panel.copyReasoning"); },
-  running: (model: string) => t("panel.running", model),
   get done() { return t("panel.done"); },
   get doneCreate() { return t("panel.doneCreate"); },
-  get aborted() { return t("panel.aborted"); },
-  get noEndpoint() { return t("panel.noEndpoint"); },
-  get openSettings() { return t("panel.openSettings"); },
-  get emptyCreate() { return t("panel.emptyCreate"); },
-  get versionsEmpty() { return t("panel.versionsEmpty"); },
-  get versionsOnlyFiles() { return t("panel.versionsOnlyFiles"); },
   unsupported: (label: string) => t("panel.unsupported", label),
-  discardConfirm: (n: number) => t("panel.discardConfirm", n),
-  get acceptAsTitle() { return t("panel.acceptAsTitle"); },
-  get acceptAsBlock() { return t("panel.acceptAsBlock"); },
-  get acceptAsFile() { return t("panel.acceptAsFile"); },
+  get emptyText() { return t("panel.emptyText"); },
+  get example1() { return t("panel.example1"); },
+  get example2() { return t("panel.example2"); },
+  get acceptBlock() { return t("panel.acceptBlock"); },
+  get acceptFile() { return t("panel.acceptFile"); },
   get noNoteOpen() { return t("panel.noNoteOpen"); },
   get noteInReadingView() { return t("panel.noteInReadingView"); },
-  get modelLabel() { return t("panel.modelLabel"); },
-  get thinkingOff() { return t("panel.thinkingOff"); },
-  thinkingOn: (level: string) => t("panel.thinkingOn", level),
-  thinkingLevel: (level: string) => t("panel.thinkingLevel", level),
-  get thinkingPicker() { return t("panel.thinkingPicker"); },
-  get promptLabel() { return t("panel.promptLabel"); },
-  get previewLabel() { return t("panel.previewLabel"); },
-  previewOf: (n: number) => t("panel.previewOf", n),
   get diffHeading() { return t("panel.diffHeading"); },
   get modelGone() { return t("panel.modelGone"); },
   get blockGone() { return t("panel.blockGone"); },
   get answerChangesNothing() { return t("panel.answerChangesNothing"); },
   get cutOff() { return t("panel.cutOff"); },
-  get targetChanged() { return t("panel.targetChanged"); },
   get noUsableParts() { return t("panel.noUsableParts"); },
   get roundNew() { return t("panel.roundNew"); },
   roundChanges: (n: number) => t("panel.roundChanges", n),
-  get discardKeep() { return t("panel.discardKeep"); },
   get settingsFallback() { return t("panel.settingsFallback"); },
   get unavailable() { return t("panel.unavailable"); },
   // Ein Code des LLM Endpoint Managers bekommt seinen Text (jeder nennt die Stelle, an der es behoben wird); alles andere

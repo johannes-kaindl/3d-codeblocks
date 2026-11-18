@@ -24,6 +24,7 @@ import { helpTexts } from "../i18n/strings";
 import { getLang, t } from "../i18n/t";
 import { githubHelpUrls, helpSettingDefinition } from "../vendor/kit-obsidian/help-setting";
 import { renderSettingDefinitions, settingBodyHost } from "../vendor/kit-obsidian/settings_walker";
+import { statusBarSettingDefinition } from "../vendor/kit-obsidian/status-bar-item";
 
 export class SettingsTab extends PluginSettingTab {
   constructor(
@@ -133,9 +134,19 @@ export class SettingsTab extends PluginSettingTab {
             control: {
               type: "dropdown",
               key: "acceptAs",
-              options: { block: t("settings.acceptAs.block"), file: t("settings.acceptAs.file"), ask: t("settings.acceptAs.ask") },
+              options: { block: t("settings.acceptAs.block"), file: t("settings.acceptAs.file") },
             },
           },
+          // Eintrag des Prompt-Panels in der Statusleiste (UI-STANDARD §8): Standard an; der Halter legt ihn an oder hängt ihn ab.
+          statusBarSettingDefinition({
+            value: this.plugin.settings.showStatusBar,
+            strings: { lang: getLang() },
+            onChange: async (value) => {
+              this.plugin.settings.showStatusBar = value;
+              this.plugin.promptHost.setStatusBarVisible(value);
+              await this.plugin.saveSettings();
+            },
+          }),
           // Texte kommen aus dem Kit (englische Default-Texte) — kein eigenes Buendel.
           { name: t("settings.llm"), desc: "", render: (setting: Setting) => this.plugin.llm.renderSettings(settingBodyHost(setting), { lang: getLang() }) },
         ],

@@ -1,24 +1,17 @@
-// Uebernehmen im Prompt-Panel (Spec Modell per Prompt § 6.3/§ 5). Die Mechanik traegt der Kit-Baustein `panel-accept` (obsidian-kit:
-// Fingerabdruck des Blocks samt Wiederfinden, Anhang anlegen und nie ueberschreiben, Cursor, Frontmatter, Lesemodus); hier steht, was
-// `shapes` ist: Zaun-Sprache, die Kette aus den Runden (`acceptText`), Dateiname und Verweis einer neuen .shapes-Datei und die offene
-// ShapesFileView, deren ungespeicherter Puffer vor dem Schreiben auf die Platte muss (das Kit kennt keine Plugin-Ansichten).
+// Uebernehmen im Prompt-Panel (Spec Modell per Prompt § 6.3/§ 5). Seit K9 Etappe 3 schreibt der Kit-Rahmen (`buildPromptPanel`, Station 7) ueber `acceptPanel`
+// des Kits und setzt den Schnappschuss vor jedem Ueberschreiben selbst; hier steht nur die Beschreibung (`acceptSpecFor`): Zaun-Sprache, die Kette aus den
+// Runden (`acceptText`), Dateiname und Verweis einer neuen .shapes-Datei, Beschriftung eines neu eingefuegten Blocks, und die offene ShapesFileView,
+// deren ungespeicherter Puffer vor dem Schreiben auf die Platte muss (`prepare`; das Kit kennt keine Plugin-Ansichten).
 // Lesemodus: `readingMode: "refuse"` (der Block geht nur in den Quellmodus); `acceptPanel` wirft nie.
 import { TFile, type App, type MarkdownView } from "obsidian";
 import { exportBaseName } from "../core/shapes/export";
 import { acceptText, chainOf, type PanelState, type PanelTarget } from "../core/shapes/panel-state";
 import { parseShapes } from "../core/shapes/parse";
 import { referenceBlock, shapesBlock } from "../core/shapes/references";
-import type { PluginSettings } from "../core/settings-types";
-import { ACCEPT_STRINGS, PANEL_TEXTS } from "../i18n/strings";
+import { ACCEPT_STRINGS } from "../i18n/strings";
+import { t } from "../i18n/t";
 import type { WritePorts } from "../vendor/kit/block-writer";
-import { askChoice } from "../vendor/kit-obsidian/choice-modal";
-import {
-  acceptPanel as acceptWithKit,
-  readBlockText,
-  type AcceptEnv,
-  type AcceptOutcome,
-  type AcceptSpec,
-} from "../vendor/kit-obsidian/panel-accept";
+import { readBlockText, type AcceptEnv, type AcceptOutcome, type AcceptSpec } from "../vendor/kit-obsidian/panel-accept";
 import { VIEW_TYPE_SHAPES } from "./shapes-file-view";
 
 export type { AcceptEnv, AcceptOutcome };
@@ -28,17 +21,9 @@ export const SHAPES_LANG = "shapes";
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** Der Kit-`AcceptEnv` fuer dieses Plugin: Meldungen aus `src/i18n`, Lesemodus lehnt ab, „Ask each time“ ueber den Auswahl-Dialog. */
-export function buildAcceptEnv(d: { app: App; ports: WritePorts; settings: () => PluginSettings; lastEditor: () => MarkdownView | null }): AcceptEnv {
-  return {
-    app: d.app,
-    ports: d.ports,
-    settings: d.settings,
-    lastEditor: d.lastEditor,
-    choose: () => chooseAcceptAs(d.app),
-    strings: ACCEPT_STRINGS,
-    readingMode: "refuse",
-  };
+/** Der Kit-`AcceptEnv` fuer dieses Plugin ohne Einstellung und Wahl (der Rahmen waehlt nie; beide Wege sind Knoepfe): Meldungen aus `src/i18n`, Lesemodus lehnt ab. */
+export function buildAcceptEnv(d: { app: App; ports: WritePorts; lastEditor: () => MarkdownView | null }): Omit<AcceptEnv, "settings" | "choose"> {
+  return { app: d.app, ports: d.ports, lastEditor: d.lastEditor, strings: ACCEPT_STRINGS, readingMode: "refuse" };
 }
 
 /** Offene Ansichten einer .shapes-Datei (wie `convertFileToBlock`): ihr Puffer kann neuer sein als die Platte. */
@@ -57,17 +42,18 @@ function openShapesViews(app: App, path: string): OpenShapesView[] {
 
 /** Aktueller Text des Ziels fuers Panel; `null` = Datei/Block nicht (mehr) auffindbar oder veraendert. Ein Block wird ueber das Kit
  *  (`readBlockText`, Fingerabdruck samt Wiederfinden) gelesen; eine Datei aus dem Puffer der offenen Ansicht, sonst von der Platte. */
-export async function readTargetText(env: AcceptEnv, t: PanelTarget): Promise<string | null> {
-  if (t.kind === "block") return readBlockText(env.ports, t, SHAPES_LANG);
-  if (t.kind !== "file") return null;
-  const file = env.app.vault.getAbstractFileByPath(t.path);
+export async function readTargetText(env: Pick<AcceptEnv, "app" | "ports">, target: PanelTarget): Promise<string | null> {
+  if (target.kind === "block") return readBlockText(env.ports, target, SHAPES_LANG);
+  if (target.kind !== "file") return null;
+  const file = env.app.vault.getAbstractFileByPath(target.path);
   if (!(file instanceof TFile)) return null;
   // Ungespeichertes Tippen in einer offenen Ansicht steht nur im Puffer: der ist der aktuelle Text.
-  const view = openShapesViews(env.app, t.path)[0];
+  const view = openShapesViews(env.app, target.path)[0];
   return view ? view.getViewData() : await env.app.vault.read(file);
 }
 
-function specFor(state: PanelState): AcceptSpec {
+/** Was das Panel schreibt, als Beschreibung fuer den Kit-Rahmen (ohne `beforeWrite`: den Schnappschuss setzt der Rahmen). */
+export function acceptSpecFor(state: PanelState): Omit<AcceptSpec, "beforeWrite"> {
   return {
     fenceLang: SHAPES_LANG,
     wrap: shapesBlock,
@@ -77,6 +63,8 @@ function specFor(state: PanelState): AcceptSpec {
       content: `${text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\n+$/, "")}\n`,
       reference: referenceBlock,
     }),
+    // Der Titel der Form, wie ihn der Block selbst nennt (`gltf-block.ts: label()`).
+    blockLabel: (_path, _openLine, body) => parseShapes(body).header.title ?? t("view.shapesBlock"),
     compute: (current) => {
       const r = acceptText(state.rounds, current);
       return r.ok ? { ok: true, text: r.text } : { ok: false, problem: r.problems.join("; ") };
@@ -84,32 +72,19 @@ function specFor(state: PanelState): AcceptSpec {
   };
 }
 
-export async function acceptPanel(env: AcceptEnv, state: PanelState): Promise<AcceptOutcome> {
-  try {
-    const t = state.target;
-    if (t.kind === "file") {
-      // Ungespeichertes Tippen einer offenen Ansicht zuerst auf die Platte: sonst wuerde die Kette auf den veralteten Plattentext
-      // angewendet und der Puffer die Datei danach wieder ueberschreiben.
-      try {
-        for (const view of openShapesViews(env.app, t.path)) await view.save();
-      } catch (error) {
-        return { ok: false, message: env.strings.notApplied(errorText(error)) };
-      }
-    }
-    const kind = chainOf(state.rounds)[0]?.kind === "create" ? "create" : "refine";
-    return await acceptWithKit(env, specFor(state), t, kind);
-  } catch (error) {
-    return { ok: false, message: env.strings.couldNotApply(errorText(error)) };
-  }
+/** `create`, wenn die Kette mit einem Erzeugen beginnt, sonst `refine`. */
+export function acceptKind(state: PanelState): "create" | "refine" {
+  return chainOf(state.rounds)[0]?.kind === "create" ? "create" : "refine";
 }
 
-/** Zwei-Wege-Wahl fuer „Ask each time“: Kit-`askChoice`; Schliessen (Esc, Klick daneben) liefert `null` = keins von beiden. */
-export function chooseAcceptAs(app: App): Promise<"block" | "file" | null> {
-  return askChoice<"block" | "file">(app, {
-    title: PANEL_TEXTS.acceptAsTitle,
-    options: [
-      { value: "block", label: PANEL_TEXTS.acceptAsBlock, cta: true },
-      { value: "file", label: PANEL_TEXTS.acceptAsFile },
-    ],
-  });
+/** Ungespeichertes Tippen einer offenen Ansicht zuerst auf die Platte (Haken `prepare` des Schreibwegs, nur beim Ziel `file`): sonst wuerde die Kette auf den
+ *  veralteten Plattentext angewendet und der Puffer die Datei danach wieder ueberschreiben. Wirft eine Ansicht beim Speichern, wird nichts geschrieben. */
+export async function saveOpenShapesViews(app: App, state: PanelState): Promise<void> {
+  const target = state.target;
+  if (target.kind !== "file") return;
+  try {
+    for (const view of openShapesViews(app, target.path)) await view.save();
+  } catch (error) {
+    throw new Error(errorText(error));
+  }
 }

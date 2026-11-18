@@ -14,6 +14,7 @@ function makeTab(overrides: Partial<PluginSettings> = {}) {
     saveSettings: vi.fn(async () => {}),
     syncAllToolbars: vi.fn(),
     llm: { renderSettings: vi.fn(), hideSettings: vi.fn() },
+    promptHost: { setStatusBarVisible: vi.fn() },
   };
   return { tab: new SettingsTab({} as any, plugin), plugin };
 }
@@ -128,8 +129,8 @@ describe("SettingsTab.display (Fallback unter Obsidian 1.13)", () => {
     tab.display();
 
     const rows = (tab.containerEl as any).settings ?? [];
-    // +1 Hilfe-Zeile (Render-Hatch), +1 Gruppen-Ueberschrift, +1 LLM-Zeile (Render-Hatch).
-    expect(rows).toHaveLength(controls(tab.getSettingDefinitions()).length + 3);
+    // +1 Hilfe-Zeile (Render-Hatch), +1 Gruppen-Ueberschrift, +1 Statusleisten-Zeile (Render-Hatch), +1 LLM-Zeile (Render-Hatch).
+    expect(rows).toHaveLength(controls(tab.getSettingDefinitions()).length + 4);
     expect(rows.map((r: any) => r.name)).toContain("View mode");
   });
 
@@ -326,8 +327,22 @@ describe("SettingsTab: Model by prompt", () => {
     expect(group).toBeDefined();
     const dropdown = group.items.find((i: any) => i.control?.key === "acceptAs");
     expect(dropdown.control.type).toBe("dropdown");
-    expect(Object.keys(dropdown.control.options)).toEqual(["block", "file", "ask"]);
+    // Beide Wege sind Knöpfe im Fenster; die Einstellung wählt nur den Hauptknopf. „Jedes Mal fragen“ gibt es nicht mehr.
+    expect(Object.keys(dropdown.control.options)).toEqual(["block", "file"]);
     expect(group.items.some((i: any) => typeof i.render === "function")).toBe(true);
+  });
+
+  it("has the status-bar row (UI-STANDARD §8, default on): the switch tells the host, stores the value and saves", async () => {
+    const { tab, plugin } = makeTab();
+    tab.display();
+    const row = ((tab.containerEl as any).settings ?? []).find((r: any) => r.name === "Status bar");
+    expect(row, "Zeile „Status bar“").toBeDefined();
+    const toggle = row.widgets.find((w: any) => w.type === "toggle");
+    expect(toggle.value).toBe(true);
+    toggle.onChangeHandler(false);
+    await vi.waitFor(() => expect(plugin.saveSettings).toHaveBeenCalled());
+    expect(plugin.settings.showStatusBar).toBe(false);
+    expect(plugin.promptHost.setStatusBarVisible).toHaveBeenCalledWith(false);
   });
 
   it("hands the LLM row body to llm.renderSettings with the language of the interface (the connection shows English without it)", () => {

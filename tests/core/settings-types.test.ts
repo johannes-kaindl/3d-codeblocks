@@ -22,6 +22,7 @@ describe("validateSettings", () => {
       endpoints: [],
       request: { overrides: {}, thinking: {}, lastOnLevel: {}, levelPickerInChat: false },
       acceptAs: "block",
+      showStatusBar: true,
     });
   });
 
@@ -145,9 +146,18 @@ describe("validateSettings: prompt settings", () => {
     expect(s.request).toEqual({ overrides: {}, thinking: {}, lastOnLevel: {}, levelPickerInChat: false });
   });
 
-  it("rejects an unknown acceptAs value and keeps the three known ones", () => {
+  it("rejects an unknown acceptAs value, keeps the two known ones and reads a stored \"ask\" as \"block\" (K9: both ways are buttons now)", () => {
     expect(validateSettings({ acceptAs: "clipboard" }).acceptAs).toBe("block");
-    for (const v of ["block", "file", "ask"] as const) expect(validateSettings({ acceptAs: v }).acceptAs).toBe(v);
+    for (const v of ["block", "file"] as const) expect(validateSettings({ acceptAs: v }).acceptAs).toBe(v);
+    expect(validateSettings({ acceptAs: "ask" }).acceptAs).toBe("block");
+    // Ein Wert aus dem Altbestand fällt auf den Standard, nicht auf den zuletzt gespeicherten Nachbarn.
+    expect(validateSettings({ acceptAs: 3 }).acceptAs).toBe("block");
+  });
+
+  it("showStatusBar: a stored boolean stays, anything else is on (UI-STANDARD §8: an update never switches a used display off)", () => {
+    expect(validateSettings({ showStatusBar: false }).showStatusBar).toBe(false);
+    expect(validateSettings({ showStatusBar: true }).showStatusBar).toBe(true);
+    for (const junk of [undefined, null, "no", 0, {}]) expect(validateSettings({ showStatusBar: junk }).showStatusBar).toBe(true);
   });
 
   it("loads a pre-3b data.json with all old values and the new defaults", () => {

@@ -1,17 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 import { MarkdownView, TFile } from "obsidian";
 import { acceptText } from "../../src/core/shapes/panel-state";
-import { acceptPanel, buildAcceptEnv, chooseAcceptAs, readTargetText, type AcceptEnv, type AcceptOutcome } from "../../src/obsidian/accept";
+import { acceptKind, acceptSpecFor, buildAcceptEnv, readTargetText, saveOpenShapesViews, type AcceptOutcome } from "../../src/obsidian/accept";
+import { acceptPanel as acceptWithKit, type AcceptEnv as KitAcceptEnv } from "../../src/vendor/kit-obsidian/panel-accept";
 import type { PanelState, PanelTarget, ShapesRound } from "../../src/core/shapes/panel-state";
 import { pushRound, type Rounds } from "../../src/vendor/kit/rounds";
 import { EMPTY_ROUNDS } from "../../src/vendor/kit/rounds";
-import { DEFAULT_SETTINGS, type PluginSettings } from "../../src/core/settings-types";
+import type { PluginSettings } from "../../src/core/settings-types";
 import type { RawChange } from "../../src/core/shapes/protocol";
 import { PANEL_TEXTS } from "../../src/i18n/strings";
-import { askChoice } from "../../src/vendor/kit-obsidian/choice-modal";
 
-// Der Dialog selbst ist Kit-Code (`askChoice`, im Kit getestet); hier steht nur, was dieses Plugin ihm uebergibt.
-vi.mock("../../src/vendor/kit-obsidian/choice-modal", () => ({ askChoice: vi.fn() }));
+// Seit K9 Etappe 3 schreibt der Kit-Rahmen (Station 7) mit der Beschreibung dieses Plugins; die Kette der Kit-Aufrufe, wie `acceptVia` des Rahmens sie macht
+// (erst `prepare`, dann `acceptPanel` des Kits mit der Beschreibung ohne `beforeWrite`), steht hier einmal nach, damit die Fälle dieser Datei weiter an der
+// echten Beschreibung und am echten Kit-Schreibweg laufen. Den Schnappschuss setzt der Rahmen (Kit-Test, GUI-Smoke PP34); hier ist keiner im Spiel.
+type AcceptEnv = KitAcceptEnv;
+const whereOf = new WeakMap<object, "block" | "file" | undefined>();
+async function acceptPanel(env: AcceptEnv, state: PanelState): Promise<AcceptOutcome> {
+  try {
+    await saveOpenShapesViews(env.app, state);
+  } catch (error) {
+    return { ok: false, message: env.strings.notApplied(error instanceof Error ? error.message : String(error)) };
+  }
+  return acceptWithKit(env, acceptSpecFor(state), state.target, acceptKind(state), whereOf.get(env));
+}
 
 vi.mock("../../src/core/shapes/panel-state", async (orig) => {
   const mod = await orig<typeof import("../../src/core/shapes/panel-state")>();
@@ -30,8 +41,8 @@ const stateOf = (target: PanelTarget, ...rs: ShapesRound[]): PanelState => ({ ta
 
 interface Opts {
   editorOpen?: boolean; // n.md im Quellmodus offen (Schreibweg + lastEditor)
-  settings?: Partial<PluginSettings>;
-  choose?: AcceptEnv["choose"];
+  /** Der Schreibweg beim neuen Ziel (früher die Einstellung `acceptAs`; seit K9 ein Knopf je Weg, `where` am Weg). */
+  settings?: Partial<Pick<PluginSettings, "acceptAs">>;
   attachments?: string[];
   onCreateFails?: boolean;
   /** Der Editor wirft beim Schreiben (kit 0.86.0: `insertAtCursor` schreibt über `replaceRange` am Hauptcursor, nie über `replaceSelection`). */
@@ -114,15 +125,12 @@ function setup(files: Record<string, string>, opts: Opts = {}) {
       },
     },
   };
-  const env: AcceptEnv = {
-    ...buildAcceptEnv({
-      app: app as never,
-      ports,
-      settings: () => ({ ...DEFAULT_SETTINGS, ...opts.settings }),
-      lastEditor: () => (opts.noEditorView ? null : (view as never)),
-    }),
-    ...(opts.choose ? { choose: opts.choose } : {}),
-  };
+  const env: AcceptEnv = buildAcceptEnv({
+    app: app as never,
+    ports,
+    lastEditor: () => (opts.noEditorView ? null : (view as never)),
+  });
+  whereOf.set(env, opts.settings?.acceptAs);
   return { env, store, selections, app, processCalls, replaced: () => replaceCalls.length, viewLeaf };
 }
 
@@ -394,10 +402,32 @@ describe("acceptPanel — target new", () => {
     expect(r.ok).toBe(true);
     expect(selections).toEqual([`\n\`\`\`shapes\n${MODEL}\n\`\`\`\n`]);
   });
+  it("as block: the retarget names the block by the title of the shape, or by the plugin's word for an untitled one", async () => {
+    const titled = setup({ "n.md": "intro" }, { settings: { acceptAs: "block" }, editorOpen: true });
+    const r1 = await acceptPanel(titled.env, stateOf(NEW, create(MODEL)));
+    expect(retargetOf(r1)).toMatchObject({ kind: "block", label: "Tisch", path: "n.md" });
+    const plain = setup({ "n.md": "intro" }, { settings: { acceptAs: "block" }, editorOpen: true });
+    const r2 = await acceptPanel(plain.env, stateOf(NEW, create("box Platte size 1 1 1 at 0 0 0")));
+    expect(retargetOf(r2)).toMatchObject({ kind: "block", label: "shapes code block" });
+  });
+  it("as file: the window works on the created file afterwards (retarget names the file)", async () => {
+    const { env } = setup({ "n.md": "intro" }, { settings: { acceptAs: "file" } });
+    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
+    expect(r.ok).toBe(true);
+    expect(retargetOf(r)).toEqual({ kind: "file", path: "Anhänge/Tisch.shapes", label: "Tisch.shapes" });
+  });
+  it("the description carries no beforeWrite: the frame sets the snapshot, a plugin cannot leave it out or replace it", () => {
+    expect(acceptSpecFor(stateOf(NEW, create(MODEL)))).not.toHaveProperty("beforeWrite");
+  });
   it("as block with a selection: the selection stays, the block goes after it", async () => {
     const { env, store, selections } = setup({ "n.md": "intro text\nnext" }, { settings: { acceptAs: "block" }, selection: { to: { line: 0, ch: 5 } }, editorOpen: true });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
-    expect(r).toEqual({ ok: true, message: "Applied to the open note as a code block after the selection." });
+    // Seit K9 liefert ein neu eingefügter Block ein `retarget`: das Fenster arbeitet auf ihm weiter, statt neu zu beginnen (Beschriftung = Titel der Form).
+    expect(r).toEqual({
+      ok: true,
+      message: "Applied to the open note as a code block after the selection.",
+      retarget: { kind: "block", path: "n.md", lineStart: 1, lineEnd: 4, label: "Tisch", body: MODEL },
+    });
     expect(selections).toEqual([]);
     expect(store["n.md"]).toBe(`intro\n\`\`\`shapes\n${MODEL}\n\`\`\`\n text\nnext`);
   });
@@ -512,23 +542,6 @@ describe("acceptPanel — target new", () => {
     expect(r.ok).toBe(false);
     expect(r.message).toContain("disk full");
   });
-  it("ask with choose → null writes nothing", async () => {
-    const choose = vi.fn(async () => null);
-    const { env, store, selections } = setup({ "n.md": "intro" }, { settings: { acceptAs: "ask" }, choose });
-    const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
-    expect(r.ok).toBe(false);
-    expect(choose).toHaveBeenCalledOnce();
-    expect(selections).toEqual([]);
-    expect(Object.keys(store)).toEqual(["n.md"]);
-  });
-  it("ask with choose → file / block follows the choice", async () => {
-    const a = setup({ "n.md": "intro" }, { settings: { acceptAs: "ask" }, choose: async () => "file" });
-    expect((await acceptPanel(a.env, stateOf(NEW, create(MODEL)))).ok).toBe(true);
-    expect(a.store["Anhänge/Tisch.shapes"]).toBeDefined();
-    const b = setup({ "n.md": "intro" }, { settings: { acceptAs: "ask" }, choose: async () => "block" });
-    expect((await acceptPanel(b.env, stateOf(NEW, create(MODEL)))).ok).toBe(true);
-    expect(b.selections).toHaveLength(1);
-  });
   it("a refine-only chain on a new target is refused", async () => {
     const { env, selections } = setup({ "n.md": "intro" });
     const r = await acceptPanel(env, stateOf(NEW, refine(UP)));
@@ -548,25 +561,6 @@ describe("acceptPanel — other and robustness", () => {
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
     expect(r.ok).toBe(false);
     expect(r.message).toContain("boom");
-  });
-});
-
-describe("chooseAcceptAs", () => {
-  const app = {} as never;
-  it("asks with the plugin texts: block is the main button, file the second, no extra cancel button", async () => {
-    vi.mocked(askChoice).mockResolvedValueOnce("file");
-    expect(await chooseAcceptAs(app)).toBe("file");
-    expect(askChoice).toHaveBeenLastCalledWith(app, {
-      title: PANEL_TEXTS.acceptAsTitle,
-      options: [
-        { value: "block", label: PANEL_TEXTS.acceptAsBlock, cta: true },
-        { value: "file", label: PANEL_TEXTS.acceptAsFile },
-      ],
-    });
-  });
-  it("passes a closed dialog through as null (neither block nor file)", async () => {
-    vi.mocked(askChoice).mockResolvedValueOnce(null);
-    expect(await chooseAcceptAs(app)).toBeNull();
   });
 });
 

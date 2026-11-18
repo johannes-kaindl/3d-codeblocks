@@ -12,11 +12,11 @@ import { getLang, pickLang, setLang, t } from "./i18n/t";
 import { DEFAULT_SETTINGS, validateSettings, type PluginSettings } from "./core/settings-types";
 import { ActiveViewport, type ViewportController } from "./core/active-viewport";
 import { MODEL_FILE_EXTENSIONS } from "./core/format";
-import type { PanelTarget } from "./core/shapes/panel-state";
+import { INITIAL_PANEL, type PanelState, type PanelTarget } from "./core/shapes/panel-state";
 import { ModelBlock } from "./obsidian/block-child";
 import { fillMissingRowModels } from "./vendor/kit/endpoint_config";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
-import { findEndpointManager, onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
+import { onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
 import { onLevelFor, thinkingFor, withThinkingLevel, type ThinkingLevel } from "./vendor/kit/sampling-profiles";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 import { ControlPanelView, VIEW_TYPE_3D_CONTROLS } from "./obsidian/control-panel";
@@ -34,8 +34,10 @@ import {
   convertBlockToFile,
   convertFileToBlock,
 } from "./obsidian/shapes-convert";
-import { PromptPanelView, VIEW_TYPE_PROMPT } from "./obsidian/prompt-panel";
-import { acceptPanel, buildAcceptEnv, readTargetText, type AcceptEnv } from "./obsidian/accept";
+import { createShapesRun, promptPanelStrings, PromptPanelView, VIEW_TYPE_PROMPT, type ShapesPanelHost } from "./obsidian/prompt-panel";
+import { buildAcceptEnv, readTargetText } from "./obsidian/accept";
+import { createPromptPanelHost } from "./vendor/kit-obsidian/prompt-panel-host";
+import { clearRounds } from "./vendor/kit/rounds";
 import { exportShapesAsGltf } from "./obsidian/shapes-export";
 import { saveViewAsImage } from "./obsidian/save-image";
 import { ShapesFileView, VIEW_TYPE_SHAPES } from "./obsidian/shapes-file-view";
@@ -61,6 +63,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   readonly active = new ActiveViewport();
   /** Die LLM-Verbindung (Endpunkt-Quelle, Modelle, Anfragen, Einstellungs-Abschnitt). */
   llm!: LlmConnection;
+  /** Der Halter des Prompt-Panels: Lauf, Sitzung und Entwurf, die das Schließen der Ansicht überstehen (K9). Entsteht in `onload`, endet in `onunload`. */
+  promptHost!: ShapesPanelHost;
 
   async onload(): Promise<void> {
     // Die Sprache vor allem, was Texte zeichnet (Befehle, Ansichten, Einstellungen); sie folgt der Obsidian-Oberfläche.
@@ -103,6 +107,20 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         return this.saveSettings();
       },
     });
+    this.promptHost = createPromptPanelHost<PanelState>({
+      plugin: this,
+      name: PANEL_TEXTS.title,
+      open: () => { void this.openPromptPanel(); },
+      statusBar: () => this.settings.showStatusBar,
+      lang: getLang(),
+      fresh: (target) => ({ target, rounds: clearRounds() }),
+      run: createShapesRun({ llm: this.llm, readTargetText: (target) => readTargetText(this.acceptEnv(), target) }),
+      model: () => {
+        const source = this.llm.source();
+        return source.sentModel || source.model;
+      },
+      strings: promptPanelStrings(),
+    }, INITIAL_PANEL);
     this.addSettingTab(new SettingsTab(this.app, this));
     // Der Manager kommt, geht oder wechselt den Endpunkt: frisch aufloesen, die Modellzeile eines offenen Panels laedt ihre Liste neu.
     this.register(onEndpointManagerChanged(this.app, () => {
@@ -270,6 +288,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
       (leaf: WorkspaceLeaf) =>
         new PromptPanelView(leaf, {
           ...hostDeps,
+          host: this.promptHost,
           llm: this.llm,
           thinking: {
             family: () => this.llm.source().family,
@@ -285,7 +304,6 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
             },
           },
           readTargetText: (target) => readTargetText(this.acceptEnv(), target),
-          accept: (state) => acceptPanel(this.acceptEnv(), state),
           openSettings: () => {
             // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
             const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
@@ -296,8 +314,10 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
             setting.open();
             setting.openTabById(this.manifest.id);
           },
-          confirm: (message) => confirmAction(this.app, { message, confirmLabel: t("confirm.discard"), cancelLabel: PANEL_TEXTS.discardKeep }),
-          managerPresent: () => findEndpointManager(this.app) !== null,
+          accept: this.acceptEnv(),
+          // Ein gespeichertes "ask" (frueher: Dialog) gilt als Standard dieses Plugins, "block".
+          primaryWay: () => (this.settings.acceptAs === "file" ? "file" : "block"),
+          pluginId: this.manifest.id,
         }),
     );
     this.addCommand({ id: "open-prompt-panel", name: t("cmd.openPrompt"), callback: () => void this.openPromptPanel({ kind: "new" }) });
@@ -317,9 +337,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         // Ohne Controller (nichts bedient) bleibt das Ziel, wie es ist: ein frisches Panel hat ohnehin „neu“.
         if (!controller) return;
         const target: PanelTarget = controller.shapesTarget?.() ?? { kind: "other", label: controller.label() };
-        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
-          if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(target);
-        }
+        // Direkt an den Halter, auch wenn die Ansicht zu ist (K9 Review Focus 4): beim Öffnen steht das Ziel, oder „festgehalten“, wenn Runden offen sind.
+        this.promptHost.offer(target);
       }),
     );
 
@@ -467,13 +486,14 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
         if (leaf?.view instanceof MarkdownView) this.lastMarkdownView = leaf.view;
+        this.refreshPromptAccept();
       }),
     );
     // Nach dem Start gibt es noch kein active-leaf-change: die schon offene Notiz einmal vormerken.
     this.app.workspace.onLayoutReady(() => {
       this.lastMarkdownView ??= this.app.workspace.getActiveViewOfType(MarkdownView);
     });
-    this.registerEvent(this.app.workspace.on("layout-change", () => this.syncAllToolbars()));
+    this.registerEvent(this.app.workspace.on("layout-change", () => { this.syncAllToolbars(); this.refreshPromptAccept(); }));
 
     // `layout-change` allein reicht NICHT: es feuert, wenn Blaetter entstehen oder
     // verschwinden — nicht, wenn der Nutzer eine Seitenleiste bloss ein- oder
@@ -489,6 +509,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   }
 
   onunload(): void {
+    // Bricht einen laufenden Lauf des Prompt-Panels ab, verwirft die Sitzung und hängt den Statusleisten-Eintrag ab (ein spätes Ergebnis ändert danach nichts).
+    this.promptHost?.destroy();
     // Verwirft die Modell-Listen eines evtl. noch offenen Settings-Tabs.
     this.llm?.hideSettings();
     // three setzt beim Laden einen globalen Marker (window.__THREE__). Obsidian räumt
@@ -525,8 +547,8 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
     return this.app.workspace.getLeavesOfType("markdown").some((leaf) => leaf.view === view) ? view : null;
   }
 
-  private acceptEnv(): AcceptEnv {
-    return buildAcceptEnv({ app: this.app, ports: obsidianWritePorts(this.app), settings: () => this.settings, lastEditor: () => this.lastEditor() });
+  private acceptEnv(): ReturnType<typeof buildAcceptEnv> {
+    return buildAcceptEnv({ app: this.app, ports: obsidianWritePorts(this.app), lastEditor: () => this.lastEditor() });
   }
 
   private convertEnv() {
@@ -536,13 +558,21 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
   /** Das Prompt-Panel in der rechten Leiste oeffnen (oder zeigen) und ihm das Ziel geben. Solange die View
    *  nicht registriert ist (Task 6), meldet das eine Notice statt ein leeres Blatt anzulegen. */
   /** Zeichnet die Modellzeile jedes offenen Prompt-Panels aus dem Zustand neu (ohne Abruf). */
+  /** Die Sperrgründe der Schreibwege des Prompt-Panels („Open a note first“, Lesemodus) folgen der zuletzt bedienten Notiz. */
+  private refreshPromptAccept(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
+      if (leaf.view instanceof PromptPanelView) leaf.view.refreshAccept();
+    }
+  }
+
   private refreshPromptPanels(): void {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROMPT)) {
       if (leaf.view instanceof PromptPanelView) leaf.view.refreshModelBar();
     }
   }
 
-  async openPromptPanel(target: PanelTarget): Promise<void> {
+  /** `target` fehlt, wenn nur das Fenster geöffnet wird (Klick auf den Eintrag der Statusleiste): dann bleibt das Ziel des Halters, wie es ist. */
+  async openPromptPanel(target?: PanelTarget): Promise<void> {
     const workspace = this.app.workspace;
     const unavailable = () => new Notice(PANEL_TEXTS.unavailable);
     // Intern, aber lesbar: ohne registrierten Typ legt setViewState ein leeres Blatt an, statt zu werfen.
@@ -564,7 +594,7 @@ export default class ThreeDCodeblocksPlugin extends Plugin {
         await leaf.setViewState({ type: VIEW_TYPE_PROMPT, active: true });
       }
       await workspace.revealLeaf(leaf);
-      if (leaf.view instanceof PromptPanelView) leaf.view.setTarget(target);
+      if (target !== undefined) this.promptHost.offer(target);
     } catch (error) {
       console.warn("[three-d-codeblocks] could not open the prompt panel:", error);
       unavailable();

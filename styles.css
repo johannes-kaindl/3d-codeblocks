@@ -401,48 +401,6 @@
   border-bottom: 1px dotted var(--color-yellow);
 }
 
-/* HUB_CSS (obsidian-kit hub.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
-/* Hub-Tab-Leiste (obsidian-kit: buildHubInto). Die vier nummerierten Zutaten gehören
-   zusammen — jede einzeln ist wirkungslos, s. Modulkopf von src/obsidian/hub.ts. */
-.okit-hub-root { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.okit-hub-tabs {
-  display: flex;
-  flex-wrap: wrap;                 /* (1) erlaubt die zweite Zeile */
-  gap: var(--size-2-1);
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-/* box-shadow: none nimmt dem nativen <button> nur seinen Ruhe-Schatten. Obsidians
-   Fokusring bleibt: button:focus-visible { box-shadow: 0 0 0 3px … } hat mit (0,1,1) die
-   höhere Spezifität als .okit-hub-tab (0,1,0) — geprüft in Obsidians app.css. */
-.okit-hub-tab {
-  display: flex;
-  flex: 1 1 auto;                  /* (2) Basis = Inhaltsbreite, sonst bricht nichts um */
-  min-width: 0;                    /* (3) hebt min-width:auto auf, sonst sprengt ein langes Label die Zeile */
-  align-items: center;
-  justify-content: center;
-  gap: var(--size-4-1);
-  padding: var(--size-2-3) var(--size-4-2);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  box-shadow: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.okit-hub-tab-label {              /* (4) ohne eigenes Label-Element kann nichts ellipsieren */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.okit-hub-tab-icon { display: inline-flex; flex: 0 0 auto; }
-.okit-hub-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-.okit-hub-tab.is-active { color: var(--text-normal); border-bottom-color: var(--interactive-accent); }
-.okit-hub-content { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
-.okit-hub-panel { height: 100%; overflow: auto; }
-.okit-hub-panel.is-hidden { display: none; }
-
 /* STREAM_AREA_CSS (obsidian-kit stream-area.ts) — verbatim aus dem Kit, nicht von Hand aendern; nach einem Re-Vendoring neu uebernehmen. */
 .okit-stream { display: flex; flex-direction: column; min-height: 0; gap: var(--size-4-2); }
 .okit-stream-body {
@@ -564,50 +522,156 @@
   white-space: nowrap;
 }
 
-/* Prompt-Panel (src/obsidian/prompt-panel.ts): nur Theme-Variablen. */
-.tdcb-prompt .is-hidden { display: none; }
-.tdcb-prompt-top, .tdcb-prompt-actions {
-  display: flex; align-items: center; gap: var(--size-4-2); flex: 0 0 auto;
+/* Kit-Baustein prompt-panel (PROMPT_PANEL_CSS, obsidian-kit 0.96.0, wortgleich aus src/vendor/kit-obsidian/prompt-panel.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+/* Auftrags-Fenster (buildPromptPanel): nur Theme-Variablen und Obsidians Größenvariablen. Die Kit-Bausteine darin (Modellzeile, Antwortbereich, Rundenliste, Status) bringen ihr Aussehen aus ihren eigenen Konstanten mit. */
+/* Obsidian blendet is-hidden nicht global aus: jeder Baustein setzt die Regel selbst. */
+.okit-prompt-panel .is-hidden {
+  display: none;
 }
-.tdcb-prompt-hint, .tdcb-prompt-quality, .tdcb-prompt-preview-caption, .tdcb-prompt-diff-heading {
-  flex: 0 0 auto; font-size: var(--font-ui-smaller); color: var(--text-muted);
+
+/* Zahlenfeld am Handy (iPhone, gemessen 2026-11-05): Die Dezimaltastatur hat keine Fertig-Taste und Obsidian verkleinert das Blatt der Seitenleiste nicht, Übernehmen lag unter der Tastatur. Der Abstand
+   unten in Höhe der Tastatur macht den Rest erreichbar (keyboard-height ist 0px, solange keine Tastatur offen ist). Vier Klassen schlagen Obsidians workspace-leaf-content view-content. */
+.is-mobile .workspace-leaf-content .view-content.okit-prompt-panel-host {
+  padding-bottom: max(var(--size-4-8), var(--keyboard-height, 0px));
 }
-.tdcb-prompt-hint:empty { display: none; }
-.tdcb-prompt-target { flex: 1 1 auto; min-width: 0; font-weight: var(--font-semibold); overflow-wrap: anywhere; }
-.tdcb-prompt > .okit-hub-content .okit-model-bar { flex: 0 0 auto; }
-.tdcb-prompt-input { width: 100%; resize: vertical; flex: 0 0 auto; }
-.tdcb-prompt > .okit-hub-content .okit-hub-panel,
-.tdcb-prompt-versions { display: flex; flex-direction: column; gap: var(--size-4-2); padding: var(--size-4-2); }
-.tdcb-prompt .okit-hub-panel.is-hidden { display: none; }
-/* Die Obergrenze liegt am Antwort-Rumpf (14em) und am Denkblock (12em, Kit), nicht an der Box: eine Box mit fester Obergrenze
-   (vorher `max-height: 14em`) lief bei offenem Denkblock ueber, und die Statuszeile „Done — …“ ragte unten heraus und ueberlagerte
-   „Preview of round N“ (gemessen mit Gemma 4, Modell-Runde Welle 23; derselbe Fehler schon in 0.10.1). */
-.tdcb-prompt-stream { flex: 0 1 auto; padding: var(--size-4-2); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); }
-.tdcb-prompt-stream .okit-stream-body { max-height: 14em; }
-/* Die Antwort ist eine JSON-Zeile ohne Leerzeichen: `white-space: pre-wrap` (Kit-Tail) bricht nur an Leerzeichen, die Zeile lief rechts aus
-   dem Panel (Bild pp11-endlage, Welle 23). Der Umbruch gilt fuer Tail und gerenderten Block, das Kit-CSS bleibt wortgleich. */
-.tdcb-prompt-stream .okit-stream-tail, .tdcb-prompt-stream .okit-stream-block { overflow-wrap: anywhere; }
-/* Ursache des zusammengefallenen Stream-Bereichs und der halb abgeschnittenen Knoepfe: der Hub-Panel-Rumpf ist ein
-   Flex-Container fester Hoehe (height: 100% aus dem Kit), alle Kinder ausser dem Stream tragen `flex: 0 0 auto`;
-   der Stream (`flex: 0 1 auto`, Kit-`.okit-stream { min-height: 0 }`, Body `flex: 1 1 auto; min-height: 0`) ist das
-   EINZIGE schrumpfbare Kind und gibt bei viel Inhalt (Vorschau 260 px, Diff, zwei Runden) allen Platz her, bis nur der
-   Streifen der Statuszeile bleibt; deren Inhalt ragt dann ueber die Box und ueberlagert die Vorschau-Beschriftung.
-   Die Regeln darunter (hoehere Spezifitaet, das Kit-CSS bleibt wortgleich): der Stream schrumpft nicht mehr und hat
-   eine Mindesthoehe von sechs Zeilen, der Rumpf rollt, die Knopfzeile Apply/Discard klebt unten. */
-.tdcb-prompt .tdcb-prompt-stream { flex: 0 0 auto; min-height: 6em; }
-.tdcb-prompt > .okit-hub-content .okit-hub-panel { overflow-y: auto; min-height: 0; }
-.tdcb-prompt .tdcb-prompt-end {
+
+.okit-prompt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-target {
+  font-weight: var(--font-semibold);
+  overflow-wrap: anywhere;
+}
+
+.okit-prompt-panel-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-prompt-panel-hint:empty {
+  display: none;
+}
+
+.okit-prompt-panel-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-notices:empty {
+  display: none;
+}
+
+.okit-prompt-panel-controls:empty {
+  display: none;
+}
+
+.okit-prompt-panel-accept-hints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+}
+
+.okit-prompt-panel-accept-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-prompt-panel-accept-hint:empty {
+  display: none;
+}
+
+.okit-prompt-panel-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.okit-prompt-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-empty,
+.okit-prompt-panel-empty-endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-prompt-panel-empty-detail {
+  color: var(--text-faint);
+}
+
+.okit-prompt-panel-example {
+  height: auto;
+  white-space: normal;
+  text-align: start;
+}
+
+/* Der Antwortbereich schrumpft nicht unter sechs Zeilen: in einer Spalte mit viel Inhalt (Vorschau, Änderungen, zwei Runden) fiele er sonst auf den Streifen der Statuszeile zusammen, und deren Inhalt
+   ragte über die Box (gemessen in 3d-codeblocks, Welle 23). Die Obergrenze hält ihn klein, der Rumpf des Antwortbereichs rollt selbst. */
+.okit-prompt-panel-stream {
+  min-height: 6em;
+  max-height: 16em;
+}
+
+.okit-prompt-panel-preview-caption {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-bottom: var(--size-4-1);
+}
+
+/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin. */
+.okit-prompt-panel-end {
   position: sticky;
   bottom: 0;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
   padding: var(--size-4-2) 0;
   background: var(--background-primary);
   border-top: 1px solid var(--background-modifier-border);
 }
-.tdcb-prompt-preview, .tdcb-prompt-diff, .tdcb-prompt-rounds, .tdcb-prompt-empty { flex: 0 0 auto; }
-.tdcb-prompt-empty { padding: var(--size-4-2); border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s); color: var(--text-muted); }
-.tdcb-prompt-diff ul { margin: 0; padding-left: var(--size-4-4); font-size: var(--font-ui-small); }
-.tdcb-prompt-versions-empty { color: var(--text-muted); font-size: var(--font-ui-small); }
+
+/* Kit-Baustein chat-host (CHAT_HOST_CSS, obsidian-kit 0.96.0, wortgleich aus src/vendor/kit-obsidian/chat-host.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+/* Host-Abstand im Hauptbereich auf dem Handy (0.76.0, Befund der Realprobe am iPhone: 215 px leere Fläche zwischen Senden und Tastatur). Die schwebende Navigationsleiste liegt über dem unteren Rand und braucht Platz
+   (--navbar-height plus die echte Safe-Area); bei offener Tastatur verkleinert Obsidian den App-Container selbst und die Leiste ist weg, dann braucht der Host nichts. Zwei Fallen: Obsidian setzt bei offener Tastatur
+   die Variable --safe-area-inset-bottom auf die Tastaturhöhe (328 px, darum env() statt der Variable: es bleibt der echte Wert), und es gibt keine Tastaturklasse, nur --keyboard-height (0px, offen die Tastaturhöhe):
+   die Zehn macht daraus einen Schalter (Leiste plus Safe-Area sind unter 100 px, 10 x Tastaturhöhe weit darüber, max() fängt es bei 0 ab). Mit der Host-Klasse und vier Klassen: die Regel schlägt Obsidians
+   .workspace-leaf-content .view-content (max(var(--safe-area-inset-bottom), var(--size-4-8))), die bei offener Tastatur selbst 328 px ergäbe. Nur im Hauptbereich; in einer Seitenleiste deckt die Schublade die Leiste ab.
+   Ungemessen: eine angedockte (nicht schwebende) Leiste, dort bleibt Obsidians Regel. */
+.is-mobile.is-floating-nav .mod-root .view-content.okit-chat-host { box-sizing: border-box; padding-bottom: max(0px, calc(var(--navbar-height) + env(safe-area-inset-bottom) - 10 * var(--keyboard-height, 0px))); }
+
+/* Was dem Prompt-Panel dieses Plugins gehört (die Änderungsliste einer Runde; Station 5): Theme-Variablen. */
+.tdcb-prompt-diff-heading { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.tdcb-prompt-diff { margin: 0; padding-left: var(--size-4-4); font-size: var(--font-ui-small); }
+/* Die Antwort ist eine JSON-Zeile ohne Leerzeichen: `white-space: pre-wrap` (Kit-Tail) bricht nur an Leerzeichen, die Zeile lief rechts aus
+   dem Panel (Bild pp11-endlage, Welle 23). Der Umbruch gilt fuer Tail und gerenderten Block, das Kit-CSS bleibt wortgleich. */
+.okit-prompt-panel-stream .okit-stream-tail, .okit-prompt-panel-stream .okit-stream-block { overflow-wrap: anywhere; }
 /* Kit-Baustein status-indicator (STATUS_INDICATOR_CSS, wortgleich aus src/vendor/kit-obsidian/status-indicator.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
 .okit-status { display: flex; gap: var(--size-2-2); align-items: center; font-size: var(--font-ui-small); color: var(--text-muted); }
 .okit-status-icon { display: inline-flex; align-items: center; }
@@ -618,8 +682,6 @@
 .okit-status.is-checking .okit-status-icon svg { animation: okit-status-spin 1.2s linear infinite; }
 @keyframes okit-status-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .okit-status.is-checking .okit-status-icon svg { animation: none; } }
-/* Im Prompt-Panel bleibt die Schrift der Messzeile und der Statuszeile so klein wie vor dem Kit-Baustein (--font-ui-smaller; der Baustein zeichnet --font-ui-small). */
-.tdcb-prompt .okit-status { font-size: var(--font-ui-smaller); }
 
 /* Kit-Baustein endpoint-list (ENDPOINT_LIST_CSS, wortgleich aus src/vendor/kit-obsidian/endpoint-list.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
 /* Pro-Zeile-Status der Endpunkt-Fallback-Liste: Form trägt die Bedeutung, Farbe sekundär (WCAG 1.4.1). */
@@ -634,7 +696,8 @@
 .okit-ep-thirdparty { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; color: var(--text-muted); }
 .okit-ep-thirdparty svg { width: 14px; height: 14px; }
 .okit-ep-secret { color: var(--text-muted); font-size: var(--font-ui-small); margin-right: 8px; }
-.okit-ep-extra { flex: 0 0 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+/* Der Zusatzcontainer sitzt im Control der Zeile und erbte dessen text-align: end; die Namen der Zusatzzeilen standen im schmalen Fenster rechtsbündig, versetzt zum Schalter (gemessen in llm-endpoint-manager f0d4a69, Fenster 610 px). */
+.okit-ep-extra { flex: 0 0 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; text-align: start; }
 /* Rolle der Zeile als Text unter den Feldern: „aktiv" / „erreichbar, aber Platz N" / … .
    Erreichbarkeit trägt das Icon (Form), die Rolle dieser Text — keins von beiden über Farbe
    allein (WCAG 1.4.1). Die frühere Auszeichnung saß auf dem Icon-Container und war wirkungslos:

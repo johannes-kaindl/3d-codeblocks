@@ -8,7 +8,8 @@ import { applyChanges } from "../src/core/shapes/changes";
 import { parseShapes } from "../src/core/shapes/parse";
 import { DE } from "../src/i18n/texts-de";
 import { EN } from "../src/i18n/texts-en";
-import { ACCEPT_STRINGS, helpTexts, modelBarStrings, PANEL_TEXTS } from "../src/i18n/strings";
+import { ACCEPT_STRINGS, helpTexts, PANEL_TEXTS } from "../src/i18n/strings";
+import { promptPanelStrings } from "../src/obsidian/prompt-panel";
 import { getLang, pickLang, setLang, t } from "../src/i18n/t";
 import { makeFakeApp, setMockLanguage } from "./__mocks__/obsidian";
 
@@ -35,8 +36,8 @@ describe("Wörterbücher EN/DE", () => {
   });
 
   it("lassen nur diese Texte unübersetzt (gleich in beiden Sprachen, aus gutem Grund)", () => {
-    // „Prompt“ und „Text“ heißen auch auf Deutsch so (Obsidian-Oberfläche, UI-STANDARD).
-    expect(Object.keys(EN).filter((k) => EN[k] === DE[k]).sort()).toEqual(["panel.modelLabel", "panel.tabPrompt", "sv.text"]);
+    // „Text“ heißt auch auf Deutsch so (Obsidian-Oberfläche, UI-STANDARD).
+    expect(Object.keys(EN).filter((k) => EN[k] === DE[k]).sort()).toEqual(["sv.text"]);
   });
 
   it("jeder im Quelltext benutzte Schlüssel steht im Wörterbuch", () => {
@@ -102,11 +103,17 @@ describe("Deutsch an den Stellen, die der Nutzer sieht", () => {
     expect(ACCEPT_STRINGS.nestedFence?.(false)).toContain("Zitats, Callouts oder einer Liste");
   });
 
-  it("die Kit-Bündel (Hilfe-Zeile, Modellzeile) wechseln mit", () => {
-    const en = { help: helpTexts(), bar: modelBarStrings().refresh };
+  it("die Kit-Bündel (Hilfe-Zeile) und die Texte, die das Plugin im Kit-Rahmen selbst sagt, wechseln mit", () => {
+    const en = { help: helpTexts(), panel: promptPanelStrings() };
     setLang("de");
     expect(helpTexts()).not.toEqual(en.help);
-    expect(modelBarStrings().refresh).not.toBe(en.bar);
+    const de = promptPanelStrings();
+    expect(de.targetNew).toBe("Neues Modell");
+    expect(de.targetNew).not.toBe(en.panel.targetNew);
+    expect(de.placeholderCreate).toContain("Beschreibe das Modell");
+    expect(de.examples).toHaveLength(2);
+    expect(de.examples?.[0]).toContain("Schneemann");
+    expect(de.unsupported?.("X")).toContain("lässt sich nicht per Prompt ändern");
   });
 
   it("Meldungen des Kerns: Parser, Änderungsliste, Messzeile, Zeilenpräfix", () => {

@@ -16,16 +16,22 @@ function declarations(selector: string): string {
 }
 const has = (selector: string, decl: RegExp): boolean => decl.test(declarations(selector));
 
-describe("prompt panel layout (stream collapsed, buttons cut off)", () => {
-  it("the stream does not shrink and has a minimum height in em", () => {
-    expect(has(".tdcb-prompt .tdcb-prompt-stream", /flex:\s*0 0 auto/)).toBe(true);
-    expect(has(".tdcb-prompt .tdcb-prompt-stream", /min-height:\s*[\d.]+em/)).toBe(true);
+describe("prompt panel layout (stream collapsed, buttons cut off) — the rules come from the kit frame (PROMPT_PANEL_CSS), verbatim in styles.css", () => {
+  it("the stream has a minimum height in em, so it never collapses to the status strip", () => {
+    expect(has(".okit-prompt-panel-stream", /min-height:\s*[\d.]+em/)).toBe(true);
   });
-  it("the body scrolls and the Apply/Discard row sticks to the bottom with a theme background", () => {
-    expect(has(".tdcb-prompt > .okit-hub-content .okit-hub-panel", /overflow-y:\s*auto/)).toBe(true);
-    expect(has(".tdcb-prompt .tdcb-prompt-end", /position:\s*sticky/)).toBe(true);
-    expect(has(".tdcb-prompt .tdcb-prompt-end", /bottom:\s*0/)).toBe(true);
-    expect(has(".tdcb-prompt .tdcb-prompt-end", /background:\s*var\(--background-primary\)/)).toBe(true);
+  it("the Apply/Discard row sticks to the bottom with a theme background", () => {
+    expect(has(".okit-prompt-panel-end", /position:\s*sticky/)).toBe(true);
+    expect(has(".okit-prompt-panel-end", /bottom:\s*0/)).toBe(true);
+    expect(has(".okit-prompt-panel-end", /background:\s*var\(--background-primary\)/)).toBe(true);
+  });
+  it("the one-line JSON answer wraps inside the stream box (it ran out to the right in the narrow panel)", () => {
+    expect(has(".okit-prompt-panel-stream .okit-stream-tail", /overflow-wrap:\s*anywhere/)).toBe(true);
+  });
+  it("the old panel rules are gone with the hub (no .tdcb-prompt, no tab bar in this plugin any more)", () => {
+    expect(css).not.toContain(".tdcb-prompt-stream");
+    expect(css).not.toContain(".tdcb-prompt .tdcb-prompt-end");
+    expect(css).not.toContain(".okit-hub-");
   });
 });
 
