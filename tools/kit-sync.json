@@ -1,7 +1,7 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.93.0" },
-    "code-kit": { "ref": "0.73.0" }
+    "obsidian-kit": { "ref": "0.95.0" },
+    "code-kit": { "ref": "0.75.0" }
   },
   "targets": [
     {
@@ -15,7 +15,7 @@
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "override-guard", "block-writer", "note-edit", "fence-scan"],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "override-guard", "block-writer", "note-edit"],
       "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {

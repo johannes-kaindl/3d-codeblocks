@@ -9,7 +9,7 @@
 //   die Datei stehen (nie ein Rollback durch Neuanlegen).
 import { MarkdownView, TFile, type App } from "obsidian";
 import { parseBlockConfig } from "../core/block-config";
-import { findFenceAt, listFences, type Fence } from "../vendor/kit/fence-scan";
+import { findFenceAt, listFences, type Fence } from "../vendor/kit/fences";
 import { exportBaseName } from "../core/shapes/export";
 import { parseShapes } from "../core/shapes/parse";
 import {

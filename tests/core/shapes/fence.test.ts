@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { fenceFor } from "../../../src/vendor/kit/fences";
-import { findFenceAt, listFences } from "../../../src/vendor/kit/fence-scan";
+import { findFenceAt, listFences } from "../../../src/vendor/kit/fences";
 
 const NOTE = ["# Möbel", "", "```shapes", "box A size 1", "```", "", "~~~js", "x", "~~~", "````shapes", "```", "box B size 1", "````"].join("\n");
 
 describe("findFenceAt", () => {
   it("finds the block around a body line and on its fence lines", () => {
     for (const line of [2, 3, 4]) {
-      expect(findFenceAt(NOTE, line)).toEqual({ lang: "shapes", openLine: 2, closeLine: 4, body: "box A size 1" });
+      expect(findFenceAt(NOTE, line)).toEqual({ lang: "shapes", openLine: 2, closeLine: 4, closed: true, body: "box A size 1" });
     }
   });
   it("returns null outside any block", () => {
@@ -16,10 +16,10 @@ describe("findFenceAt", () => {
   });
   it("knows tildes and longer fences", () => {
     expect(findFenceAt(NOTE, 7)?.lang).toBe("js");
-    expect(findFenceAt(NOTE, 11)).toEqual({ lang: "shapes", openLine: 9, closeLine: 12, body: "```\nbox B size 1" });
+    expect(findFenceAt(NOTE, 11)).toEqual({ lang: "shapes", openLine: 9, closeLine: 12, closed: true, body: "```\nbox B size 1" });
   });
   it("treats an unclosed fence as running to the end", () => {
-    expect(findFenceAt("```shapes\nbox A size 1", 1)).toEqual({ lang: "shapes", openLine: 0, closeLine: 1, body: "box A size 1" });
+    expect(findFenceAt("```shapes\nbox A size 1", 1)).toEqual({ lang: "shapes", openLine: 0, closeLine: 1, closed: false, body: "box A size 1" });
   });
   it("does not open a backtick fence from a prose line whose info string holds a backtick", () => {
     expect(listFences("```shapes``` text\nbox A size 1")).toEqual([]);

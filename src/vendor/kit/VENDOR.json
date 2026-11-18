@@ -1,14 +1,14 @@
 {
   "source": "code-kit",
-  "version": "0.73.0",
-  "sha": "09b7dcb",
+  "version": "0.75.0",
+  "sha": "e6cd8be",
   "vendored": "num.ts, settings_schema.ts, secrets.ts, redact.ts, safe-markdown.ts, rounds.ts, sampling-profiles.ts, backend-probe.ts, model-list-cache.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, sse.ts, reasoning.ts, capabilities.ts, think-splitter.ts, think-toggle.ts, timeout.ts, model-choice.ts, data-url.ts, stream-blocks.ts, i18n.ts, replace-span.ts, embeddings-client.ts, llm-json.ts, model-context.ts, anthropic-wire.ts, text-window.ts, rel-path.ts, block-lines.ts, split-list.ts, fences.ts, panel-session.ts, css-color.ts, measured-quality.ts, error-message.ts, sha256.ts, clipboard.ts",
   "note": "Verbatim snapshot aus festen Git-Refs (CORE-META-22: feste Ref, nicht Arbeitsstand); den Stand nennen `version` und die Einzelpins in `vendored`. Never hand-edit. Re-vendor via tools/sync-kit.sh. num.ts kommt nur als Abhaengigkeit mit: settings_schema.ts importiert clampInt daraus. ACHTUNG: ab Kit 0.28.0 liegen diese beiden Module nicht mehr im Kit, sondern in code-kit — ein Anheben der Ref erfordert vorher einen Quellenwechsel. kit-obsidian/ siehe dortige VENDOR.json.",
   "code_kit_version": "0.13.0",
   "code_kit_sha": "d3a29d3",
   "code_kit_vendored": "rounds.ts, sampling-profiles.ts, backend-probe.ts, model-list-cache.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, sse.ts, reasoning.ts, capabilities.ts, think-splitter.ts, think-toggle.ts, timeout.ts, model-choice.ts, stream-blocks.ts, i18n.ts, clipboard.ts",
-  "obsidian_kit_version": "0.93.0",
-  "obsidian_kit_sha": "7997447",
-  "obsidian_kit_vendored": "endpoint-source.ts, endpoint-secret-hook.ts, override-guard.ts, block-writer.ts, note-edit.ts, fence-scan.ts",
+  "obsidian_kit_version": "0.95.0",
+  "obsidian_kit_sha": "3853245",
+  "obsidian_kit_vendored": "endpoint-source.ts, endpoint-secret-hook.ts, override-guard.ts, block-writer.ts, note-edit.ts",
   "license": "AGPL-3.0-or-later"
 }

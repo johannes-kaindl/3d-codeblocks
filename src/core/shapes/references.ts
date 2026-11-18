@@ -55,7 +55,7 @@ function stripQuotes(line: string): { rest: string; quoted: boolean; depth: numb
 }
 
 /**
- * Zaunsuche, die Zitat- und Listen-Präfixe kennt (Obsidian rendert solche Zäune; der Kit-Scanner `fence-scan` bewusst nicht).
+ * Zaunsuche, die Zitat- und Listen-Präfixe kennt (Obsidian rendert solche Zäune; der Kit-Leser `listFences` bewusst nicht).
  * Ein Zaun in einem Zitat endet spätestens an der ersten Zeile ohne `>`; ein Zaun in einem Listenpunkt
  * an der ersten nicht leeren Zeile, die unter die Einrückung des Zaunbeginns fällt. Nur ein Zaun auf
  * oberster Ebene läuft (wie bei listFences) bis zum Dateiende.
