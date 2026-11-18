@@ -86,7 +86,6 @@ interface Shot {
  *  Die zwei Wartepunkte sind beide load-bearing: der erste auf das DOM, der zweite auf
  *  den ersten gezeichneten Frame. Ohne den zweiten fotografiert man ein leeres Canvas. */
 async function blockBereit(cdp: Cdp, notiz: string, index = 0): Promise<boolean> {
-  await cdp.send("Page.bringToFront");
   // Live Preview WIEDER AN. splitQuelleUndBild schaltet sie ab, damit links echter
   // Quelltext steht — und liess sie bisher aus. Jedes Bild danach zeigte dann Quelltext
   // statt Modell: kein gerenderter Block, keine Fehlermeldung, nur "leseflaeche: 0".
@@ -719,7 +718,6 @@ async function main(): Promise<void> {
   // sichtbar ist, WANN sie kamen — zwischen welchen beiden Bildern.
   await cdp.mitschnitt((zeile) => console.log(`      » ${zeile}`));
 
-  await cdp.send("Page.bringToFront");
   // Grosszuegig warten: Obsidian baut Workspace und Plugins nach dem Fokuswechsel neu
   // auf. Zu frueh gemessen liefert eine leere Leseflaeche — und der erste Shot scheitert,
   // waehrend spaetere gelingen. Ein Fehlerbild, das wie Zufall aussieht.

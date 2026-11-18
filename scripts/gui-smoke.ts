@@ -7027,12 +7027,9 @@ async function main(): Promise<void> {
   const zustand = beimAbbruch(cleanupState, "Smoke-Zustand zurücksetzen");
 
   try {
-    // Ohne Fokus drosselt Chromium den Renderer. `Page.bringToFront` allein genuegt auf
-    // macOS NICHT: es holt das Fenster innerhalb der App nach vorn, nicht die App nach
-    // vorn. Gemessen 2026-08-04 — im Hintergrund blieb das DOM der Notiz komplett leer
-    // (`.tdcb-block` = 0, kein Notiztext), obwohl `app.workspace` die Datei korrekt als
-    // aktiv meldete. Man debuggt dann ein Phantom: Zustand richtig, Anzeige nicht da.
-    await cdp.send("Page.bringToFront");
+    // Ohne Fokus drosselt Chromium den Renderer: gemessen 2026-08-04 blieb im Hintergrund das DOM der Notiz komplett leer
+    // (`.tdcb-block` = 0, kein Notiztext), obwohl `app.workspace` die Datei korrekt als aktiv meldete. Ein eigenes
+    // `Page.bringToFront` bewirkt dagegen nichts (gemessen Welle 28); die Sichtbarkeit stellt `requireVisible` her.
     // Die Fokus-Emulation setzt `requireVisible` oben (Bruecke, seit 9eb35c2); gemessen 2026-08-14: ohne sie flackerte der
     // Lauf zwischen 21/21 und Totalausfall.
     // Fokus ist Voraussetzung, nicht Prüfgegenstand: ohne ihn drosselt Chromium den
