@@ -76,6 +76,7 @@ import {
   pollUntil,
   reopenNote,
   requireVisible,
+  schliesseDialog,
   schliesseEinstellungen,
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
@@ -4781,10 +4782,10 @@ const PP_MODEL_B = "qwen3.8-smoke-b";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30", "PP31"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30", "PP31", "PP32", "PP33", "PP34", "PP36", "PP37", "PP38", "PP39", "PP40"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
-  PP2: "Panel öffnet mit Hub, Messzeile und Beispiel-Platzhalter",
+  PP2: "Panel öffnet ohne Tab-Leiste, mit Messzeile und Beispiel-Platzhalter",
   PP3: "Erzeugen streamt in Stücken und zeigt eine Vorschau",
   PP4: "Übernehmen als Codeblock schreibt einen shapes-Block in die Notiz",
   PP5: "Ändern über die Aktionsleiste: Ziel, Diff, nur die Platte-Zeile ändert sich",
@@ -4812,9 +4813,19 @@ const PP_TITEL = {
   PP29: "Modellzeile: die Denk-Steuerung (Dropdown mit den Stufen des Modells) steht IN der Zeile, schaltet um, und der gesendete Body ändert sich (Wirkung am Stub)",
   PP30: "Modellzeile: während einer Anfrage gesperrt (Dropdown und Neu laden), danach wieder frei",
   PP31: "Übernehmen in eine im Quellmodus offene CRLF-Notiz (Kit 0.93.0 note-edit): wendet an, schreibt im Editor (Editorstand = Platte, Strg+Z nimmt es zurück), nur die Platte-Zeile ändert sich",
+  PP34: "Schnappschuss vor jedem Überschreiben: das Ersetzen eines Blocks sichert die ganze Notiz, das Einfügen an der Schreibmarke nicht (K9 Station 7)",
+  PP36: "Im Lauf gesperrt: zweites Senden, Neu, Übernehmen und die Rundenwahl; nach Erfolg sind die Rohantwort weg und das Auftragsfeld leer, nach Abbruch bleibt der Text im Feld (K9 Stationen 3, 4, 6, 7)",
+  PP37: "Übernehmen nennt den Sperrgrund: ohne offene Notiz und im Lesemodus steht der Grund neben dem gesperrten Knopf (aria-describedby), mit Quellmodus ist er frei (K9 Station 7)",
+  PP38: "Ein Lauf überlebt das Schließen des Fensters: Eintrag „läuft“ in der Statusleiste, kein Abbruch am Server, danach „Ergebnis wartet“ und die Runde steht beim Öffnen da (K9 Halter)",
+  PP40: "Schalter „Statusleiste“ aus: ohne Fenster und im Lauf steht kein Eintrag, nach dem Einschalten erscheint er (K9)",
+  PP39: "Nach dem Übernehmen eines neuen Modells arbeitet das Fenster auf dem angelegten Block weiter (K9 retarget)",
+  PP32: "Schließen mit einer offenen Runde fragt (Behalten oder Verwerfen); Escape behält, Verwerfen verwirft (K9 Station 8)",
+  PP33: "Zwei schnelle Rundenwahlen: die Vorschau zeigt am Ende die zuletzt gewählte Runde (K9 Ticket der Vorschau)",
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
+const PP37_NO_NOTE = "Open a note to insert a code block.";
+const PP37_READING = "reading view";
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
 const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
@@ -4943,7 +4954,7 @@ const PP_RESET = `
 const PP_STREAM_UNIT = 8;
 const PP_STREAM_TAKT_MS = 20;
 const PP_STREAM_REASONING = "Ich ueberlege die Teile des Tisches: Platte, vier Beine, Masse, Lage. ".repeat(6);
-const PP_STREAM_BODY = ".tdcb-prompt .tdcb-prompt-stream .okit-stream-body";
+const PP_STREAM_BODY = ".okit-prompt-panel-host .okit-prompt-panel-stream .okit-stream-body";
 const ppStreamAnswer = (teile = 45): string => {
   const parts = Array.from({ length: teile }, (_, i) => ({ name: `Teil-${i + 1}`, shape: "box", size: [0.1, 0.1, 0.1], at: [i * 0.05, 0.5, 0], color: "#8b5a2b" }));
   return JSON.stringify({ parts });
@@ -4980,7 +4991,7 @@ async function ppStromMessen(
   });
   // Beobachter fuer den Denk-Text (PP15): die Bruecke kennt ihn nicht. Haengt vor dem Start des Stroms.
   const armed = await cdp.evaluate<boolean>(`
-    const area = document.querySelector(".tdcb-prompt .tdcb-prompt-stream");
+    const area = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-stream");
     if (!area) return false;
     window.__ppReasoning = [];
     window.__ppReasoningObs?.disconnect();
@@ -5000,7 +5011,7 @@ async function ppStromMessen(
   const ergebnis = await messeFolge(cdp, {
     selector: PP_STREAM_BODY,
     laeuft: () => sub.unterwegs > 0,
-    starte: () => ppClick(cdp, ".tdcb-prompt-send"),
+    starte: () => ppClick(cdp, ".okit-prompt-panel-send"),
     kontrolle: opt.kontrolle,
     stoerung: opt.stoerung,
     wiederaufnahme: opt.wiederaufnahme,
@@ -5047,25 +5058,25 @@ interface PpState {
 /** Renderer-Schnipsel: der sichtbare Stand des Panels (oder `null`, wenn keines offen ist). */
 const PP_READ = `
   ${SAMPLER}
-  const root = document.querySelector(".tdcb-prompt");
+  const root = document.querySelector(".okit-prompt-panel-host");
   if (!root) return null;
-  const statusRow = root.querySelector(".tdcb-prompt-status");
+  const statusRow = root.querySelector(".okit-prompt-panel-status");
   const phase = ["checking", "ok", "error", "warning"].find((p) => statusRow?.classList.contains("is-" + p)) ?? "idle";
-  const canvas = root.querySelector(".tdcb-prompt-preview canvas");
-  const wrap = root.querySelector(".tdcb-prompt-preview");
+  const canvas = root.querySelector(".okit-prompt-panel-preview canvas");
+  const wrap = root.querySelector(".okit-prompt-panel-preview");
   return {
     phase,
-    status: statusRow?.querySelector(".tdcb-prompt-status-label")?.textContent ?? "",
+    status: statusRow?.querySelector(".okit-status-label")?.textContent ?? "",
     tail: root.querySelector(".okit-stream-tail")?.textContent ?? "",
-    target: root.querySelector(".tdcb-prompt-target")?.textContent ?? "",
-    send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
+    target: root.querySelector(".okit-prompt-panel-target")?.textContent ?? "",
+    send: root.querySelector(".okit-prompt-panel-send")?.textContent ?? "",
     rounds: app.workspace.getLeavesOfType("tdcb-prompt-panel")[0]?.view?.state?.()?.rounds?.rounds?.length ?? 0,
     diff: [...root.querySelectorAll(".tdcb-prompt-diff li")].map((l) => l.textContent ?? ""),
     previewVisible: !!wrap && !wrap.classList.contains("is-hidden"),
     colors: canvas ? (sample(canvas)?.colors ?? 0) : 0,
-    stopVisible: !!root.querySelector(".tdcb-prompt-stop:not(.is-hidden)"),
-    applyDisabled: root.querySelector(".tdcb-prompt-apply")?.disabled ?? true,
-    sendDisabled: root.querySelector(".tdcb-prompt-send")?.disabled ?? true,
+    stopVisible: !!root.querySelector(".okit-prompt-panel-stop:not(.is-hidden)"),
+    applyDisabled: root.querySelector(".okit-prompt-panel-accept")?.disabled ?? true,
+    sendDisabled: root.querySelector(".okit-prompt-panel-send")?.disabled ?? true,
   };
 `;
 
@@ -5081,7 +5092,7 @@ const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeo
 async function ppWaitPanelInside(cdp: Cdp): Promise<boolean> {
   const settled = await pollState<{ inside: boolean }>(
     cdp,
-    `const r = document.querySelector(".tdcb-prompt")?.getBoundingClientRect(); return r ? { inside: r.width > 0 && r.left >= 0 && r.right <= innerWidth } : null;`,
+    `const r = document.querySelector(".okit-prompt-panel-host")?.getBoundingClientRect(); return r ? { inside: r.width > 0 && r.left >= 0 && r.right <= innerWidth } : null;`,
     (s) => s.inside,
     10_000,
     200,
@@ -5103,7 +5114,7 @@ async function bildUndBreite(cdp: Cdp, name: string, selector?: string): Promise
       const root = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : "document.body"};
       if (!root) return null;
       const sichtbar = (e) => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
-      const alle = [...root.querySelectorAll("button, label, select, .setting-item-name, .okit-hub-tab-label, .tdcb-prompt-target, .tdcb-prompt-quality, .tdcb-prompt-status, .tdcb-pill, [class*='tdcb-'][class*='-label']")].filter(sichtbar);
+      const alle = [...root.querySelectorAll("button, label, select, .setting-item-name, .okit-prompt-panel-target, .okit-prompt-panel-quality, .okit-prompt-panel-status, .tdcb-pill, [class*='tdcb-'][class*='-label']")].filter(sichtbar);
       const abgeschnitten = [], umgebrochen = [], ueberstand = [];
       const kante = root.getBoundingClientRect().right;
       for (const e of alle) {
@@ -5128,6 +5139,20 @@ async function bildUndBreite(cdp: Cdp, name: string, selector?: string): Promise
   }
 }
 
+/** Schnappschüsse des Plugins (Kit `file-snapshot`, vor jedem Überschreiben): Anzahl aller Stände und Inhalt des jüngsten (Stempel im Dateinamen). */
+async function ppSnapshotInfo(cdp: Cdp): Promise<{ count: number; newest: string | null }> {
+  return cdp.evaluate(`
+    const dir = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].manifest.dir + "/snapshots";
+    const files = [];
+    const walk = async (d) => { if (!(await app.vault.adapter.exists(d))) return; const l = await app.vault.adapter.list(d); for (const f of l.files) files.push(f); for (const sub of l.folders) await walk(sub); };
+    await walk(dir);
+    const byStamp = [...files].sort((a, b) => (a.split("/").pop() ?? "").localeCompare(b.split("/").pop() ?? ""));
+    const newest = byStamp.length > 0 ? await app.vault.adapter.read(byStamp[byStamp.length - 1]) : null;
+    return { count: files.length, newest };
+  `);
+}
+let ppSnapInsert: { before: number; after: number } | null = null;
+
 /** Das Panel frisch öffnen (Blatt zu, Befehl `open-prompt-panel`, Ziel „new“) und warten, bis es steht. */
 async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
   await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
@@ -5140,7 +5165,7 @@ async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
 /** Text ins Eingabefeld des Panels schreiben (das Panel liest `value` beim Senden). */
 async function ppType(cdp: Cdp, text: string): Promise<boolean> {
   return cdp.evaluate<boolean>(`
-    const ta = document.querySelector(".tdcb-prompt .tdcb-prompt-input");
+    const ta = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-input");
     if (!ta) return false;
     ta.value = ${JSON.stringify(text)};
     ta.dispatchEvent(new Event("input", { bubbles: true }));
@@ -5150,7 +5175,7 @@ async function ppType(cdp: Cdp, text: string): Promise<boolean> {
 
 /** Echter Mausklick auf einen Knopf des Panels. */
 const ppClick = (cdp: Cdp, selector: string): Promise<boolean> =>
-  clickReal(cdp, `document.querySelector(${JSON.stringify(`.tdcb-prompt ${selector}`)})`);
+  clickReal(cdp, `document.querySelector(${JSON.stringify(`.okit-prompt-panel-host ${selector}`)})`);
 
 /** Den Knopf mit dieser Beschriftung in der Aktionsleiste des ersten Blocks im Lesemodus klicken. */
 const ppClickActionButton = (cdp: Cdp, label: string): Promise<boolean> =>
@@ -5350,7 +5375,7 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     await ppWaitPanelInside(cdp);
     step = "Wunsch senden";
     await ppType(cdp, PP_REFINE_PROMPT);
-    await ppClick(cdp, ".tdcb-prompt-send");
+    await ppClick(cdp, ".okit-prompt-panel-send");
     step = "Ende der Runde abwarten";
     const done = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 400);
     return { ready: done.reached && done.state?.phase === "ok", clicked: true, reason: done.state ? `Status ${done.state.phase}: ${done.state.status}` : "kein Panel", round: done.state, buttons };
@@ -5473,16 +5498,16 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     // --- PP2. Panel öffnet ----------------------------------------------------
     const opened = await ppOpenFresh(cdp);
     const two = await cdp.evaluate<{ tabs: string[]; quality: string; qualityWarning: boolean; placeholder: string; send: string; examples: string } | null>(`
-      const root = document.querySelector(".tdcb-prompt");
+      const root = document.querySelector(".okit-prompt-panel-host");
       if (!root) return null;
-      const q = root.querySelector(".tdcb-prompt-quality");
+      const q = root.querySelector(".okit-prompt-panel-quality");
       return {
-        tabs: [...root.querySelectorAll(".okit-hub-tab-label")].map((t) => t.textContent ?? ""),
+        tabs: [...root.querySelectorAll(".okit-hub-tab-label")].map((t) => t.textContent ?? ""),  // seit K9 ohne Tab-Leiste: leer
         quality: q?.textContent ?? "",
         qualityWarning: !!q && q.classList.contains("is-warning"),
-        placeholder: root.querySelector(".tdcb-prompt-input")?.getAttribute("placeholder") ?? "",
-        send: root.querySelector(".tdcb-prompt-send")?.textContent ?? "",
-        examples: root.querySelector(".tdcb-prompt-examples:not(.is-hidden)")?.textContent ?? "",
+        placeholder: root.querySelector(".okit-prompt-panel-input")?.getAttribute("placeholder") ?? "",
+        send: root.querySelector(".okit-prompt-panel-send")?.textContent ?? "",
+        examples: root.querySelector(".okit-prompt-panel-empty:not(.is-hidden)")?.textContent ?? "",
       };
     `);
     if (!opened || two === null) {
@@ -5491,12 +5516,12 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       ppRecord(
         "PP2",
         T.PP2,
-        two.tabs.join("|") === "Prompt|Versions" && two.quality.startsWith("Not measured for this model") && /the one small model tested/.test(two.quality) && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
-        `Tabs ${two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
+        two.tabs.length === 0 && two.quality.startsWith("Not measured for this model") && /the one small model tested/.test(two.quality) && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
+        `Tab-Leiste: ${two.tabs.length === 0 ? "keine (gewollt)" : two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
       );
     }
 
-    if (opened) await bildUndBreite(cdp, "pp2-panel.png", ".tdcb-prompt");
+    if (opened) await bildUndBreite(cdp, "pp2-panel.png", ".okit-prompt-panel-host");
 
     // --- PP3. Erzeugen --------------------------------------------------------
     if (!opened) {
@@ -5504,7 +5529,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     } else {
       await ppType(cdp, PP_CREATE_PROMPT);
       const armed = await cdp.evaluate<boolean>(`
-        const tail = document.querySelector(".tdcb-prompt .okit-stream-tail");
+        const tail = document.querySelector(".okit-prompt-panel-host .okit-stream-tail");
         if (!tail) return false;
         window.__ppTail = [];
         window.__ppObs?.disconnect();
@@ -5516,7 +5541,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         window.__ppObs.observe(tail, { childList: true, characterData: true, subtree: true });
         return true;
       `);
-      const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+      const clicked = await ppClick(cdp, ".okit-prompt-panel-send");
       const run = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
       // Vorschau-Canvas braucht einen Moment nach dem Status.
       const shown = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.colors >= 3, 15_000, 400);
@@ -5549,7 +5574,11 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         editor.setCursor({ line: last, ch: editor.getLine(last).length });
         return true;
       `);
-      const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
+      const snapBeforeInsert = (await ppSnapshotInfo(cdp)).count;
+      // Zustand der Schreibwege vor dem Klick (Entwurfslauf 1: Übernehmen schrieb nichts; Knopf gesperrt? Grund?).
+      const waysBefore = await cdp.evaluate<string>(`return JSON.stringify([...document.querySelectorAll(".okit-prompt-panel-host .okit-prompt-panel-accept")].map((b) => ({ t: b.textContent, disabled: b.disabled, hint: (b.getAttribute("aria-describedby") ? document.getElementById(b.getAttribute("aria-describedby"))?.textContent : "") })));`);
+      console.log(`  PP4 Schreibwege vor dem Klick: ${waysBefore}`);
+      const clicked = await ppClick(cdp, ".okit-prompt-panel-accept");
       const written = await pollState<{ text: string; buffer: string; bufferPath: string }>(
         cdp,
         `
@@ -5567,6 +5596,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         500,
       );
       const after = await ppRead(cdp);
+      ppSnapInsert = { before: snapBeforeInsert, after: (await ppSnapshotInfo(cdp)).count };
+      // PP39: nach dem Übernehmen eines NEUEN Modells arbeitet das Fenster auf dem angelegten Block weiter (K9 `retarget`), statt neu zu beginnen.
+      const targetKind = await cdp.evaluate<string>(`return app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)})[0]?.view?.state?.()?.target?.kind ?? "";`);
+      ppRecord("PP39", T.PP39, written.reached && targetKind === "block" && (after?.target ?? "").startsWith("Edit:"), `Ziel nach dem Übernehmen: Art „${targetKind}“, Anzeige „${after?.target ?? "?"}“ (erwartet Block, „Edit: …“; früher: neu)`);
       const text = written.state?.text ?? "";
       const block = /```shapes\n([\s\S]*?)\n```/.exec(text)?.[1] ?? "";
       ppRecord(
@@ -5606,8 +5639,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       const diffOk = s.diff.some((l) => /^Platte: at/.test(l));
       let applied = false;
       let detail = "";
+      let snapReplace: { before: number; after: number; content: string | null } | null = null;
       if (edit.ready && diffOk && targetOk) {
-        await ppClick(cdp, ".tdcb-prompt-apply");
+        const snapBefore = (await ppSnapshotInfo(cdp)).count;
+        await ppClick(cdp, ".okit-prompt-panel-accept");
         const changed = await pollState<{ text: string }>(
           cdp,
           `const file = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_NOTE_PP_EDIT)}); return { text: file ? await app.vault.read(file) : "" };`,
@@ -5621,10 +5656,23 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const platte = now.find((l) => l.startsWith("box Platte "));
         applied = changed.reached && now.length === before.length && differing.length === 1 && platte !== undefined && platte.includes(" 0.925 ");
         detail = `geänderte Zeilen ${differing.length} (erwartet 1, Länge ${before.length}→${now.length}) · Platte-Zeile „${platte ?? "fehlt"}“`;
+        const snapAfter = await ppSnapshotInfo(cdp);
+        snapReplace = { before: snapBefore, after: snapAfter.count, content: snapAfter.newest };
       } else {
         detail = `Apply nicht gefahren (${edit.ready ? "" : edit.reason}${targetOk ? "" : " · Ziel falsch"}${diffOk ? "" : " · Diff ohne „Platte: at“"})`;
       }
       ppRecord("PP5", T.PP5, applied && targetOk && diffOk, `Ziel „${s.target}“ · Diff ${JSON.stringify(s.diff)} · ${detail}`);
+      // PP34 (K9): vor dem Ersetzen eines Blocks entsteht ein Schnappschuss der GANZEN Notiz; das Einfügen an der Schreibmarke (PP4) legt keinen an.
+      if (snapReplace === null || ppSnapInsert === null) {
+        ppNothing("PP34", T.PP34, "PP4 oder PP5 kam nicht bis zum Übernehmen");
+      } else {
+        ppRecord(
+          "PP34",
+          T.PP34,
+          snapReplace.after === snapReplace.before + 1 && snapReplace.content === editBody && ppSnapInsert.after === ppSnapInsert.before,
+          `Ersetzen (PP5): Stände ${snapReplace.before} → ${snapReplace.after} (erwartet +1), jüngster Stand gleich der ganzen Notiz vor dem Schreiben: ${snapReplace.content === editBody} · Einfügen (PP4): Stände ${ppSnapInsert.before} → ${ppSnapInsert.after} (erwartet gleich)`,
+        );
+      }
     }
 
     // --- PP6. Abbruch ---------------------------------------------------------
@@ -5636,10 +5684,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       sub.hang = true;
       try {
         await ppType(cdp, PP_CREATE_PROMPT);
-        await ppClick(cdp, ".tdcb-prompt-send");
+        await ppClick(cdp, ".okit-prompt-panel-send");
         const streaming = await pollState<PpState>(cdp, PP_READ, (s) => s.tail.length > 0 && s.stopVisible, 15_000, 250);
         await sleepMs(1000);
-        const stopClicked = streaming.reached ? await ppClick(cdp, ".tdcb-prompt-stop") : false;
+        const stopClicked = streaming.reached ? await ppClick(cdp, ".okit-prompt-panel-stop") : false;
         const stopped = await pollState<PpState>(cdp, PP_READ, (s) => s.status === "Stopped." && !s.stopVisible, 10_000, 250);
         const seenAbort = await (async () => {
           const deadline = Date.now() + 8000;
@@ -5674,7 +5722,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         await new Promise((r) => setTimeout(r, 1500));
         return true;
       `);
-      const clicked = await ppClick(cdp, ".tdcb-prompt-apply");
+      const clicked = await ppClick(cdp, ".okit-prompt-panel-accept");
       const refused = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== stale.round?.status, 8000, 250);
       const noteNow = await ppReadNote(cdp, SMOKE_NOTE_PP_STALE);
       ppRecord(
@@ -5698,7 +5746,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const body = view?.state?.().target?.body;
         return typeof body === "string" ? { len: body.length, endsWithNewline: body.endsWith("\\n"), tail: JSON.stringify(body.slice(-8)) } : null;
       `);
-      await ppClick(cdp, ".tdcb-prompt-apply");
+      await ppClick(cdp, ".okit-prompt-panel-accept");
       const outcome = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== blank.round?.status, 10_000, 250);
       await sleepMs(1200);
       const noteNow = await ppReadNote(cdp, SMOKE_NOTE_PP_BLANK);
@@ -5746,7 +5794,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           return leaf?.view?.editor ? leaf.view.editor.getValue() : null;
         `);
         const editorVorher = await readEditor();
-        await ppClick(cdp, ".tdcb-prompt-apply");
+        await ppClick(cdp, ".okit-prompt-panel-accept");
         const outcome = await pollState<PpState>(cdp, PP_READ, (s) => s.status !== "" && s.status !== crlf.round?.status, 10_000, 250);
         // Der Editor schreibt die Platte erst nach Obsidians Speicher-Verzögerung (gemessen: nach 1,5 s noch die alte Platte mit CRLF, der Editor schon geändert):
         // auf die Platte warten, bis sie sich vom Ausgang unterscheidet, statt einen festen Wert zu raten.
@@ -5792,10 +5840,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       // die Statuszeile „Done — …“ (zwei Zeilen im schmalen Panel) ragte aus der Box ueber „Preview of round 1“ (Bild der Modell-Runde Welle 23).
       sub.reasoning = PP_STREAM_REASONING.repeat(8);
       await ppType(cdp, PP_CREATE_PROMPT);
-      const clickedCreate = await ppClick(cdp, ".tdcb-prompt-send");
+      const clickedCreate = await ppClick(cdp, ".okit-prompt-panel-send");
       const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
       await ppType(cdp, PP_REFINE_PROMPT);
-      const clickedRefine = first.reached ? await ppClick(cdp, ".tdcb-prompt-send") : false;
+      const clickedRefine = first.reached ? await ppClick(cdp, ".okit-prompt-panel-send") : false;
       const second = await pollState<PpState>(cdp, PP_READ, (s) => (s.phase === "ok" || s.phase === "error") && s.rounds === 2 && s.diff.length > 0, 40_000, 300);
       sub.reasoning = "";
       await sleepMs(600);
@@ -5813,21 +5861,21 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         sticky: string;
         scrollable: boolean;
       } | null>(`
-        const root = document.querySelector(".tdcb-prompt");
+        const root = document.querySelector(".okit-prompt-panel-host");
         if (!root) return null;
         const r = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
-        const panel = root.querySelector(".okit-hub-panel:not(.is-hidden)");
+        const panel = root;
         const pr = panel.getBoundingClientRect();
         const btn = (cls, name) => { const b = root.querySelector(cls).getBoundingClientRect(); return { name, top: b.top, bottom: b.bottom }; };
         return {
           innerH: innerHeight,
-          buttons: [btn(".tdcb-prompt-apply", "Apply"), btn(".tdcb-prompt-discard", "Discard")],
+          buttons: [btn(".okit-prompt-panel-accept", "Apply"), btn(".okit-prompt-panel-discard", "Discard")],
           panel: { top: pr.top, bottom: pr.bottom },
-          statusRect: r(root.querySelector(".tdcb-prompt-status")),
-          captionRect: r(root.querySelector(".tdcb-prompt-preview-caption")),
-          streamRect: r(root.querySelector(".tdcb-prompt-stream")),
-          streamH: root.querySelector(".tdcb-prompt-stream").getBoundingClientRect().height,
-          sticky: getComputedStyle(root.querySelector(".tdcb-prompt-end")).position,
+          statusRect: r(root.querySelector(".okit-prompt-panel-status")),
+          captionRect: r(root.querySelector(".okit-prompt-panel-preview-caption")),
+          streamRect: r(root.querySelector(".okit-prompt-panel-stream")),
+          streamH: root.querySelector(".okit-prompt-panel-stream").getBoundingClientRect().height,
+          sticky: getComputedStyle(root.querySelector(".okit-prompt-panel-end")).position,
           scrollable: panel.scrollHeight > panel.clientHeight + 1,
         };
       `);
@@ -5836,8 +5884,8 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       if (shotDir11 && geo !== null) {
         const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
         // Die Stelle zeigen, um die es geht: Statuszeile und Beschriftung in der Mitte des (scrollenden) Rumpfs.
-        await cdp.evaluate(`document.querySelector(".tdcb-prompt .tdcb-prompt-status")?.scrollIntoView({ block: "center" }); await new Promise((r) => setTimeout(r, 400)); return true;`);
-        const box = await boxOf(cdp, ".tdcb-prompt", 4);
+        await cdp.evaluate(`document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-status")?.scrollIntoView({ block: "center" }); await new Promise((r) => setTimeout(r, 400)); return true;`);
+        const box = await boxOf(cdp, ".okit-prompt-panel-host", 4);
         if (box) { mkdirSync(shotDir11, { recursive: true }); writeFileSync(join(shotDir11, "pp11-endlage.png"), await capture(cdp, box, 2)); }
       }
       if (sizeBefore) await cdp.evaluate(`const w = window.require("electron").remote.getCurrentWindow(); w.setSize(${sizeBefore[0] ?? 1024}, ${sizeBefore[1] ?? 800}); await new Promise((r) => setTimeout(r, 700)); return true;`).catch(() => undefined);
@@ -5862,7 +5910,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
 
     // --- PP13–PP17. Stream-Bereich im Prompt-Panel: Folge-Regel, Kontrolle, Denkblock live, Wiederaufnahme --------------------
     // Gemessen mit `messeFolge` der Bruecke (README § Folge-Messung): der scrollende Rumpf (`.okit-stream-body`) ist durch
-    // `.tdcb-prompt-stream .okit-stream-body { max-height: 14em }` begrenzt. Die Gueltigkeit steht im Urteil der Bruecke (Ueberlauf >= 80 px, mindestens
+    // `.okit-prompt-panel-stream .okit-stream-body { max-height: 14em }` begrenzt. Die Gueltigkeit steht im Urteil der Bruecke (Ueberlauf >= 80 px, mindestens
     // 3 Staende, Vorbedingung „Bereich folgte vor der Stoerung“); sonst „nichts gemessen“ (CORE-TEST-22).
     {
       const namen = { PP14: T.PP14, PP16: T.PP16, PP13: T.PP13, PP17: T.PP17 };
@@ -5924,16 +5972,16 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       } else {
         await ppType(cdp, PP_CREATE_PROMPT);
         sub.queue({ stuecke: [GEDANKE.slice(0, 20), GEDANKE.slice(20) + "<channel|>", antwort.slice(0, dritt), antwort.slice(dritt, 2 * dritt), antwort.slice(2 * dritt)], takt: 700 });
-        const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+        const clicked = await ppClick(cdp, ".okit-prompt-panel-send");
         const mid = await pollUntil<string>(cdp, `
-          const t = document.querySelector(".tdcb-prompt .okit-stream-tail")?.textContent ?? "";
+          const t = document.querySelector(".okit-prompt-panel-host .okit-stream-tail")?.textContent ?? "";
           return t.includes('"parts"') && !t.includes('"Teil-6"') ? t : null;`, 20_000, 50);
-        const reasoning = await cdp.evaluate<string>(`return document.querySelector(".tdcb-prompt .okit-stream-reasoning > pre")?.textContent ?? "";`);
+        const reasoning = await cdp.evaluate<string>(`return document.querySelector(".okit-prompt-panel-host .okit-stream-reasoning > pre")?.textContent ?? "";`);
         // Sichtbare Folge (Regel 12): mit SMOKE_SHOT_DIR schreibt der Punkt den Antwortbereich mit dem Denkblock als PNG.
         const shotDir = process.env.SMOKE_SHOT_DIR;
         if (shotDir && typeof mid === "string") {
           const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
-          const box = await boxOf(cdp, ".tdcb-prompt .tdcb-prompt-stream", 12);
+          const box = await boxOf(cdp, ".okit-prompt-panel-host .okit-prompt-panel-stream", 12);
           if (box) { mkdirSync(shotDir, { recursive: true }); writeFileSync(join(shotDir, "pp18-gemma-denkblock.png"), await capture(cdp, box, 2)); }
         }
         const run = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
@@ -5962,9 +6010,9 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       } else {
         await ppType(cdp, PP_CREATE_PROMPT);
         sub.queue({ stuecke: [antwort.slice(0, haelfte), LANG, antwort.slice(haelfte)], takt: 900 });
-        const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+        const clicked = await ppClick(cdp, ".okit-prompt-panel-send");
         const wide = await pollUntil<{ over: number; scrollX: number; worst: string }>(cdp, `
-          const stream = document.querySelector(".tdcb-prompt .tdcb-prompt-stream");
+          const stream = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-stream");
           const tail = stream?.querySelector(".okit-stream-tail");
           if (!stream || !tail || !(tail.textContent || "").includes(${JSON.stringify(LANG)})) return null;
           const sr = stream.getBoundingClientRect();
@@ -5979,7 +6027,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const shotDir19 = process.env.SMOKE_SHOT_DIR;
         if (shotDir19 && wide !== null) {
           const { boxOf, capture } = await import("../../tools/obsidian-cdp/shot.js");
-          const box = await boxOf(cdp, ".tdcb-prompt .tdcb-prompt-stream", 12);
+          const box = await boxOf(cdp, ".okit-prompt-panel-host .okit-prompt-panel-stream", 12);
           if (box) { mkdirSync(shotDir19, { recursive: true }); writeFileSync(join(shotDir19, "pp19-lange-zeile.png"), await capture(cdp, box, 2)); }
         }
         await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 40_000, 300);
@@ -5998,13 +6046,13 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       if (!(await ppOpenFresh(cdp))) {
         ppNothing("PP20", T.PP20, "das Panel öffnete nicht");
       } else {
-        const vorher = await cdp.evaluate<number>(`return document.querySelectorAll(".tdcb-prompt .okit-stream-reasoning-copy").length;`);
+        const vorher = await cdp.evaluate<number>(`return document.querySelectorAll(".okit-prompt-panel-host .okit-stream-reasoning-copy").length;`);
         sub.reasoning = DENKEN;
         await ppType(cdp, PP_CREATE_PROMPT);
-        const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+        const clicked = await ppClick(cdp, ".okit-prompt-panel-send");
         // Gueltig ist die Messung, sobald der Denk-Text im Block steht; fehlt der Knopf DANN, ist das der Befund (rot), nicht „nichts gemessen“.
         const knopf = await pollUntil<{ label: string | null; offen: boolean }>(cdp, `
-          const d = document.querySelector(".tdcb-prompt .okit-stream-reasoning");
+          const d = document.querySelector(".okit-prompt-panel-host .okit-stream-reasoning");
           if (!d || !(d.querySelector("pre")?.textContent ?? "").includes(${JSON.stringify(MARKE)})) return null;
           const b = d.querySelector(".okit-stream-reasoning-copy");
           return { label: b ? (b.getAttribute("aria-label") ?? "") : null, offen: d.open };`, 20_000, 100);
@@ -6018,13 +6066,13 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           // Quittung). Neu: aria-label ist Pflicht; die Gegenprobe steht als PP26. Lokal bleibt die Vorbedingung „vor dem Denken kein Knopf“.
           // Das Hauptfenster muss das aktive Dokument sein: gemessen 2026-10-23, `activeDocument !== document` ließ die Aufzeichnung an `navigator.clipboard` ins Leere laufen (0× writeText bei quittierendem Knopf).
           await schliesseEinstellungen(cdp);
-          const u = await messeDenkblockKopierbar(cdp, { block: ".tdcb-prompt .okit-stream-reasoning", knopf: ".tdcb-prompt .okit-stream-reasoning-copy", enthaelt: MARKE, erwartetKnopf: true });
+          const u = await messeDenkblockKopierbar(cdp, { block: ".okit-prompt-panel-host .okit-stream-reasoning", knopf: ".okit-prompt-panel-host .okit-stream-reasoning-copy", enthaelt: MARKE, erwartetKnopf: true });
           if (u.kopie.urteil !== "gruen") {
             const diag = await cdp.evaluate<string>(`
               const c = navigator.clipboard;
               const knoepfe = document.querySelectorAll(".okit-stream-reasoning-copy").length;
               const bloecke = document.querySelectorAll(".okit-stream-reasoning").length;
-              const k = document.querySelector(".tdcb-prompt .okit-stream-reasoning-copy");
+              const k = document.querySelector(".okit-prompt-panel-host .okit-stream-reasoning-copy");
               return JSON.stringify({ eigene: Object.getOwnPropertyNames(c), activeGleich: typeof activeWindow !== "undefined" && activeWindow.navigator.clipboard === c, knoepfe, bloecke, knopfImPanel: !!k, docGleich: typeof activeDocument !== "undefined" && activeDocument === document });`).catch((e: Error) => `Diagnose fehlgeschlagen: ${e.message}`);
             u.kopie = { urteil: u.kopie.urteil, detail: `${u.kopie.detail} · Diagnose ${diag}` };
           }
@@ -6049,25 +6097,25 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       if (!(await ppOpenFresh(cdp))) {
         for (const id of ["PP21", "PP22", "PP23", "PP24", "PP25"] as const) ppNothing(id, T[id], "das Panel öffnete nicht");
       } else {
-        const FELD = ".tdcb-prompt-input";
+        const FELD = ".okit-prompt-panel-input";
         pflicht("PP21", await messeFokusErhalt(cdp, { selector: FELD }));
         pflicht("PP22", await gegenprobeFokus(cdp, { selector: FELD }));
         await ppType(cdp, PP_CREATE_PROMPT);
-        await ppClick(cdp, ".tdcb-prompt-send");
+        await ppClick(cdp, ".okit-prompt-panel-send");
         const runde = await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" && st.rounds === 1, 40_000, 300);
         if (!runde.reached) {
           for (const id of ["PP23", "PP24", "PP25"] as const) ppNothing(id, T[id], "die Vorbedingung (eine fertige Runde im Panel) kam nicht zustande");
         } else {
-          await bildUndBreite(cdp, "pp23-panel-mit-runde.png", ".tdcb-prompt");
-          const rumpf = ".tdcb-prompt .okit-hub-panel:not(.is-hidden)";
+          await bildUndBreite(cdp, "pp23-panel-mit-runde.png", ".okit-prompt-panel-host");
+          const rumpf = ".okit-prompt-panel-host";
           const opts = {
-            selektoren: [".tdcb-prompt-input", ".tdcb-prompt-send", ".tdcb-prompt-apply", ".tdcb-prompt-discard", ".tdcb-prompt-new"],
+            selektoren: [".okit-prompt-panel-input", ".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard", ".okit-prompt-panel-new"],
             fuelle: { in: ".tdcb-prompt-diff" },
             ueberlauf: rumpf,
-            erforderlich: [".tdcb-prompt-input", ".tdcb-prompt-send", ".tdcb-prompt-apply", ".tdcb-prompt-discard"],
+            erforderlich: [".okit-prompt-panel-input", ".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard"],
           };
           pflicht("PP23", await messeErreichbarkeit(cdp, opts));
-          pflicht("PP24", await mitHoehe<PflichtTeilurteil>(cdp, { element: ".workspace-leaf", enthaelt: ".tdcb-prompt", hoehe: 420 }, () => messeErreichbarkeit(cdp, opts)));
+          pflicht("PP24", await mitHoehe<PflichtTeilurteil>(cdp, { element: ".workspace-leaf", enthaelt: ".okit-prompt-panel-host", hoehe: 420 }, () => messeErreichbarkeit(cdp, opts)));
           const gegen = await gegenprobeErreichbarkeit(cdp, { selektoren: opts.selektoren, rollbereich: rumpf, fuelle: opts.fuelle });
           // Gemessen (Welle 24): in diesem Layout sitzen Eingabe, Senden und Neu oben im Rumpf und Apply/Discard in der Knopfzeile, die unten
           // klebt (`position: sticky`). Ohne Rollbalken bleibt jedes erreichbar, die Gegenprobe kann hier nie rot werden — „nicht anwendbar“ (skipped),
@@ -6085,7 +6133,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
     {
       const readBar = (): Promise<{ bars: number; options: string[]; value: string; label: string | null; announce: string; selDisabled: boolean; refreshDisabled: boolean; toggles: number; toggleInBar: number }> =>
         cdp.evaluate(`
-          const root = document.querySelector(".tdcb-prompt");
+          const root = document.querySelector(".okit-prompt-panel-host");
           const bars = root ? [...root.querySelectorAll(".okit-model-bar")] : [];
           const sel = bars[0]?.querySelector(".okit-model-bar-select");
           return {
@@ -6102,7 +6150,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         `);
       const choose = (value: string): Promise<boolean> =>
         cdp.evaluate<boolean>(`
-          const sel = document.querySelector(".tdcb-prompt .okit-model-bar .okit-model-bar-select");
+          const sel = document.querySelector(".okit-prompt-panel-host .okit-model-bar .okit-model-bar-select");
           if (!sel) return false;
           sel.value = ${JSON.stringify(value)};
           sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -6117,9 +6165,9 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         } else {
           // PP27 — vor dem Klick gibt es keine Ansage (Gegenprobe: die Zahl kommt vom Klick, nicht von einem alten Stand).
           const before = await readBar();
-          await pollState(cdp, `const s = document.querySelector(".tdcb-prompt .okit-model-bar .okit-model-bar-select"); return { n: s ? [...s.options].filter((o) => (o.textContent ?? "").startsWith("smoke-") || (o.textContent ?? "").startsWith("qwen3.8-smoke")).length : 0 };`, (x: { n: number }) => x.n >= 2, 8_000, 250);
+          await pollState(cdp, `const s = document.querySelector(".okit-prompt-panel-host .okit-model-bar .okit-model-bar-select"); return { n: s ? [...s.options].filter((o) => (o.textContent ?? "").startsWith("smoke-") || (o.textContent ?? "").startsWith("qwen3.8-smoke")).length : 0 };`, (x: { n: number }) => x.n >= 2, 8_000, 250);
           await ppClick(cdp, ".okit-model-bar-refresh");
-          await pollState(cdp, `const z = document.querySelector(".tdcb-prompt .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models? loaded/.test(x.t), 6_000, 250);
+          await pollState(cdp, `const z = document.querySelector(".okit-prompt-panel-host .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models? loaded/.test(x.t), 6_000, 250);
           const bar = await readBar();
           const modelOptions = bar.options.filter((o) => o === PP_MODEL || o === PP_MODEL_B);
           ppRecord(
@@ -6132,14 +6180,14 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           // PP28 — Anfrage mit dem Zeilen-Modell A, Wechsel auf B, Anfrage mit B (der Stub schneidet den Body mit).
           const n0 = sub.bodies.length;
           await ppType(cdp, PP_CREATE_PROMPT);
-          await ppClick(cdp, ".tdcb-prompt-send");
+          await ppClick(cdp, ".okit-prompt-panel-send");
           await pollState<PpState>(cdp, PP_READ, (st) => st.phase === "ok" || st.phase === "error", 30_000, 400);
           const modelA = (sub.bodies[n0] as { model?: string } | undefined)?.model;
           await choose(PP_MODEL_B);
           const inUse = await pollState(cdp, `const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return { m: p.llm.modelInUse() };`, (x: { m: string }) => x.m === PP_MODEL_B, 6_000, 250);
           const n1 = sub.bodies.length;
           await ppType(cdp, PP_CREATE_PROMPT);
-          await ppClick(cdp, ".tdcb-prompt-send");
+          await ppClick(cdp, ".okit-prompt-panel-send");
           await pollState<PpState>(cdp, PP_READ, (st) => (st.phase === "ok" || st.phase === "error") && sub.bodies.length > n1, 30_000, 400);
           const modelB = (sub.bodies[n1] as { model?: string } | undefined)?.model;
           ppRecord(
@@ -6154,7 +6202,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           const level0 = await cdp.evaluate<string>(`const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return p.settings.request.thinking?.structured ?? "off";`);
           // Seit obsidian-kit 0.88.0 ist die Denkstufe in der Zeile immer ein Dropdown mit den Stufen des Modells: eine andere Stufe wählen und `change` auslösen.
           const clickedToggle = await cdp.evaluate<boolean>(`
-            const sel = document.querySelector(".tdcb-prompt .okit-model-bar .okit-thinking-control select:not(.is-measuring)");
+            const sel = document.querySelector(".okit-prompt-panel-host .okit-model-bar .okit-thinking-control select:not(.is-measuring)");
             if (!sel || sel.disabled) return false;
             const andere = [...sel.options].map((o) => o.value).find((v) => v !== sel.value);
             if (andere === undefined) return false;
@@ -6165,7 +6213,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           const level1 = (await pollState(cdp, `const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; return { l: p.settings.request.thinking?.structured ?? "off" };`, (x: { l: string }) => x.l !== level0, 5_000, 250)).state?.l;
           const n2 = sub.bodies.length;
           await ppType(cdp, PP_CREATE_PROMPT);
-          await ppClick(cdp, ".tdcb-prompt-send");
+          await ppClick(cdp, ".okit-prompt-panel-send");
           await pollState<PpState>(cdp, PP_READ, (st) => (st.phase === "ok" || st.phase === "error") && sub.bodies.length > n2, 30_000, 400);
           const bodyOff = withoutMessages(sub.bodies[n1]);
           const bodyOn = withoutMessages(sub.bodies[n2]);
@@ -6181,10 +6229,10 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           sub.hang = true;
           try {
             await ppType(cdp, PP_CREATE_PROMPT);
-            await ppClick(cdp, ".tdcb-prompt-send");
+            await ppClick(cdp, ".okit-prompt-panel-send");
             const running = await pollState<PpState>(cdp, PP_READ, (st) => st.tail.length > 0 && st.stopVisible, 15_000, 250);
             const locked = await readBar();
-            if (running.reached) await ppClick(cdp, ".tdcb-prompt-stop");
+            if (running.reached) await ppClick(cdp, ".okit-prompt-panel-stop");
             await pollState<PpState>(cdp, PP_READ, (st) => !st.stopVisible, 10_000, 250);
             const after = await readBar();
             ppRecord(
@@ -6205,6 +6253,230 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           await p.llm.setModel(${JSON.stringify(PP_MODEL)});
           return true;
         `).catch(() => undefined);
+      }
+    }
+
+
+    // --- PP32/PP33. Schließen mit Runden, schnelle Rundenwahl (K9 Etappe 3, Task 3.1 Step 2) ---------------------------
+    // Am alten Stand (cd838ae) gemessen, am neuen Stand dieselben Punkte: PP32 erwartet die Rückfrage beim Schließen (Station 8),
+    // PP33 die zuletzt gewählte Vorschau. Beide sind am alten Stand rot, wenn die Lesemessung des Plans stimmt.
+    {
+      const roundsOf = (c: Cdp): Promise<number> => ppRead(c).then((s) => s?.rounds ?? 0);
+      const opened32 = await ppOpenFresh(cdp);
+      let made = false;
+      if (opened32) {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        await ppClick(cdp, ".okit-prompt-panel-send");
+        made = (await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1, 40_000, 300)).reached;
+      }
+      if (!made) {
+        ppNothing("PP32", T.PP32, "keine Runde im Panel (Panel öffnete nicht oder Erzeugen schlug fehl)");
+      } else {
+        const dialogOf = (): Promise<{ text: string; buttons: string[] }> =>
+          cdp.evaluate(`
+            const modal = [...document.querySelectorAll(".modal")].find((m) => m.querySelector("button"));
+            return { text: modal?.textContent?.trim() ?? "", buttons: [...(modal?.querySelectorAll("button") ?? [])].map((b) => (b.textContent ?? "").trim()) };
+          `);
+        // 1. Schließen wie ein Nutzer (Blatt lösen) und nach der Rückfrage sehen.
+        await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); return true;`);
+        await sleepMs(1500);
+        const dlg1 = await dialogOf();
+        const asked = dlg1.buttons.length > 0;
+        // 2. Escape (anderer Ausgang): behält.
+        const esc = asked ? await schliesseDialog(cdp, { fristMs: 3000 }) : null;
+        await sleepMs(500);
+        await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
+        await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "", 10_000, 250);
+        const keptRounds = await roundsOf(cdp);
+        // 3. Schließen und „Verwerfen“ klicken.
+        await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); return true;`);
+        await sleepMs(1500);
+        const dlg2 = await dialogOf();
+        const clickedDiscard = await cdp.evaluate<boolean>(`
+          const b = [...document.querySelectorAll(".modal button")].find((x) => /^(discard|verwerfen)$/i.test((x.textContent ?? "").trim()));
+          if (!b) return false;
+          b.click();
+          return true;
+        `);
+        await sleepMs(800);
+        await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
+        await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "", 10_000, 250);
+        const afterDiscard = await roundsOf(cdp);
+        ppRecord(
+          "PP32",
+          T.PP32,
+          asked && esc !== null && esc.geschlossen && keptRounds === 1 && dlg2.buttons.length > 0 && clickedDiscard && afterDiscard === 0,
+          `Rückfrage nach dem Schließen: ${asked ? `ja „${dlg1.text.slice(0, 70)}“ [${dlg1.buttons.join(", ")}]` : "NEIN (kein Dialog)"} · Escape ${esc ? (esc.geschlossen ? "schloss den Dialog" : "ließ ihn offen") : "nicht versucht"} → Runden nach Wiederöffnen: ${keptRounds} (erwartet 1) · zweites Schließen fragt: ${dlg2.buttons.length > 0 ? "ja" : "NEIN"}, Verwerfen geklickt: ${clickedDiscard} → Runden danach: ${afterDiscard} (erwartet 0)`,
+        );
+      }
+
+      // PP33: zwei Runden, dann die Vorschau von Runde 1 und 2 als Bildsignatur (langsam gewählt), dann schnell 1→2 und die Signatur am Ende.
+      const opened33 = await ppOpenFresh(cdp);
+      let two = false;
+      if (opened33) {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        await ppClick(cdp, ".okit-prompt-panel-send");
+        const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
+        if (first.reached) {
+          await ppType(cdp, PP_REFINE_PROMPT);
+          await ppClick(cdp, ".okit-prompt-panel-send");
+          two = (await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 2 && s.diff.length > 0, 40_000, 300)).reached;
+        }
+      }
+      if (!two) {
+        ppNothing("PP33", T.PP33, "zwei Runden waren nicht herzustellen");
+      } else {
+        const SIG = `${SAMPLER} const c = document.querySelector(".okit-prompt-panel-preview canvas, .okit-prompt-panel-host canvas"); const s = c ? sample(c) : null; return s ? s.hash + ":" + s.colors : null;`;
+        const pickRow = (n: number): string => `{ const rows = [...document.querySelectorAll(".okit-vlist-row")]; rows[${n}]?.click(); }`;
+        const settleSig = async (): Promise<string | null> => {
+          let last: string | null = null;
+          let same = 0;
+          for (let i = 0; i < 20 && same < 3; i++) {
+            await sleepMs(400);
+            const now = await cdp.evaluate<string | null>(SIG);
+            same = now !== null && now === last ? same + 1 : 0;
+            last = now;
+          }
+          return last;
+        };
+        await cdp.evaluate(`${pickRow(0)} return true;`);
+        const ref1 = await settleSig();
+        await cdp.evaluate(`${pickRow(1)} return true;`);
+        const ref2 = await settleSig();
+        const rowCount = await cdp.evaluate<number>(`return document.querySelectorAll(".okit-vlist-row").length;`);
+        const runs: { sig: string | null; caption: string }[] = [];
+        for (let i = 0; i < 6; i++) {
+          // 1→2 in einem Zug (zwei Klicks im selben Tick): der Zeichner für Runde 1 läuft noch, wenn der für Runde 2 beginnt.
+          await cdp.evaluate(`${pickRow(0)} ${pickRow(1)} return true;`);
+          const sig = await settleSig();
+          const caption = await cdp.evaluate<string>(`return document.querySelector(".okit-prompt-panel-preview-caption")?.textContent ?? "";`);
+          runs.push({ sig, caption });
+          // Gegenrichtung zur nächsten Runde (2→1 schnell), damit jede Runde von der anderen Seite beginnt.
+          await cdp.evaluate(`${pickRow(1)} ${pickRow(0)} return true;`);
+          await settleSig();
+        }
+        const wrong = runs.filter((r) => r.sig !== ref2).length;
+        ppRecord(
+          "PP33",
+          T.PP33,
+          ref1 !== null && ref2 !== null && ref1 !== ref2 && rowCount >= 2 && wrong === 0,
+          `Zeilen der Rundenliste ${rowCount} · Bildsignatur Runde 1 ${ref1 ?? "?"}, Runde 2 ${ref2 ?? "?"}${ref1 === ref2 ? " (GLEICH: die Probe unterscheidet die Runden nicht)" : ""} · schnelle Wahl 1→2: ${runs.length - wrong} von ${runs.length} Läufen enden auf Runde 2 (${runs.map((r) => (r.sig === ref2 ? "2" : r.sig === ref1 ? "1" : "?")).join("")}), Beschriftung „${runs[0]?.caption ?? ""}“`,
+        );
+      }
+    }
+
+
+    // --- PP36/PP38/PP40/PP37. Sperren im Lauf, Lauf ohne Fenster, Statusleiste, Sperrgrund (K9 Etappe 3) ----------------
+    {
+      const barEntry = (): Promise<string | null> => cdp.evaluate<string | null>(`const e = document.querySelector(".status-bar .okit-prompt-panel-statusbar"); return e && !e.classList.contains("is-hidden") && e.style.display !== "none" ? (e.textContent ?? "") : null;`);
+      const reader = (extra: string): Promise<Record<string, unknown> | null> => cdp.evaluate(`
+        const root = document.querySelector(".okit-prompt-panel-host");
+        if (!root) return null;
+        const accept = [...root.querySelectorAll(".okit-prompt-panel-accept")];
+        const view = app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)})[0]?.view;
+        return { send: root.querySelector(".okit-prompt-panel-send")?.disabled, neu: root.querySelector(".okit-prompt-panel-new")?.disabled, accept: accept.map((b) => b.disabled), tail: root.querySelector(".okit-stream-tail")?.textContent ?? "", input: root.querySelector(".okit-prompt-panel-input")?.value ?? "", active: view?.state?.()?.rounds?.active ?? -1, rounds: view?.state?.()?.rounds?.rounds?.length ?? 0, ${extra} };
+      `);
+      // Zwei Runden vorbereiten, dann die dritte langsam fahren.
+      let ready = await ppOpenFresh(cdp);
+      if (ready) {
+        await ppType(cdp, PP_CREATE_PROMPT);
+        await ppClick(cdp, ".okit-prompt-panel-send");
+        ready = (await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1, 40_000, 300)).reached;
+      }
+      if (ready) {
+        await ppType(cdp, PP_REFINE_PROMPT);
+        await ppClick(cdp, ".okit-prompt-panel-send");
+        ready = (await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 2, 40_000, 300)).reached;
+      }
+      if (!ready) {
+        for (const id of ["PP36", "PP38", "PP40", "PP37"] as const) ppNothing(id, T[id], "zwei Runden waren nicht herzustellen");
+      } else {
+        // PP36, Lauf: die dritte Runde.
+        const requestsBefore = sub.requests.length;
+        await ppType(cdp, "Make the legs 5 cm thicker.");
+        await ppClick(cdp, ".okit-prompt-panel-send");
+        const running = await pollState<PpState>(cdp, PP_READ, (s) => s.stopVisible && s.tail.length > 0, 15_000, 150);
+        const during = running.reached ? await reader("") : null;
+        // Zweites Senden (Strg+Enter im Feld), Neu und Rundenwahl: alle wirkungslos im Lauf.
+        await cdp.evaluate(`const ta = document.querySelector(".okit-prompt-panel-input"); ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })); return true;`);
+        await cdp.evaluate(`{ const rows = [...document.querySelectorAll(".okit-vlist-row")]; rows[0]?.click(); }  document.querySelector(".okit-prompt-panel-new")?.click(); return true;`);
+        await sleepMs(300);
+        const duringAfter = await reader("");
+        const finished = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 3, 40_000, 300);
+        await sleepMs(500);
+        const after = await reader("");
+        // Abbruch: der Text bleibt im Feld.
+        await ppType(cdp, "Remove the legs.");
+        await ppClick(cdp, ".okit-prompt-panel-send");
+        await pollState<PpState>(cdp, PP_READ, (s) => s.stopVisible, 10_000, 100);
+        await ppClick(cdp, ".okit-prompt-panel-stop");
+        await sleepMs(600);
+        const aborted = await reader("");
+        const extraRequests = sub.requests.length - requestsBefore;
+        const locks = during !== null && during["send"] === true && during["neu"] === true && (during["accept"] as boolean[]).every(Boolean) && String(during["tail"]).length > 0;
+        const unchanged = duringAfter !== null && duringAfter["active"] === 2 && duringAfter["rounds"] === 2;
+        ppRecord(
+          "PP36",
+          T.PP36,
+          locks && unchanged && finished.reached && after !== null && after["tail"] === "" && after["input"] === "" && aborted !== null && aborted["input"] === "Remove the legs." && extraRequests === 2,
+          `im Lauf: Senden/Neu/Übernehmen gesperrt ${locks} · nach Strg+Enter, Klick auf Runde 1 und Neu: Runden ${duringAfter?.["rounds"] ?? "?"}, aktiv ${duringAfter?.["active"] ?? "?"} (erwartet 2 Runden, aktiv 2) · Anfragen an den Ersatz: ${extraRequests} (erwartet 2: dritte Runde und der Abbruch-Lauf) · nach Erfolg: Rohantwort „${String(after?.["tail"] ?? "?").slice(0, 20)}“ (erwartet leer), Feld „${String(after?.["input"] ?? "?")}“ (erwartet leer) · nach Abbruch: Feld „${String(aborted?.["input"] ?? "?")}“ (erwartet der Text)`,
+        );
+
+        // PP38: ein Lauf ohne Fenster. Frisches Fenster (Runden verwerfen über den Halter), Lauf starten, Fenster schließen.
+        await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); const h = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].promptHost; h.startNew(); h.setDraft(""); return true;`);
+        await sleepMs(400);
+        await clearNotices(cdp);
+        const closedBefore38 = sub.clientClosed;
+        await cdp.evaluate(`app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].promptHost.start(${JSON.stringify(PP_CREATE_PROMPT)}); return true;`);
+        await sleepMs(700);
+        const entryRunning = await barEntry();
+        await pollState<{ running: boolean }>(cdp, `return { running: app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].promptHost.running() };`, (x) => !x.running, 40_000, 400);
+        await sleepMs(500);
+        const entryWaiting = await barEntry();
+        const noticeText = await notices(cdp);
+        await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
+        const reopened = await pollState<PpState>(cdp, PP_READ, (s) => s.rounds === 1 && s.previewVisible, 15_000, 300);
+        await sleepMs(500);
+        const entryAfter = await barEntry();
+        ppRecord(
+          "PP38",
+          T.PP38,
+          entryRunning !== null && /running|läuft/i.test(entryRunning) && sub.clientClosed === closedBefore38 && entryWaiting !== null && /waiting|wartet/i.test(entryWaiting) && /ready|liegt vor/i.test(noticeText) && reopened.reached && entryAfter === null,
+          `Eintrag im Lauf: „${entryRunning ?? "keiner"}“ · vom Server geschlossene Verbindungen: ${sub.clientClosed - closedBefore38} (erwartet 0) · Eintrag danach: „${entryWaiting ?? "keiner"}“ · Meldung: ${JSON.stringify(noticeText.slice(0, 120))} · beim Öffnen: ${reopened.reached ? "Runde und Vorschau da" : "keine Runde"}, Eintrag ${entryAfter === null ? "weg" : `„${entryAfter}“`}`,
+        );
+
+        // PP40: Schalter aus.
+        await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); const p = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]; p.promptHost.startNew(); p.promptHost.setStatusBarVisible(false); p.promptHost.start(${JSON.stringify(PP_CREATE_PROMPT)}); return true;`);
+        await sleepMs(700);
+        const offRunning = await barEntry();
+        await pollState<{ running: boolean }>(cdp, `return { running: app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].promptHost.running() };`, (x) => !x.running, 40_000, 400);
+        const offDone = await barEntry();
+        await cdp.evaluate(`app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].promptHost.setStatusBarVisible(true); return true;`);
+        await sleepMs(300);
+        const onAgain = await barEntry();
+        ppRecord("PP40", T.PP40, offRunning === null && offDone === null && onAgain !== null && /waiting|wartet/i.test(onAgain), `Schalter aus: im Lauf „${offRunning ?? "kein Eintrag"}“, nach dem Lauf „${offDone ?? "kein Eintrag"}“ · wieder an: „${onAgain ?? "keiner"}“`);
+
+        // PP37: Sperrgrund. Das Fenster öffnen (die Runde wartet), alle Notizen schließen, dann Quellmodus und Lesemodus.
+        await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); app.workspace.detachLeavesOfType("markdown"); return true;`);
+        await sleepMs(1200);
+        const hintRead = (): Promise<{ disabled: boolean; hint: string }> => cdp.evaluate(`
+          const b = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-accept");
+          const id = b?.getAttribute("aria-describedby");
+          return { disabled: !!b?.disabled, hint: id ? (document.getElementById(id)?.textContent ?? "") : "" };
+        `);
+        const none = await hintRead();
+        await openNote(cdp, SMOKE_NOTE_PP_BLANK, "# PP37 (automatisch erzeugt, wird nach dem Lauf gelöscht)\n", "source");
+        await sleepMs(900);
+        const source = await hintRead();
+        await openNote(cdp, SMOKE_NOTE_PP_BLANK, "# PP37 (automatisch erzeugt, wird nach dem Lauf gelöscht)\n", "preview");
+        await sleepMs(900);
+        const reading = await hintRead();
+        ppRecord(
+          "PP37",
+          T.PP37,
+          none.disabled && none.hint.includes(PP37_NO_NOTE) && !source.disabled && source.hint === "" && reading.disabled && reading.hint.includes(PP37_READING),
+          `ohne Notiz: gesperrt ${none.disabled}, Grund „${none.hint}“ · Quellmodus: gesperrt ${source.disabled}, Grund „${source.hint}“ (erwartet frei, leer) · Lesemodus: gesperrt ${reading.disabled}, Grund „${reading.hint}“`,
+        );
       }
     }
 
@@ -6353,7 +6625,7 @@ async function sectionClaude(cdp: Cdp, _model: string): Promise<void> {
       nothing("CL4", "das Panel öffnete nicht");
     } else {
       const liesZeile = (): Promise<{ text: string; warn: boolean }> => cdp.evaluate(`
-        const q = document.querySelector(".tdcb-prompt .tdcb-prompt-quality");
+        const q = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-quality");
         return { text: q?.textContent ?? "", warn: !!q && q.classList.contains("is-warning") };`);
       const sofort = await liesZeile();
       await new Promise((r) => setTimeout(r, 1500));
@@ -6369,9 +6641,9 @@ async function sectionClaude(cdp: Cdp, _model: string): Promise<void> {
       return;
     }
     await ppType(cdp, PP_CREATE_PROMPT);
-    const clicked = await ppClick(cdp, ".tdcb-prompt-send");
+    const clicked = await ppClick(cdp, ".okit-prompt-panel-send");
     const imBlock = await pollUntil<string>(cdp, `
-      const pre = document.querySelector(".tdcb-prompt .okit-stream-reasoning > pre");
+      const pre = document.querySelector(".okit-prompt-panel-host .okit-stream-reasoning > pre");
       return pre && (pre.textContent ?? "").includes("Maße") ? pre.textContent : null;`, 30_000, 100);
     const lauf = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
     const anfragen = stub.anfragen().filter((a) => a.route === "messages");
@@ -6392,7 +6664,7 @@ async function sectionClaude(cdp: Cdp, _model: string): Promise<void> {
     }
     stub.antworten([{ text: ppStreamAnswer(6), laenge: 40, model: CL_MODELL, stromFehler: { nach: 3, typ: "overloaded_error", meldung: "Overloaded" } }]);
     await ppType(cdp, PP_CREATE_PROMPT);
-    const geklickt = await ppClick(cdp, ".tdcb-prompt-send");
+    const geklickt = await ppClick(cdp, ".okit-prompt-panel-send");
     const fertig = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" || s.phase === "error", 40_000, 300);
     const st = fertig.state;
     rec("CL3", geklickt && st?.phase === "error" && /overload/i.test(st.status) && st.tail.includes(`"parts"`),
