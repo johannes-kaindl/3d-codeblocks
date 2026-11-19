@@ -53,6 +53,7 @@ import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connec
 import {
   AbbruchAusnahme,
   Cdp,
+  attachTo,
   beimAbbruch,
   clearNotices,
   bereiteInstanzVor,
@@ -70,6 +71,7 @@ import {
   schliesseDialog,
   schliesseEinstellungen,
   setPluginSetting,
+  vaultName,
 } from "../../tools/obsidian-cdp/cdp.js";
 import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
 import { messeFolge, zeichneFolge } from "../../tools/obsidian-cdp/folge.js";
@@ -5089,6 +5091,8 @@ const PP_READ = `
 
 /** PP1 lässt die Einstellungen offen (siehe dort); `ppCleanup` schließt sie am Ende des Laufs. */
 let ppSettingsOpened = false;
+/** Die Werkzeugleiste wird einmal je Lauf für die Sprachprobe gemessen. */
+let leisteGemessen = false;
 
 const ppRead = (cdp: Cdp): Promise<PpState | null> => cdp.evaluate<PpState | null>(PP_READ);
 const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -5142,6 +5146,66 @@ async function bildUndBreite(cdp: Cdp, name: string, selector?: string): Promise
     writeFileSync(join(dir, name), await capture(cdp, box ?? undefined, 2));
   } catch (e) {
     console.log(`   [Breite] ${name}: nicht aufgenommen — ${(e as Error).message}`);
+  }
+}
+
+/** Port der Zweitinstanz (gesetzt in `main`): das Einstellungen-Fenster ist in der Zweitinstanz ein eigenes Pop-out und nur über `attachTo("settings", port)` erreichbar. */
+let smokePort = 0;
+
+/** Sprachprobe für den geöffneten Einstellungs-Tab (Task „Rest der Deutsch-Bildprobe“): hängt sich ans Einstellungen-Fenster und fährt `bildUndBreite` zweimal,
+ *  oben (Hilfe, Grundeinstellungen) und am LLM-Abschnitt (Endpunktliste, Anfrage). Ohne `SMOKE_SHOT_DIR`/`SMOKE_BREITE=1` tut es nichts; zählt in keinem Punkt mit. */
+async function bildUndBreiteEinstellungen(cdp: Cdp, name: string): Promise<void> {
+  if (!process.env.SMOKE_SHOT_DIR && process.env.SMOKE_BREITE !== "1") return;
+  let fenster: Cdp | null = null;
+  try {
+    // Modal (Obsidian < 1.13) oder Pop-out: im Modal liegt der Tab im Hauptfenster.
+    const alsModal = await cdp.evaluate<boolean>(`return Boolean(document.querySelector(".modal.mod-settings"));`);
+    if (alsModal) fenster = cdp;
+    else fenster = await attachTo("settings", smokePort, await vaultName(cdp));
+    if (!fenster) { console.log(`   [Breite] ${name}: Einstellungen-Fenster nicht gefunden`); return; }
+    if (fenster !== cdp) await requireVisible(fenster).catch(() => undefined);
+    const inhalt = ".vertical-tab-content";
+    await fenster.evaluate(`const c = document.querySelector(${JSON.stringify(inhalt)}); if (c) c.scrollTop = 0; return true;`);
+    await bildUndBreite(fenster, `${name}-oben.png`, inhalt);
+    const gescrollt = await fenster.evaluate<boolean>(`
+      const z = document.querySelector(".okit-ep-row") ?? document.querySelector(".okit-collapsible-title");
+      if (!z) return false;
+      z.scrollIntoView({ block: "start" });
+      await new Promise((r) => setTimeout(r, 300));
+      return true;
+    `);
+    if (gescrollt) await bildUndBreite(fenster, `${name}-llm.png`, inhalt);
+    else console.log(`   [Breite] ${name}-llm.png: LLM-Abschnitt nicht gefunden`);
+  } catch (e) {
+    console.log(`   [Breite] ${name}: nicht aufgenommen — ${(e as Error).message}`);
+  } finally {
+    // Das Pop-out gehört `ppCleanup`/`schliesseEinstellungen`; nur die Verbindung hier lösen.
+    if (fenster && fenster !== cdp) fenster.close();
+  }
+}
+
+/** Sprachprobe für die Werkzeugleiste (`.tdcb-toolbar`): ohne Hover steht sie auf `opacity: 0`, für Messung und Bild wird sie sichtbar gestellt und danach zurückgesetzt.
+ *  Gemessen wird gegen die rechte Kante des Blocks; die Knöpfe tragen nur Symbole, ihre (deutschen) Namen sind `aria-label`. */
+async function bildUndBreiteLeiste(cdp: Cdp, name: string): Promise<void> {
+  if (!process.env.SMOKE_SHOT_DIR && process.env.SMOKE_BREITE !== "1") return;
+  // Der Block, der die Leiste trägt (nicht der erste `.tdcb-block` des Blatts: das kann ein Standbild ohne Leiste sein), bekommt für die Dauer der Messung eine Marke.
+  const block = ".workspace-leaf-content[data-type='markdown'] .tdcb-block[data-tdcb-breite]";
+  try {
+    const labels = await cdp.evaluate<string[] | null>(`
+      const bar = [...document.querySelectorAll(".workspace-leaf-content[data-type='markdown'] .tdcb-block .tdcb-toolbar")].find((b) => b.getBoundingClientRect().width > 0);
+      if (!bar) return null;
+      bar.closest(".tdcb-block").setAttribute("data-tdcb-breite", "1");
+      bar.style.opacity = "1";
+      await new Promise((r) => setTimeout(r, 200));
+      return [...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") ?? "");
+    `);
+    if (labels === null) { console.log(`   [Breite] ${name}: keine sichtbare Werkzeugleiste im Block`); return; }
+    console.log(`   [Breite] ${name}: ${labels.length} Knöpfe (aria-label): ${labels.join(" | ")}`);
+    await bildUndBreite(cdp, name, block);
+  } catch (e) {
+    console.log(`   [Breite] ${name}: nicht aufgenommen — ${(e as Error).message}`);
+  } finally {
+    await cdp.evaluate(`for (const b of document.querySelectorAll(".tdcb-block[data-tdcb-breite]")) { b.removeAttribute("data-tdcb-breite"); const bar = b.querySelector(".tdcb-toolbar"); if (bar) bar.style.opacity = ""; } return true;`).catch(() => undefined);
   }
 }
 
@@ -5333,6 +5397,7 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     const note = await ppOpenBlockNote(cdp, path, body);
     if (note === null) return { ready: false, clicked: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
     buttons = note.buttons;
+    if (!leisteGemessen) { leisteGemessen = true; await bildUndBreiteLeiste(cdp, "pp-werkzeugleiste.png"); }
     step = "Aktionsknopf klicken";
     // Das Schließen des Panels klappt die Seitenleiste ein, die Hauptfläche wird breiter, der Block rendert neu
     // (Standbild → Aktivierung) — erst warten, bis der Knopf wieder eine Größe hat.
@@ -5432,6 +5497,14 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       return true;
     `);
 
+    // Schnappschuss-Ordner leeren: das Kit rotiert bei 15 Ständen, und im selben Staging-Vault bleibt die Zahl nach einigen Läufen bei 15 stehen,
+    // obwohl der neueste Stand stimmt (PP34 „+1“ wurde so rot, englischer Lauf 2026-11-19: „Stände 15 → 15“, jüngster Stand gleich der Notiz).
+    await cdp.evaluate(`
+      const dir = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].manifest.dir + "/snapshots";
+      if (await app.vault.adapter.exists(dir)) await app.vault.adapter.rmdir(dir, true);
+      return true;
+    `);
+
     // --- PP1. Settings --------------------------------------------------------
     // Erster GUI-Beleg für `renderSettings`. Der Anfrage-Titel stammt aus dem vendorten Kit-Modul, nicht aus dem Gedächtnis.
     const requestTitle = LLM_CONNECTION_STRINGS_EN.request.title;
@@ -5473,6 +5546,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         settings.endpointRow && settings.titles.includes(requestTitle),
         `Zeile mit Ersatz-URL: ${settings.endpointRow ? "ja" : `nein (Felder: ${settings.endpointValues.join(" | ") || "keine"})`} · Abschnitt „${requestTitle}“: ${settings.titles.includes(requestTitle) ? "ja" : `nein (Titel: ${settings.titles.join(" | ") || "keine"})`} · Gruppe „Model by prompt“: ${settings.group ? "ja" : "nein"} · ${settings.rows} Zeilen`,
       );
+      await bildUndBreiteEinstellungen(cdp, "pp1-einstellungen");
     }
 
     // --- PP10. Die Ersatz-Zeile ist ERREICHBAR ----------------------------------
@@ -6158,7 +6232,12 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
             erforderlich: [".okit-prompt-panel-input", ".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard"],
           };
           pflicht("PP23", await messeErreichbarkeit(cdp, opts));
-          pflicht("PP24", await mitHoehe<PflichtTeilurteil>(cdp, { element: ".workspace-leaf", enthaelt: ".okit-prompt-panel-host", hoehe: 420 }, () => messeErreichbarkeit(cdp, opts)));
+          pflicht("PP24", await mitHoehe<PflichtTeilurteil>(cdp, { element: ".workspace-leaf", enthaelt: ".okit-prompt-panel-host", hoehe: 420 }, async () => {
+            const teil = await messeErreichbarkeit(cdp, opts);
+            // Sprachprobe: das Panel in der gedrückten Lage (420 px) als Bild, nur mit SMOKE_SHOT_DIR (auf Deutsch deckte die klebende Fußzeile Eingabe und Senden-Knopf).
+            await bildUndBreite(cdp, "pp24-kurzes-panel.png", ".okit-prompt-panel-host");
+            return teil;
+          }));
           const gegen = await gegenprobeErreichbarkeit(cdp, { selektoren: opts.selektoren, rollbereich: rumpf, fuelle: opts.fuelle });
           // Gemessen (Welle 24): in diesem Layout sitzen Eingabe, Senden und Neu oben im Rumpf und Apply/Discard in der Knopfzeile, die unten
           // klebt (`position: sticky`). Ohne Rollbalken bleibt jedes erreichbar, die Gegenprobe kann hier nie rot werden — „nicht anwendbar“ (skipped),
@@ -6893,6 +6972,7 @@ async function main(): Promise<void> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     throw new Error("--port <1024-65535> ist Pflicht (kein Standardport: 9222 gehoert der regulaeren Instanz). Beispiel: npm run smoke:gui -- --port 9390 --vault 3d-codeblocks");
   }
+  smokePort = port;
   const keep = args.has("keep");
   const modelArg = flag("model");
   const vault = flag("vault");
