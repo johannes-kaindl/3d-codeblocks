@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges, applyChangesAnswer, matchPart } from "../../../src/core/shapes/changes";
 import { readChangesAnswer } from "../../../src/core/shapes/protocol";
+import { pruefeLinear } from "../../vendor/kit/linear-probe";
 
 const TABLE = [
   "title: Tisch",
@@ -433,4 +434,15 @@ describe("shape change (Plan 3b)", () => {
     expect(r.ok && r.after[1]).toEqual({ kind: "cylinder", name: "Bein-1", size: [0.03, 0.7], at: [-0.55, 0.35, -0.3], rot: [0, 0, 0], color: null });
     expect(r.ok && r.before[1].kind).toBe("box");
   });
+});
+
+describe("applyChanges: Laufzeit auf dem Text der Datei", () => {
+  // Der Text stammt aus der Datei des Nutzers; Quadratisch waere 5x Eingabe = 25x Zeit (Probe: n = 1 000, 10 000, 50 000, Quotient < 12 oder unter 50 ms).
+  const linear = (bau: (n: number) => string) => {
+    const r = pruefeLinear((text: string) => applyChanges(`title: t\nbox a\n${text}\nbox b`, []), bau);
+    expect(r.linear, r.message).toBe(true);
+  };
+  it("viele Leerzeilen bleiben linear", () => linear((n) => "\n".repeat(n)));
+  it("viele Zeilen mit Wagenruecklauf bleiben linear", () => linear((n) => "\r\n".repeat(n)));
+  // Eine Probe mit 50 000 Teilezeilen („box a\n“) misst vor allem den Müllsammler (isoliert Quotient 5,5, im vollen Gate unter Last 12,9): sie bleibt draußen.
 });

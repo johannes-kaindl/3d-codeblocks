@@ -5,7 +5,7 @@
 // von außen, damit beide Wege dieselbe Wikilink-Semantik haben.
 // Ein übersehener Verweis lässt Datei → Block eine noch benutzte Datei löschen: im Zweifel zählen.
 import { parseBlockConfig } from "../block-config";
-import { fenceFor } from "../../vendor/kit/fences";
+import { wrapInFence } from "../../vendor/kit/fences";
 
 export interface NoteText {
   path: string;
@@ -26,10 +26,13 @@ export type ModelReference =
   | { notePath: string; kind: "link"; from: number; to: number; text: string };
 
 // `\|` (maskierter Strich in Tabellen) wird akzeptiert; der Linktext verliert den Backslash.
-const WIKI = /(!?)\[\[([^\]|#^]+)(?:[#^|][^\]]*)?\]\]/g;
+// Linear auch bei Zeilen voller `[[` ohne Abschluss (Fuzz `tests/core/linear-fuzz.test.ts`): der Name enthält kein `[` (Obsidian erlaubt es in Dateinamen nicht),
+// der Anzeigeteil hört vor jedem `[[` auf. Ohne beides läuft jede der n Startstellen bis ans Zeilenende (n = 10 000: 2,5 s, quadratisch).
+const WIKI = /(!?)\[\[([^[\]|#^]+)(?:[#^|](?:[^\][]|\[(?!\[))*)?\]\]/g;
 // `![alt](pfad)` / `![](<pfad mit leerzeichen>)` — Obsidians Embed-Registry rendert registrierte
 // Erweiterungen auch in dieser Schreibweise (embed.ts:67 MODEL_EXTENSIONS, registerExtension).
-const MD_EMBED = /!\[[^\]]*\]\((<[^>]*>|[^)\s]*)\)/g;
+// Gleiche Bauart: der Alt-Text hört vor jedem `![` auf, der Pfad enthält weder `(` noch `<` (spitze Klammern nur als Umschließung), sonst liefe jede Startstelle bis ans Zeilenende.
+const MD_EMBED = /!\[(?:(?!!\[)[^\]])*\]\((<[^<>]*>|[^()\s<]*)\)/g;
 const QUOTE = /^\s*>[ ]?/;
 const LIST_MARK = /^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+/;
 const FENCE_OPEN = /^(`{3,}|~{3,})\s*([^\s`]*)/;
@@ -62,6 +65,7 @@ function stripQuotes(line: string): { rest: string; quoted: boolean; depth: numb
  */
 function scanFences(lines: string[]): ScannedFence[] {
   const out: ScannedFence[] = [];
+  const containers = containerTracker(lines);
   let i = 0;
   while (i < lines.length) {
     // Zitat- und Listenpräfixe abwechselnd abstreifen, bis nichts mehr geht (`- > ```3d`, `- - ```3d`).
@@ -86,7 +90,7 @@ function scanFences(lines: string[]): ScannedFence[] {
       i += 1;
       continue;
     }
-    const nested = quoted || marked || indent.includes("\t") || indent.length > 3 || (indent.length > 0 && containersBefore(lines, i).list);
+    const nested = quoted || marked || indent.includes("\t") || indent.length > 3 || (indent.length > 0 && containers(i).list);
     const marker = open[1];
     const closeRe = new RegExp(`^\\s*${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
     const col = lines[i].length - fenceText.length;
@@ -118,21 +122,32 @@ const ALONE_LINE = /^ {0,3}!\[\[[^\]]*\]\]\s*$/;
 const HEADING = /^ {0,3}#{1,6}(\s|$)/;
 const THEMATIC = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 
-/** Zustand der Container (offener Listenpunkt / offenes Zitat) NACH den Zeilen vor `index`. */
-function containersBefore(lines: string[], index: number): { list: boolean; quote: boolean } {
+/** Zustand der Container (offener Listenpunkt / offenes Zitat) NACH den Zeilen vor `index`.
+ *  Läuft von der zuletzt erreichten Zeile weiter statt je Aufruf bei 0 anzufangen: bei steigendem `index` (jede Zaunzeile, jeder Embed einer Notiz)
+ *  ist die Gesamtarbeit linear; ein kleinerer `index` (der Blick auf die Zeile davor) beginnt neu. Vorher war jeder eingerückte Zaun ein Lauf über alle
+ *  Zeilen davor (20 000 Zeilen mit Zäunen: 2,4 s, Fuzz Welle 36). */
+function containerTracker(lines: string[]): (index: number) => { list: boolean; quote: boolean } {
+  let k = 0;
   let list = false;
   let quote = false;
-  for (let k = 0; k < index; k++) {
-    const l = lines[k];
-    if (l.trim() === "") {
+  return (index) => {
+    if (index < k) {
+      k = 0;
+      list = false;
       quote = false;
-      continue;
     }
-    quote = /^\s*>/.test(l);
-    if (LIST_LINE.test(l)) list = true;
-    else if (!/^\s/.test(l) && !quote && (k === 0 || lines[k - 1].trim() === "" || HEADING.test(lines[k - 1]) || THEMATIC.test(lines[k - 1]))) list = false;
-  }
-  return { list, quote };
+    for (; k < index; k++) {
+      const l = lines[k];
+      if (l.trim() === "") {
+        quote = false;
+        continue;
+      }
+      quote = /^\s*>/.test(l);
+      if (LIST_LINE.test(l)) list = true;
+      else if (!/^\s/.test(l) && !quote && (k === 0 || lines[k - 1].trim() === "" || HEADING.test(lines[k - 1]) || THEMATIC.test(lines[k - 1]))) list = false;
+    }
+    return { list, quote };
+  };
 }
 
 /**
@@ -143,7 +158,7 @@ function containersBefore(lines: string[], index: number): { list: boolean; quot
  * einer nicht leeren Zeile in Spalte 0, die kein Marker ist), ist nur Spalte 0 nach einer Leerzeile sicher
  * (sie beendet die Liste); ein Zitat endet an Leerzeile bzw. Zeile ohne `>`. Alles andere: "continuation".
  */
-function aloneReason(lines: string[], index: number, match: string, fences: ScannedFence[]): AloneReason | undefined {
+function aloneReason(lines: string[], index: number, match: string, fences: ScannedFence[], containers: (index: number) => { list: boolean; quote: boolean }): AloneReason | undefined {
   const line = lines[index];
   const at = line.indexOf(match);
   const before = line.slice(0, at);
@@ -153,7 +168,7 @@ function aloneReason(lines: string[], index: number, match: string, fences: Scan
   if (LIST_LINE.test(line)) return "list";
   if (before.includes("\t") || /^ {4,}/.test(line)) return "indent";
   if (line.trim() !== match) return "inline";
-  const { list } = containersBefore(lines, index);
+  const { list } = containers(index);
   if (list && /^\s/.test(line)) return "continuation";
   const p = index - 1;
   if (p < 0 || lines[p].trim() === "") return undefined;
@@ -161,7 +176,7 @@ function aloneReason(lines: string[], index: number, match: string, fences: Scan
   if (HEADING.test(prev) || THEMATIC.test(prev)) return undefined;
   if (fences.some((f) => f.to === p && f.closed && !f.nested)) return undefined;
   if (prev.trim() === "$$" && lines.slice(0, p + 1).filter((l) => l.trim() === "$$").length % 2 === 0) return undefined;
-  if (ALONE_LINE.test(prev) && aloneReason(lines, p, prev.trim(), fences) === undefined) return undefined;
+  if (ALONE_LINE.test(prev) && aloneReason(lines, p, prev.trim(), fences, containers) === undefined) return undefined;
   return "continuation";
 }
 
@@ -175,6 +190,7 @@ export function findModelReferences(
     const lines = note.text.split(/\r?\n/);
     const inFence = new Set<number>();
     const fences = scanFences(lines);
+    const containers = containerTracker(lines);
     for (const fence of fences) {
       for (let l = fence.from; l <= fence.to; l++) inFence.add(l);
       if (fence.lang !== "3d") continue;
@@ -199,7 +215,7 @@ export function findModelReferences(
           refs.push({ notePath: note.path, kind: "link", from: index, to: index, text: line });
           continue;
         }
-        const reason = aloneReason(lines, index, match[0], fences);
+        const reason = aloneReason(lines, index, match[0], fences, containers);
         // Anzeigeoptionen (`|400`, `|alias`, `#Ueberschrift`, `^id`) hinter dem Linktext: ein Zaun kann sie nicht tragen.
         const options = match[0].slice(3, -2).slice(match[2].length).trim();
         refs.push({
@@ -307,7 +323,6 @@ export function referenceBlock(linktext: string): string {
  * akzeptierte Normalisierung: die Rückumwandlung (Block → Datei) schreibt eine BOM-lose Datei.
  */
 export function shapesBlock(text: string): string {
-  const body = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\n+$/, "");
-  const fence = fenceFor(body);
-  return [`${fence}shapes`, body, fence].join("\n");
+  // Dieselbe Regel wie der Kit-Baustein (BOM, CRLF, Schlusszeilen, Zaunlänge): die eigene Kopie ist entfallen (Angleichen); Ausgabe unverändert.
+  return wrapInFence("shapes", text);
 }

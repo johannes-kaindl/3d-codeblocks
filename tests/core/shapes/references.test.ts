@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { listFences } from "../../../src/vendor/kit/fences";
+import { pruefeLinear } from "../../vendor/kit/linear-probe";
 import { findModelReferences, referenceBlock, shapesBlock, unaccountedMentions } from "../../../src/core/shapes/references";
 
 const TARGET = "Modelle/tisch.shapes";
@@ -402,5 +403,42 @@ describe("unaccountedMentions: fix round 4", () => {
   });
   it("regression: a note with exactly one embed yields an empty net", () => {
     expect(net("Text\n\n![[tisch.shapes]]\n\nMehr Text")).toEqual([]);
+  });
+});
+
+describe("findModelReferences: Anzeigeteil mit Klammern und Laufzeit", () => {
+  const embeds = (text: string) => findModelReferences([{ path: "n.md", text }], TARGET, resolve).map((r) => r.kind);
+  it("finds an embed whose alias holds a single opening square bracket", () => {
+    expect(embeds("![[tisch.shapes|Tisch [alt 200]]")).toEqual(["embed"]);
+    expect(embeds("![[tisch.shapes#Abschnitt [1]]")).toEqual(["embed"]);
+  });
+  it("finds a markdown embed whose alt text holds square brackets, and one in angle brackets", () => {
+    expect(embeds("![Tisch [alt](tisch.shapes)")).toEqual(["embed"]);
+    expect(embeds("![](<Ordner mit Leerzeichen/tisch.shapes>)")).toEqual(["embed"]);
+  });
+  it("finds the embed that follows an unclosed link opener on the same line (vorher las der Name `offen ![[tisch.shapes` es als einfachen Link)", () => {
+    expect(embeds("[[offen ![[tisch.shapes]]")).toEqual(["embed"]);
+    expect(embeds("![kaputt ![](tisch.shapes)")).toEqual(["embed"]);
+  });
+  // Quadratisch war jede Zeile mit vielen Öffnern ohne Abschluss: jede Startstelle lief bis ans Zeilenende (n = 10 000 Zeichen: 2,5 bis 6 s, Fuzz Welle 36).
+  const linear = (bau: (n: number) => string) => {
+    const r = pruefeLinear((text: string) => findModelReferences([{ path: "n.md", text }], TARGET, resolve), bau);
+    expect(r.linear, r.message).toBe(true);
+  };
+  it("stays linear on a line of unclosed wikilink openers", () => linear((n) => "![[".repeat(n)));
+  it("stays linear on a line of unclosed openers with an alias", () => linear((n) => "[[a|".repeat(n)));
+  it("stays linear on many indented fence lines (the list state before each fence was recomputed from line 0)", () => {
+    linear((n) => "```\n ".repeat(n));
+    linear((n) => " ```\n".repeat(n));
+  });
+  it("still reads a fence inside a list item as nested after a long text", () => {
+    const text = [...Array.from({ length: 300 }, (_, i) => `Zeile ${i}`), "- Punkt", "  ```3d", "  file: tisch.shapes", "  ```"].join("\n");
+    const refs = findModelReferences([{ path: "n.md", text }], TARGET, resolve);
+    expect(refs.map((r) => [r.kind, r.kind === "block" ? r.nested : null])).toEqual([["block", true]]);
+  });
+  it("stays linear on a line of unclosed markdown embeds", () => {
+    linear((n) => "![".repeat(n));
+    linear((n) => "![a](<".repeat(n));
+    linear((n) => "![](b".repeat(n));
   });
 });
