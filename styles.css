@@ -522,7 +522,7 @@
   white-space: nowrap;
 }
 
-/* Kit-Baustein prompt-panel (PROMPT_PANEL_CSS, obsidian-kit 0.96.0, wortgleich aus src/vendor/kit-obsidian/prompt-panel.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
+/* Kit-Baustein prompt-panel (PROMPT_PANEL_CSS, obsidian-kit 0.105.0, wortgleich aus src/vendor/kit-obsidian/prompt-panel.ts — Kit-Vertrag: Darstellung ist eine Kopie) */
 /* Auftrags-Fenster (buildPromptPanel): nur Theme-Variablen und Obsidians Größenvariablen. Die Kit-Bausteine darin (Modellzeile, Antwortbereich, Rundenliste, Status) bringen ihr Aussehen aus ihren eigenen Konstanten mit. */
 /* Obsidian blendet is-hidden nicht global aus: jeder Baustein setzt die Regel selbst. */
 .okit-prompt-panel .is-hidden {
@@ -585,6 +585,37 @@
 .okit-prompt-panel-accept-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Der Hinweis ist ein Knopf, sieht aber aus wie eine Zeile Text: Obsidians Knopfregeln (button not clickable-icon, Hover) setzen Höhe, Rand, Grund und Schatten, deshalb drei Selektorteile. Der Fokusring bleibt (Tastatur). */
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint:hover {
+  background: transparent;
+  color: var(--text-normal);
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint.is-open {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .okit-prompt-panel-accept-hint:empty {
@@ -638,13 +669,27 @@
   max-height: 16em;
 }
 
+/* Im Leerlauf (kein Lauf, kein Puffer) steht der Antwortbereich nur noch als Lesebereich im Baum: ein Pixel, unsichtbar, ohne Platz im Fluss (clip-path ist eine Store-Warnung, deshalb Deckkraft 0). Display none liesse die Ansage beim ersten Lauf unzuverlässig aus (aria-live). */
+.okit-prompt-panel-stream.is-idle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  max-height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+}
+
 .okit-prompt-panel-preview-caption {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   margin-bottom: var(--size-4-1);
 }
 
-/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin. */
+/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin, je eine Zeile (der volle Text steht im DOM und am Knopf über aria-describedby). */
 .okit-prompt-panel-end {
   position: sticky;
   bottom: 0;
