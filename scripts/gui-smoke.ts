@@ -4930,6 +4930,26 @@ function loadPpAnswers(): { ok: true; create: string; refine: string; sources: s
 
 /** Renderer-Schnipsel: Ersatz-Zeile und Ersatz-Modell aus den Einstellungen nehmen, Panel-Blätter schliessen.
  *  Speichert nur, wenn etwas zu entfernen war. Liefert, was entfernt wurde. */
+/** Panel schließen wie ein Nutzer: Blatt lösen, und fragt das Fenster wegen offener Runden („Discard“/„Keep“), „Discard“ klicken. Seit dem Kit-Rahmen
+ *  hält der Halter die Runden über das Schließen hinaus; ein bloßes `detachLeavesOfType` räumt sie nicht ab, und das nächste Fenster behält sein Ziel
+ *  („Target kept — discard to switch“), was alle Folgepunkte auf ein falsches Ziel setzt (k9d3, Lauf 1: PP9, PP11, PP23 bis PP25, PP31 bis PP33, PP36 bis PP40). */
+const PP_CLOSE_DISCARDING = `
+  app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)});
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 120));
+    const b = [...document.querySelectorAll(".modal button")].find((x) => /^(discard|verwerfen)$/i.test((x.textContent ?? "").trim()));
+    if (b) { b.click(); await new Promise((r) => setTimeout(r, 300)); break; }
+    if (app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}).length === 0 && i >= 2) break;
+  }
+  // Rückfall: blieb eine Runde im Halter (Dialog nicht erschienen oder nicht bedient), verwirft der Treiber sie dort und zählt das mit.
+  {
+    const h = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]?.promptHost;
+    const n = h?.session?.()?.rounds?.rounds?.length ?? 0;
+    window.__ppRestRunden = n;
+    if (n > 0) h.discard();
+  }
+`;
+
 const PP_RESET = `
   const plugin = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}];
   const removed = [];
@@ -4942,7 +4962,7 @@ const PP_RESET = `
     if (changed) plugin.settings.endpoints = kept;
     if (changed) { await plugin.saveSettings?.(); plugin.llm?.invalidate?.(); }
   }
-  app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)});
+  ${PP_CLOSE_DISCARDING}
   await new Promise((r) => setTimeout(r, 200));
   return removed;
 `;
@@ -5155,7 +5175,8 @@ let ppSnapInsert: { before: number; after: number } | null = null;
 
 /** Das Panel frisch öffnen (Blatt zu, Befehl `open-prompt-panel`, Ziel „new“) und warten, bis es steht. */
 async function ppOpenFresh(cdp: Cdp): Promise<boolean> {
-  await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 300)); return true;`);
+  // Das Fenster folgt dem zuletzt bedienten Block (Halter, auch bei geschlossenem Fenster): „Erzeugen“ braucht ein neues Ziel, wie PP38 es setzt.
+  await cdp.evaluate(`${PP_CLOSE_DISCARDING} const h = app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]?.promptHost; h?.startNew?.(); h?.setDraft?.(""); await new Promise((r) => setTimeout(r, 300)); return true;`);
   await cdp.evaluate(`await app.commands.executeCommandById(${JSON.stringify(`${PLUGIN_ID}:open-prompt-panel`)}); return true;`);
   const up = await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "", 10_000, 250);
   if (!up.reached) return false;
@@ -5319,7 +5340,9 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
     // Panel ZUERST schließen: das Einklappen der Seitenleiste ändert die Breite der Hauptfläche, und ein Block, der
     // dabei neu rendert, verliert Aktivierung und Aktionsleiste (gemessen 2026-10-04: Knopf danach Breite 0).
     step = "Panel schließen";
-    await cdp.evaluate(`app.workspace.detachLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}); await new Promise((r) => setTimeout(r, 1200)); return true;`);
+    await cdp.evaluate(`${PP_CLOSE_DISCARDING} await new Promise((r) => setTimeout(r, 1200)); return true;`);
+    const rest = await cdp.evaluate<number>(`return window.__ppRestRunden ?? -1;`);
+    if (rest !== 0) console.log(`  (Panel schließen vor ${path}: ${rest} Runde(n) blieben im Halter und wurden verworfen)`);
     step = "Notiz öffnen";
     const note = await ppOpenBlockNote(cdp, path, body);
     if (note === null) return { ready: false, clicked: false, reason: "der shapes-Block rendert nicht", round: null, buttons: [] };
@@ -5868,6 +5891,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       await ppType(cdp, PP_CREATE_PROMPT);
       const clickedCreate = await ppClick(cdp, ".okit-prompt-panel-send");
       const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
+      if (!first.reached) console.log(`  Diagnose: erste Runde nicht erreicht, Stand: ${JSON.stringify(first.state)}`);
       await ppType(cdp, PP_REFINE_PROMPT);
       const clickedRefine = first.reached ? await ppClick(cdp, ".okit-prompt-panel-send") : false;
       const second = await pollState<PpState>(cdp, PP_READ, (s) => (s.phase === "ok" || s.phase === "error") && s.rounds === 2 && s.diff.length > 0, 40_000, 300);
@@ -6124,6 +6148,13 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         for (const id of ["PP21", "PP22", "PP23", "PP24", "PP25"] as const) ppNothing(id, T[id], "das Panel öffnete nicht");
       } else {
         const FELD = ".okit-prompt-panel-input";
+        console.log(`  PP21 Feld vor der Messung: ${await cdp.evaluate<string>(`
+          const el = document.querySelector(${JSON.stringify(FELD)});
+          if (!el) return "kein Feld";
+          const r = el.getBoundingClientRect();
+          const a = document.activeElement;
+          return JSON.stringify({ tag: el.tagName, disabled: el.disabled === true, readOnly: el.readOnly === true, rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)], aktivVorher: a ? (a.className || a.tagName) : null, fensterFokus: document.hasFocus() });
+        `)}`);
         pflicht("PP21", await messeFokusErhalt(cdp, { selector: FELD }));
         pflicht("PP22", await gegenprobeFokus(cdp, { selector: FELD }));
         await ppType(cdp, PP_CREATE_PROMPT);
@@ -6136,7 +6167,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           const rumpf = ".okit-prompt-panel-host";
           const opts = {
             selektoren: [".okit-prompt-panel-input", ".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard", ".okit-prompt-panel-new"],
-            fuelle: { in: ".tdcb-prompt-diff" },
+            fuelle: { in: ".okit-prompt-panel-changes" },
             ueberlauf: rumpf,
             erforderlich: [".okit-prompt-panel-input", ".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard"],
           };
@@ -6192,14 +6223,23 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           // PP27 — vor dem Klick gibt es keine Ansage (Gegenprobe: die Zahl kommt vom Klick, nicht von einem alten Stand).
           const before = await readBar();
           await pollState(cdp, `const s = document.querySelector(".okit-prompt-panel-host .okit-model-bar .okit-model-bar-select"); return { n: s ? [...s.options].filter((o) => (o.textContent ?? "").startsWith("smoke-") || (o.textContent ?? "").startsWith("qwen3.8-smoke")).length : 0 };`, (x: { n: number }) => x.n >= 2, 8_000, 250);
+          // Diagnose (k9d3): jeden Wechsel der Ansage mit Zeit mitschreiben (MutationObserver), dazu die Zahl der Endpunkte, die die Zeile kennt.
+          await cdp.evaluate(`
+            const z = document.querySelector(".okit-prompt-panel-host .okit-model-bar-status");
+            const log = (window.__k9d3ansage = { t0: performance.now(), wechsel: [], eps: (app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}].settings.endpoints ?? []).length });
+            if (z) new MutationObserver(() => log.wechsel.push([Math.round(performance.now() - log.t0), z.textContent])).observe(z, { childList: true, characterData: true, subtree: true });
+            return !!z;
+          `);
           await ppClick(cdp, ".okit-model-bar-refresh");
-          await pollState(cdp, `const z = document.querySelector(".okit-prompt-panel-host .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models? loaded/.test(x.t), 6_000, 250);
+          // Seit obsidian-kit 0.88.0 nennt die Ansage bei Endpunktgruppen alle Modelle aller Endpunkte: „2 models in 1 endpoint loaded“ (sonst „2 models loaded“).
+          await pollState(cdp, `const z = document.querySelector(".okit-prompt-panel-host .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models?( in 1 endpoint)? loaded/.test(x.t), 6_000, 250);
+          console.log(`  PP27 Ansage-Verlauf: ${await cdp.evaluate<string>(`return JSON.stringify(window.__k9d3ansage ?? null);`)}`);
           const bar = await readBar();
           const modelOptions = bar.options.filter((o) => o === PP_MODEL || o === PP_MODEL_B);
           ppRecord(
             "PP27",
             T.PP27,
-            bar.bars === 1 && modelOptions.length === 2 && bar.options.some((o) => /^Automatic/.test(o)) && !!bar.label && /^2 models loaded/.test(bar.announce.trim()) && before.announce.trim() === "",
+            bar.bars === 1 && modelOptions.length === 2 && bar.options.some((o) => /^Automatic/.test(o)) && !!bar.label && /^2 models( in 1 endpoint)? loaded/.test(bar.announce.trim()) && before.announce.trim() === "",
             `${bar.bars} Zeile, Einträge ${JSON.stringify(bar.options)}, Name „${bar.label ?? ""}“, Ansage nach dem Klick „${bar.announce.trim()}“ (davor „${before.announce.trim()}“, Gegenprobe: leer)`,
           );
 
@@ -6343,6 +6383,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         await ppType(cdp, PP_CREATE_PROMPT);
         await ppClick(cdp, ".okit-prompt-panel-send");
         const first = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && s.colors >= 3, 40_000, 300);
+      if (!first.reached) console.log(`  Diagnose: erste Runde nicht erreicht, Stand: ${JSON.stringify(first.state)}`);
         if (first.reached) {
           await ppType(cdp, PP_REFINE_PROMPT);
           await ppClick(cdp, ".okit-prompt-panel-send");
@@ -6420,6 +6461,11 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         // PP36, Lauf: die dritte Runde.
         const requestsBefore = sub.requests.length;
         await ppType(cdp, "Make the legs 5 cm thicker.");
+        // Der Ersatz antwortet auf jedes Ändern mit derselben Aufzeichnung (Platte auf 0,925); nach Runde 2 ändert sie nichts mehr („The answer changes nothing“, k9d3 Lauf 5).
+        // Die dritte Runde bekommt deshalb eine andere Änderung, in Stücken, damit der Lauf lange genug sichtbar bleibt.
+        const dritteAntwort = JSON.stringify({ changes: [{ op: "change", name: "Platte", position: [0, 1.025, 0] }] });
+        const stueck = Math.ceil(dritteAntwort.length / 5);
+        sub.queue({ stuecke: Array.from({ length: 5 }, (_, i) => dritteAntwort.slice(i * stueck, (i + 1) * stueck)), takt: 500 });
         await ppClick(cdp, ".okit-prompt-panel-send");
         const running = await pollState<PpState>(cdp, PP_READ, (s) => s.stopVisible && s.tail.length > 0, 15_000, 150);
         const during = running.reached ? await reader("") : null;
@@ -6440,12 +6486,13 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const aborted = await reader("");
         const extraRequests = sub.requests.length - requestsBefore;
         const locks = during !== null && during["send"] === true && during["neu"] === true && (during["accept"] as boolean[]).every(Boolean) && String(during["tail"]).length > 0;
-        const unchanged = duringAfter !== null && duringAfter["active"] === 2 && duringAfter["rounds"] === 2;
+        const unchanged = duringAfter !== null && duringAfter["active"] === 1 && duringAfter["rounds"] === 2; // active zählt ab 0: zwei Runden, die zweite aktiv = 1; ein Klick auf Runde 1 ergäbe 0
+        console.log(`  PP36 Rohwerte: nachErfolg=${JSON.stringify(after)} · nachAbbruch=${JSON.stringify(aborted)} · fertig=${finished.reached} · Stand=${JSON.stringify({ phase: finished.state?.phase, status: finished.state?.status, rounds: finished.state?.rounds })}`);
         ppRecord(
           "PP36",
           T.PP36,
           locks && unchanged && finished.reached && after !== null && after["tail"] === "" && after["input"] === "" && aborted !== null && aborted["input"] === "Remove the legs." && extraRequests === 2,
-          `im Lauf: Senden/Neu/Übernehmen gesperrt ${locks} · nach Strg+Enter, Klick auf Runde 1 und Neu: Runden ${duringAfter?.["rounds"] ?? "?"}, aktiv ${duringAfter?.["active"] ?? "?"} (erwartet 2 Runden, aktiv 2) · Anfragen an den Ersatz: ${extraRequests} (erwartet 2: dritte Runde und der Abbruch-Lauf) · nach Erfolg: Rohantwort „${String(after?.["tail"] ?? "?").slice(0, 20)}“ (erwartet leer), Feld „${String(after?.["input"] ?? "?")}“ (erwartet leer) · nach Abbruch: Feld „${String(aborted?.["input"] ?? "?")}“ (erwartet der Text)`,
+          `im Lauf: Senden/Neu/Übernehmen gesperrt ${locks} · nach Strg+Enter, Klick auf Runde 1 und Neu: Runden ${duringAfter?.["rounds"] ?? "?"}, aktiv ${duringAfter?.["active"] ?? "?"} (erwartet 2 Runden, aktiv 1 = die zweite, Zählung ab 0) · Anfragen an den Ersatz: ${extraRequests} (erwartet 2: dritte Runde und der Abbruch-Lauf) · nach Erfolg: Rohantwort „${String(after?.["tail"] ?? "?").slice(0, 20)}“ (erwartet leer), Feld „${String(after?.["input"] ?? "?")}“ (erwartet leer) · nach Abbruch: Feld „${String(aborted?.["input"] ?? "?")}“ (erwartet der Text)`,
         );
 
         // PP38: ein Lauf ohne Fenster. Frisches Fenster (Runden verwerfen über den Halter), Lauf starten, Fenster schließen.
