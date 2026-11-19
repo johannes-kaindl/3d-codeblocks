@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.98.0, src/obsidian/prompt-panel.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.99.1, src/obsidian/prompt-panel.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Rahmen der Auftrags-Fenster (K9, Welle 36): zeichnet die acht Stationen eines Fensters, das einen Auftrag an ein Modell gibt, das Ergebnis zeigt und es auf Knopfdruck schreibt.
 // Herkunft: svg-studio@0.1.4 `src/obsidian/panel/shell.ts` (`buildPanelShell`, 628 Zeilen), verschoben und auf den Halter umgebaut; die Tests stammen aus `tests/obsidian/panel-shell.test.ts`
 // (17 Tests, von happy-dom auf das Fake-DOM des Kits umgeschrieben). Spec: Cockpit `_SDD/2026-11-15-auftrags-fenster-rahmen-design`, Plan `…-plan-etappe-1-3`.
@@ -38,6 +38,13 @@
 //   `onClose` baut (Etappe 3), ruft `void panel.requestClose()` und danach `panel.destroy()`; ein Rückgabewert, der über das Schließen entschiede, gäbe es nicht mehr zu entscheiden.
 // - **Jedes Zeichnen der Vorschau bekommt ein eigenes Wurzelelement.** Grund: `ctx.current()` schützt nur einen Slot, der es nach dem `await` fragt; das Element schützt auch einen, der es vergisst (Spec § 11: eine späte
 //   Vorschau schreibt nicht mehr in den Platz).
+// - **Die Schreibweg-Knöpfe bleiben stabil** (`renderWays`): bei gleicher Form der Wegliste (Anzahl, Beschriftungen, Reihenfolge) behält `refreshAccept()` und jedes andere Neuzeichnen die Knopf-Elemente und setzt nur das Weg-Objekt
+//   neu; der Klick liest den Weg zur Klickzeit. shell.ts baute sie bei jedem Aufruf neu. Grund: der `mousedown` auf einen Knopf aktiviert das Blatt des Fensters, das Plugin ruft dabei `refreshAccept()`, und ein ersetzter
+//   Knopf bekommt das `mouseup` ohne `mousedown` (kein `click`): Übernehmen verpuffte ohne Meldung (gemessen von svg-studio im echten Obsidian, Rahmen 0.98.0). Gleiche Falle an anderen Stellen, mit Urteil: **Hinweise (`notices`)**
+//   sind Knöpfe des Plugins; `renderNotices` zeichnet sie bei `target` und `session` neu, und `host.offer` meldet `target` bei jedem Angebot, also auch bei einem Blattwechsel. Das ist dieselbe Folge, aber nicht allgemein
+//   zu beheben: der Rahmen kennt die Abhängigkeiten des Slots nicht und dürfte ein Neuzeichnen nur auslassen, wenn er sie kennt; der Slot hält seine Knöpfe selbst stabil (offener Befund, siehe Bericht). Die **Rundenliste**
+//   zeichnet nur bei `session` (Runde gewählt, Ergebnis, Verwerfen: kein Blattwechsel), die **Beispiele** sind feste Knöpfe (nur Sichtbarkeit), **Neu**, **Verwerfen**, **Senden** und **Abbrechen** feste Knöpfe, die **Prüfliste** zeichnet bei `session`
+//   und am Ende eines Laufs (kein Blattwechsel). Unverändert, weil nicht dieselbe Folge.
 // - **Keine Abweichung mehr beim Entsperren:** `shell.ts` zeichnete nach jedem Laufende alles neu (`runInner` `finally`, `stop()`: `settle(); renderAll()`); der erste Stand dieses Rahmens zeichnete nur die Bedienteile
 //   (ein Fehler, keine gewollte Abweichung). Seit dem Fix zeichnet er Prüfliste und Felder neu und die Vorschau nicht; das ist der einzige Unterschied zum Neuzeichnen von allem, und er hat den Grund oben (die Vorschau ist teuer).
 // - **Die Rundenliste erscheint ab zwei Runden** (`minItems` des Bausteins `buildVersionList`, Standard 2) wie in svg-studio, dem besten Exemplar; bei einer Runde zeigt die Vorschau sie ohnehin.
@@ -443,14 +450,25 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     previewWrap.toggleClass("is-hidden", n === 0 && baseShown === null);
   }
 
+  /** Die Schreibweg-Knöpfe: bei gleicher Form der Wegliste (gleiche Anzahl, gleiche Beschriftungen in gleicher Reihenfolge) bleiben die Elemente stehen, nur `wayViews[i].way` wird auf das neue Weg-Objekt gesetzt
+   *  (Sperre, Hinweis und `aria-describedby` folgen in `renderControls`). Nur eine geänderte Form baut sie neu. Grund: ein Klick auf einen Knopf aktiviert beim `mousedown` das Blatt des Fensters, das Plugin ruft dann
+   *  `refreshAccept()` (`active-leaf-change`), und ein ersetzter Knopf bekäme das `mouseup` ohne `mousedown`: kein `click`, Übernehmen täte nichts, ohne Meldung (gemessen von svg-studio am Rahmen 0.98.0).
+   *  Der Klick-Handler liest den Weg zur Klickzeit aus `wayViews`, nie den beim Bau gefangenen. */
   function renderWays(): void {
+    const ways = slots.acceptWays(session());
+    if (ways.length === wayViews.length && ways.every((w, i) => w.label === wayViews[i]?.way.label)) {
+      ways.forEach((w, i) => { const v = wayViews[i]; if (v !== undefined) v.way = w; });
+      return;
+    }
     waysEl.empty();
     hintsEl.empty();
-    const ways = slots.acceptWays(session());
     wayViews = ways.map((way, i) => {
       const hintId = `okit-prompt-panel-${String(uid)}-hint-${String(i)}`;
       const btn = waysEl.createEl("button", { cls: i === 0 ? "mod-cta okit-prompt-panel-accept" : "okit-prompt-panel-accept", text: way.label, attr: { type: "button" } });
-      btn.addEventListener("click", () => { void acceptVia(way); });
+      btn.addEventListener("click", () => {
+        const v = wayViews[i];
+        if (v !== undefined && v.btn === btn) void acceptVia(v.way);
+      });
       const hint = hintsEl.createDiv({ cls: "okit-prompt-panel-accept-hint", attr: { id: hintId } });
       return { way, btn, hint, hintId };
     });

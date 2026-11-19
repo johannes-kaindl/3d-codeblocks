@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.98.0, src/obsidian/prompt-panel-strings.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.99.1, src/obsidian/prompt-panel-strings.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Texte des Auftrags-Fensters (`prompt-panel.ts`), Deutsch und Englisch vollständig, formatneutral.
 // Herkunft: svg-studio@0.1.4 `src/i18n/strings.ts` (`panelStrings()` und die Schlüssel `panel.*`, `run.aborted`, `run.start`, `accept.backupFailed`),
 // dort an das Format gebunden („Neues SVG“, „Panel“); hier ohne Format. Das Plugin überschreibt, was fachlich seins ist: Platzhalter, Beispiele,
@@ -10,6 +10,7 @@ export interface PromptPanelStrings {
   targetEdit: (label: string) => string;
   targetKept: (label: string) => string;
   newButton: string;
+  /** Name der Aufgabe, nicht des Modells: er steht als `label` an der Modellzeile und ergibt deren `aria-label` „Model for <Aufgabe>“ / „Modell für <Aufgabe>“. Standard „Prompt“ / „Auftrag“. */
   modelLabel: string;
   promptLabel: string;
   placeholderCreate: string;
@@ -59,7 +60,7 @@ export const PROMPT_PANEL_STRINGS_EN: PromptPanelStrings = {
   targetEdit: (label) => `Edit: ${label}`,
   targetKept: (label) => `Target kept: ${label} — discard to switch`,
   newButton: "New",
-  modelLabel: "Model",
+  modelLabel: "Prompt",
   promptLabel: "Your instruction",
   placeholderCreate: "Describe what should be created.",
   placeholderRefine: "What should change?",
@@ -100,7 +101,7 @@ export const PROMPT_PANEL_STRINGS_DE: PromptPanelStrings = {
   targetEdit: (label) => `Ändern: ${label}`,
   targetKept: (label) => `Ziel festgehalten: ${label} — Verwerfen zum Wechseln`,
   newButton: "Neu",
-  modelLabel: "Modell",
+  modelLabel: "Auftrag",
   promptLabel: "Deine Anweisung",
   placeholderCreate: "Beschreibe, was entstehen soll.",
   placeholderRefine: "Was soll sich ändern?",
