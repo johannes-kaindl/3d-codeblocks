@@ -49,7 +49,7 @@ import { cwd } from "node:process";
 
 import { cameraFloorGltf, groundFloorGltf, coloredCubeObj, cube3mf, dracoDeclaredGlb, octahedronPly, spherePcd, sphereXyz, towerGcode } from "../docs/images/fixture/make-models.mjs";
 import { readChangesAnswer, readPartsAnswer } from "../src/core/shapes/protocol";
-import { LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
+import { LLM_CONNECTION_STRINGS_DE, LLM_CONNECTION_STRINGS_EN } from "../src/vendor/kit-obsidian/llm-connection-strings";
 import {
   AbbruchAusnahme,
   Cdp,
@@ -4812,12 +4812,15 @@ const PP_TITEL = {
   PP19: "Lange Zeile im Antwortbereich: nichts ragt rechts aus der Box des Streams, der Rumpf rollt nicht waagerecht",
   PP11: "Panel mit zwei Runden, Diff-Liste und langem Denkblock: Apply/Discard erreichbar, die lange „Done“-Zeile überlagert die Vorschau-Beschriftung nicht, Stream nicht zusammengefallen",
 } as const;
-const PP37_NO_NOTE = "Open a note to insert a code block.";
-const PP37_READING = "reading view";
+/** Sprache des Laufs: `--lang de` startet die Zweitinstanz deutsch (sonst setzt der Treiber en); die Texte, die der Treiber vergleicht, folgen ihr (Welle 36, PP1, PP2, PP6, PP27, PP37, PP39). */
+let smokeDe = false;
+const sprache = (en: string, de: string): string => (smokeDe ? de : en);
+let PP37_NO_NOTE = "Open a note to insert a code block.";
+let PP37_READING = "reading view";
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
-const PP_STALE_MESSAGE = "The block changed — nothing was applied.";
-const PP_EDIT_LABEL = "Edit in prompt panel";
+let PP_STALE_MESSAGE = "The block changed — nothing was applied.";
+let PP_EDIT_LABEL = "Edit in prompt panel";
 /** Selektor der Formen, die ein Lucide-Icon in seinem `<svg>` trägt — ein leeres `<svg>` (unbekannte Icon-ID) hat keine. */
 const PP_ICON_SHAPE = "svg path, svg line, svg circle, svg rect, svg polyline, svg polygon, svg ellipse";
 
@@ -5443,7 +5446,7 @@ async function ppRefineRound(cdp: Cdp, path: string, body: string): Promise<{ re
       return { ready: false, clicked: false, reason: `Knopf „${PP_EDIT_LABEL}“ nicht klickbar (Breite ${barBack.state?.w ?? "?"}, Standbilder ${barBack.state?.poster ?? "?"}) · Vorbedingung ${vorbedingung} · ${where}`, round: null, buttons };
     }
     step = "Panel mit Ziel abwarten";
-    const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith("Edit:"), 10_000, 250);
+    const up = await pollState<PpState>(cdp, PP_READ, (s) => s.target.startsWith(sprache("Edit:", "Ändern:")), 10_000, 250);
     if (!up.reached) return { ready: false, clicked: true, reason: `Panel zeigte kein Ziel „Edit: …“ (Ziel: ${up.state?.target ?? "kein Panel"})`, round: up.state, buttons };
     step = "Panel stehen lassen";
     await ppWaitPanelInside(cdp);
@@ -5507,7 +5510,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
 
     // --- PP1. Settings --------------------------------------------------------
     // Erster GUI-Beleg für `renderSettings`. Der Anfrage-Titel stammt aus dem vendorten Kit-Modul, nicht aus dem Gedächtnis.
-    const requestTitle = LLM_CONNECTION_STRINGS_EN.request.title;
+    const requestTitle = (smokeDe ? LLM_CONNECTION_STRINGS_DE : LLM_CONNECTION_STRINGS_EN).request.title;
     ppSettingsOpened = true;
     const settings = await cdp.evaluate<{ rows: number; endpointRow: boolean; endpointValues: string[]; titles: string[]; group: boolean; statusOk: boolean; statusError: boolean }>(`
       app.setting.open();
@@ -5599,7 +5602,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       ppRecord(
         "PP2",
         T.PP2,
-        two.tabs.length === 0 && two.quality.startsWith("Not measured for this model") && /the one small model tested/.test(two.quality) && two.qualityWarning && /e\.g\./.test(two.placeholder) && two.send === "Create" && /snowman/.test(two.examples),
+        two.tabs.length === 0 && two.quality.startsWith(sprache("Not measured for this model", "Für dieses Modell nicht gemessen")) && (smokeDe ? /das eine getestete kleine Modell/ : /the one small model tested/).test(two.quality) && two.qualityWarning && (smokeDe ? /zum Beispiel/ : /e\.g\./).test(two.placeholder) && two.send === sprache("Create", "Erzeugen") && (smokeDe ? /Schneemann/ : /snowman/).test(two.examples),
         `Tab-Leiste: ${two.tabs.length === 0 ? "keine (gewollt)" : two.tabs.join("/")} · Messzeile ${two.qualityWarning ? "is-warning" : "ohne is-warning"}: „${two.quality.slice(0, 60)}…“ · Platzhalter „${two.placeholder.slice(0, 50)}…“ · Knopf „${two.send}“ · Beispiel-Empty-State: ${two.examples ? `„${two.examples.slice(0, 40)}…“` : "nicht sichtbar"}`,
       );
     }
@@ -5708,7 +5711,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       ppSnapInsert = { before: snapBeforeInsert, after: (await ppSnapshotInfo(cdp)).count };
       // PP39: nach dem Übernehmen eines NEUEN Modells arbeitet das Fenster auf dem angelegten Block weiter (K9 `retarget`), statt neu zu beginnen.
       const targetKind = await cdp.evaluate<string>(`return app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)})[0]?.view?.state?.()?.target?.kind ?? "";`);
-      ppRecord("PP39", T.PP39, written.reached && targetKind === "block" && (after?.target ?? "").startsWith("Edit:"), `Ziel nach dem Übernehmen: Art „${targetKind}“, Anzeige „${after?.target ?? "?"}“ (erwartet Block, „Edit: …“; früher: neu)`);
+      ppRecord("PP39", T.PP39, written.reached && targetKind === "block" && (after?.target ?? "").startsWith(sprache("Edit:", "Ändern:")), `Ziel nach dem Übernehmen: Art „${targetKind}“, Anzeige „${after?.target ?? "?"}“ (erwartet Block, „Edit: …“; früher: neu)`);
       const text = written.state?.text ?? "";
       const block = /```shapes\n([\s\S]*?)\n```/.exec(text)?.[1] ?? "";
       ppRecord(
@@ -5744,7 +5747,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       ppNothing("PP5", T.PP5, edit.reason);
     } else {
       const s = edit.round;
-      const targetOk = /^Edit: Tisch/.test(s.target);
+      const targetOk = (smokeDe ? /^Ändern: Tisch/ : /^Edit: Tisch/).test(s.target);
       const diffOk = s.diff.some((l) => /^Platte: at/.test(l));
       let applied = false;
       let detail = "";
@@ -5797,7 +5800,7 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
         const streaming = await pollState<PpState>(cdp, PP_READ, (s) => s.tail.length > 0 && s.stopVisible, 15_000, 250);
         await sleepMs(1000);
         const stopClicked = streaming.reached ? await ppClick(cdp, ".okit-prompt-panel-stop") : false;
-        const stopped = await pollState<PpState>(cdp, PP_READ, (s) => s.status === "Stopped." && !s.stopVisible, 10_000, 250);
+        const stopped = await pollState<PpState>(cdp, PP_READ, (s) => s.status === sprache("Stopped.", "Abgebrochen.") && !s.stopVisible, 10_000, 250);
         const seenAbort = await (async () => {
           const deadline = Date.now() + 8000;
           while (Date.now() < deadline) {
@@ -6297,14 +6300,14 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           `);
           await ppClick(cdp, ".okit-model-bar-refresh");
           // Seit obsidian-kit 0.88.0 nennt die Ansage bei Endpunktgruppen alle Modelle aller Endpunkte: „2 models in 1 endpoint loaded“ (sonst „2 models loaded“).
-          await pollState(cdp, `const z = document.querySelector(".okit-prompt-panel-host .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => /^2 models?( in 1 endpoint)? loaded/.test(x.t), 6_000, 250);
+          await pollState(cdp, `const z = document.querySelector(".okit-prompt-panel-host .okit-model-bar-status"); return { t: z ? z.textContent.trim() : "" };`, (x: { t: string }) => (smokeDe ? /^2 Modelle?( in 1 Endpunkt)? geladen/ : /^2 models?( in 1 endpoint)? loaded/).test(x.t), 6_000, 250);
           console.log(`  PP27 Ansage-Verlauf: ${await cdp.evaluate<string>(`return JSON.stringify(window.__k9d3ansage ?? null);`)}`);
           const bar = await readBar();
           const modelOptions = bar.options.filter((o) => o === PP_MODEL || o === PP_MODEL_B);
           ppRecord(
             "PP27",
             T.PP27,
-            bar.bars === 1 && modelOptions.length === 2 && bar.options.some((o) => /^Automatic/.test(o)) && !!bar.label && /^2 models( in 1 endpoint)? loaded/.test(bar.announce.trim()) && before.announce.trim() === "",
+            bar.bars === 1 && modelOptions.length === 2 && bar.options.some((o) => (smokeDe ? /^Automatisch/ : /^Automatic/).test(o)) && !!bar.label && (smokeDe ? /^2 Modelle( in 1 Endpunkt)? geladen/ : /^2 models( in 1 endpoint)? loaded/).test(bar.announce.trim()) && before.announce.trim() === "",
             `${bar.bars} Zeile, Einträge ${JSON.stringify(bar.options)}, Name „${bar.label ?? ""}“, Ansage nach dem Klick „${bar.announce.trim()}“ (davor „${before.announce.trim()}“, Gegenprobe: leer)`,
           );
 
@@ -6973,6 +6976,13 @@ async function main(): Promise<void> {
     throw new Error("--port <1024-65535> ist Pflicht (kein Standardport: 9222 gehoert der regulaeren Instanz). Beispiel: npm run smoke:gui -- --port 9390 --vault 3d-codeblocks");
   }
   smokePort = port;
+  smokeDe = flag("lang") === "de";
+  if (smokeDe) {
+    PP37_NO_NOTE = "Öffne eine Notiz, um einen Codeblock einzufügen.";
+    PP37_READING = "Leseansicht";
+    PP_EDIT_LABEL = "Im Prompt-Panel bearbeiten";
+    PP_STALE_MESSAGE = "Der Block hat sich geändert — es wurde nichts übernommen.";
+  }
   const keep = args.has("keep");
   const modelArg = flag("model");
   const vault = flag("vault");
