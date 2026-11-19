@@ -75,6 +75,7 @@ import { type Bilanz, createBilanz, parseArgs, runDriver } from "../../tools/obs
 import { messeFolge, zeichneFolge } from "../../tools/obsidian-cdp/folge.js";
 import { gegenprobeErreichbarkeit, gegenprobeFokus, messeDenkblockKopierbar, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichneDenkblock, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
 import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
+import { warteBisMitStand } from "../../tools/obsidian-cdp/warten.js";
 import { startLlmStub, type Antwort, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
 
 
@@ -3772,14 +3773,8 @@ async function pollState<T>(
   timeoutMs: number,
   stepMs = 500,
 ): Promise<{ state: T | null; reached: boolean }> {
-  const deadline = Date.now() + timeoutMs;
-  let state: T | null = null;
-  for (;;) {
-    state = await cdp.evaluate<T | null>(expression);
-    if (state && done(state)) return { state, reached: true };
-    if (Date.now() >= deadline) return { state, reached: false };
-    await new Promise((resolve) => setTimeout(resolve, stepMs));
-  }
+  const r = await warteBisMitStand(() => cdp.evaluate<T | null>(expression), (s) => !!s && done(s), timeoutMs, "pollState", { intervalMs: stepMs });
+  return { state: r.wert, reached: r.erreicht };
 }
 
 /** Datei in einem Blatt der Hauptflaeche oeffnen (nicht in einem Split), danach aufraeumen. */
