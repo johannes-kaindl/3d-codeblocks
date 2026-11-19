@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-19
+
 ### Added
 
 - **German translation.** Every text of the plugin — settings, commands, the prompt panel, the side panel and toolbar, notices, errors and the quality line — now exists in English and German and follows the language of Obsidian's interface. The language model settings (endpoint list, request section) and the model row come from the shared parts and are German as well; the settings showed their English texts in a German interface before this was measured in a picture.
