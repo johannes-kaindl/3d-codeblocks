@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-11-19
+
 ### Fixed
 
 - **Finding model references stays fast on odd notes.** Moving or deleting a `.shapes` file scans your notes for references to it. A line with many unclosed `[[` or `![` openers, or a note with thousands of indented code fences, made that scan take seconds (it grew with the square of the size); it now grows in step with the note. Which references are found is unchanged.
