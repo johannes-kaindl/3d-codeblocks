@@ -5578,7 +5578,33 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
       // Zustand der Schreibwege vor dem Klick (Entwurfslauf 1: Übernehmen schrieb nichts; Knopf gesperrt? Grund?).
       const waysBefore = await cdp.evaluate<string>(`return JSON.stringify([...document.querySelectorAll(".okit-prompt-panel-host .okit-prompt-panel-accept")].map((b) => ({ t: b.textContent, disabled: b.disabled, hint: (b.getAttribute("aria-describedby") ? document.getElementById(b.getAttribute("aria-describedby"))?.textContent : "") })));`);
       console.log(`  PP4 Schreibwege vor dem Klick: ${waysBefore}`);
+      // Diagnose (k9d2): wer liegt an der Klickstelle, und was steht unmittelbar nach dem Klick (Status, Meldungen, Zeilen der Runden)?
+      const hitBefore = await cdp.evaluate<string>(`
+        const b = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-accept");
+        if (!b) return "kein Knopf";
+        b.scrollIntoView({ block: "center" });
+        const r = b.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return JSON.stringify({ rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)], hit: top === b ? "der Knopf selbst" : (top?.className ?? String(top)), text: b.textContent });
+      `);
+      console.log(`  PP4 Klickstelle: ${hitBefore}`);
+      // Hypothese des Kit-Masters: das Panel wird beim mousedown aktiv (active-leaf-change), der Knopf wird ersetzt, der click kommt nie an.
+      await cdp.evaluate(`
+        const b = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-accept");
+        b.dataset.k9d2 = "alt";
+        const log = (window.__k9d2 = { down: 0, up: 0, click: 0, leaf: 0, detachedAtClick: null, activeBefore: app.workspace.activeLeaf?.view?.getViewType?.() ?? null });
+        const on = (t, f) => document.addEventListener(t, f, true);
+        on("mousedown", () => { log.down++; });
+        on("mouseup", () => { log.up++; });
+        on("click", (e) => { log.click++; log.detachedAtClick = !e.target.isConnected; });
+        app.workspace.on("active-leaf-change", () => { log.leaf++; });
+        return true;
+      `);
       const clicked = await ppClick(cdp, ".okit-prompt-panel-accept");
+      await new Promise((r) => setTimeout(r, 600));
+      console.log(`  PP4 Hypothese Ersetzen: ${await cdp.evaluate<string>(`const b = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-accept"); return JSON.stringify({ ...window.__k9d2, knopfNochDerAlte: b?.dataset.k9d2 === "alt", aktivDanach: app.workspace.activeLeaf?.view?.getViewType?.() ?? null });`)}`);
+      const afterClick = await cdp.evaluate<string>(`return JSON.stringify({ status: document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-status")?.textContent ?? null, notices: [...document.querySelectorAll(".notice")].map((n) => n.textContent), source: app.workspace.getMostRecentLeaf(app.workspace.rootSplit)?.view?.getMode?.() ?? null });`);
+      console.log(`  PP4 nach dem Klick (600 ms): clickReal=${clicked} ${afterClick}`);
       const written = await pollState<{ text: string; buffer: string; bufferPath: string }>(
         cdp,
         `
