@@ -4762,7 +4762,9 @@ const SMOKE_NOTE_PP_EDIT = "_tdcb-gui-smoke-pp-edit.md";
 const SMOKE_NOTE_PP_STALE = "_tdcb-gui-smoke-pp-stale.md";
 const SMOKE_NOTE_PP_BLANK = "_tdcb-gui-smoke-pp-blank.md";
 const SMOKE_NOTE_PP_CRLF = "_tdcb-gui-smoke-pp-crlf.md";
-const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK, SMOKE_NOTE_PP_CRLF];
+/** .shapes-Datei für PP41 und PP35 (Ziel `file`, offene Ansicht `tdcb-shapes-file`). */
+const SMOKE_PP_SHAPES = "_tdcb-gui-smoke-pp35.shapes";
+const PP_NOTES = [SMOKE_NOTE_PP_NEW, SMOKE_NOTE_PP_EDIT, SMOKE_NOTE_PP_STALE, SMOKE_NOTE_PP_BLANK, SMOKE_NOTE_PP_CRLF, SMOKE_PP_SHAPES];
 const PP_ENDPOINT_ID = "tdcb-smoke-ep";
 const PP_MODEL = "smoke-model";
 /** Zweites Modell des Ersatz-Endpunkts (Modellzeile, PP27–PP30). Der Name trägt die Familie qwen3.8, damit die Denk-Steuerung einen Zustand hat, der den Body ändert. */
@@ -4770,7 +4772,7 @@ const PP_MODEL_B = "qwen3.8-smoke-b";
 /** Abstand zwischen den drei Stücken einer Antwort: gross genug, dass der Transport sie nicht zu einem
  *  Fortschrittsereignis verschmilzt und der Tail sichtbar in drei Ständen wächst. */
 const PP_CHUNK_DELAY_MS = 800;
-const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30", "PP31", "PP32", "PP33", "PP34", "PP36", "PP37", "PP38", "PP39", "PP40"] as const;
+const PP_IDS = ["PP1", "PP2", "PP3", "PP4", "PP5", "PP6", "PP7", "PP8", "PP9", "PP10", "PP11", "PP12", "PP13", "PP14", "PP15", "PP16", "PP17", "PP18", "PP19", "PP20", "PP21", "PP22", "PP23", "PP24", "PP25", "PP26", "PP27", "PP28", "PP29", "PP30", "PP31", "PP32", "PP33", "PP34", "PP35", "PP36", "PP37", "PP38", "PP39", "PP40", "PP41"] as const;
 const PP_TITEL = {
   PP1: "Settings zeigen den LLM-Abschnitt (Endpunkt-Zeile und Anfrage)",
   PP2: "Panel öffnet ohne Tab-Leiste, mit Messzeile und Beispiel-Platzhalter",
@@ -4806,6 +4808,8 @@ const PP_TITEL = {
   PP37: "Übernehmen nennt den Sperrgrund: ohne offene Notiz und im Lesemodus steht der Grund neben dem gesperrten Knopf (aria-describedby), mit Quellmodus ist er frei (K9 Station 7)",
   PP38: "Ein Lauf überlebt das Schließen des Fensters: Eintrag „läuft“ in der Statusleiste, kein Abbruch am Server, danach „Ergebnis wartet“ und die Runde steht beim Öffnen da (K9 Halter)",
   PP40: "Schalter „Statusleiste“ aus: ohne Fenster und im Lauf steht kein Eintrag, nach dem Einschalten erscheint er (K9)",
+  PP41: "Zielwechsel bei geschlossenem Fenster: eine geöffnete .shapes-Datei erreicht den Halter ohne offenes Fenster, das nächste Fenster zeigt sie als Ziel (K9 Review Focus 4)",
+  PP35: "Übernehmen in eine offene .shapes-Ansicht: ungespeichertes Getipptes geht vorher auf die Platte (Schnappschuss enthält es), Platte und Ansicht tragen beides, Strg+Z nimmt nur das Getippte zurück (K9 prepare)",
   PP39: "Nach dem Übernehmen eines neuen Modells arbeitet das Fenster auf dem angelegten Block weiter (K9 retarget)",
   PP32: "Schließen mit einer offenen Runde fragt (Behalten oder Verwerfen); Escape behält, Verwerfen verwirft (K9 Station 8)",
   PP33: "Zwei schnelle Rundenwahlen: die Vorschau zeigt am Ende die zuletzt gewählte Runde (K9 Ticket der Vorschau)",
@@ -6619,6 +6623,148 @@ async function sectionPromptPanel(cdp: Cdp, _model: string): Promise<void> {
           `ohne Notiz: gesperrt ${none.disabled}, Grund „${none.hint}“ · Quellmodus: gesperrt ${source.disabled}, Grund „${source.hint}“ (erwartet frei, leer) · Lesemodus: gesperrt ${reading.disabled}, Grund „${reading.hint}“`,
         );
       }
+    }
+
+    // --- PP41/PP35. Zielwechsel bei geschlossenem Fenster, offene .shapes-Ansicht vor dem Schreiben speichern (K9, Welle 37) ----------
+    // PP41 belegt `main.ts`: das Abo des zuletzt bedienten Modells ruft `promptHost.offer` direkt, auch ohne offenes Fenster (K9 Review Focus 4; vorher
+    // gingen Zielwechsel nur an offene Ansichten). Gemessen über den echten Weg: die .shapes-Datei öffnen, ihr Viewport meldet sich nach dem Zeichnen als bedient
+    // (`touch` → `active.set` → `offer`), kein Aufruf von `offer` aus dem Treiber. Geöffnet wird danach wie über den Halter (`open` ohne Ziel), nicht über den
+    // Befehl, der „neu“ anbietet.
+    // PP35 belegt `prepare` (`saveOpenShapesViews`): Getipptes, das Obsidians Speicher-Verzögerung noch nicht auf die Platte gebracht hat, geht vor dem Schreiben
+    // dorthin; sonst wird die Kette auf den alten Plattentext angewendet, und der Schnappschuss vor dem Überschreiben fehlt das Getippte.
+    {
+      const pluginJs = `app.plugins.plugins[${JSON.stringify(PLUGIN_ID)}]`;
+      const shapesBody = `${SHAPES_TABLE}\n`;
+      const typedLine = "box PP35-Getippt size 0.1 0.1 0.1 at 0 1.5 0";
+      const label = SMOKE_PP_SHAPES.replace(/\.shapes$/, "");
+      const fileTarget = { kind: "file", path: SMOKE_PP_SHAPES, label };
+      await cdp.evaluate(`${PP_CLOSE_DISCARDING} const h = ${pluginJs}.promptHost; h.startNew(); h.setDraft(""); await new Promise((r) => setTimeout(r, 300)); return true;`);
+      // Die Rückfrage beim Schließen kann nach der Wartezeit von PP_CLOSE_DISCARDING erscheinen (Runde aus PP37); stehen geblieben deckt sie alles ab
+      // (Lauf 4, Welle 37: `.modal-bg` unter dem Senden-Knopf). Abwarten, protokollieren, mit „Verwerfen“ schließen.
+      const dialog = await pollState<{ text: string }>(cdp, `const m = document.querySelector(".modal"); return m ? { text: (m.textContent ?? "").trim().slice(0, 120) } : { text: "" };`, (x) => x.text !== "", 1500, 150);
+      if (dialog.reached) {
+        console.log(`  PP41 vorher: Dialog stand offen („${dialog.state?.text}“), wird verworfen`);
+        await cdp.evaluate(`const b = [...document.querySelectorAll(".modal button")].find((x) => /^(discard|verwerfen)$/i.test((x.textContent ?? "").trim())); b?.click(); await new Promise((r) => setTimeout(r, 400)); return true;`);
+        if (await cdp.evaluate<boolean>(`return !!document.querySelector(".modal");`)) await schliesseDialog(cdp, { fristMs: 3000 });
+        await cdp.evaluate(`const h = ${pluginJs}.promptHost; h.startNew(); h.setDraft(""); return true;`);
+      }
+      const vorher = await cdp.evaluate<{ kind: string; open: number }>(`return { kind: ${pluginJs}.promptHost.session().target.kind, open: app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}).length };`);
+      const geoeffnet = await cdp.evaluate<string>(`
+        let f = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_PP_SHAPES)});
+        if (f) await app.vault.modify(f, ${JSON.stringify(shapesBody)}); else f = await app.vault.create(${JSON.stringify(SMOKE_PP_SHAPES)}, ${JSON.stringify(shapesBody)});
+        const leaf = app.workspace.getLeaf("tab");
+        await leaf.openFile(f);
+        app.workspace.setActiveLeaf(leaf, { focus: true });
+        return leaf.view?.getViewType?.() ?? "?";
+      `);
+      // Bedient heißt im Plugin: OrbitControls melden „start“ (Ziehen), dann `touch` → `active.set` → Abo in `main.ts`. Öffnen allein bedient nicht
+      // (gemessen Lauf 1, Welle 37: Ziel blieb „new“); ein Doppelklick auch nicht (`handleDoubleClick` meldet keine Interaktion).
+      const canvasJs = `app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).find((l) => l.view?.file?.path === ${JSON.stringify(SMOKE_PP_SHAPES)})?.view.containerEl.querySelector(".tdcb-shapes-model canvas")`;
+      const canvasDa = await pollState<{ w: number }>(cdp, `const c = ${canvasJs}; return c ? { w: c.getBoundingClientRect().width } : null;`, (x) => x.w > 0, 15_000, 300);
+      await cdp.evaluate(`if (!window.__ppFehler) { window.__ppFehler = []; const ce = console.error.bind(console); console.error = (...a) => { window.__ppFehler.push(a.map((x) => String(x && x.stack ? x.stack : x)).join(" ").slice(0, 300)); ce(...a); }; window.addEventListener("error", (e) => window.__ppFehler.push("onerror " + String(e.message).slice(0, 300))); window.addEventListener("unhandledrejection", (e) => window.__ppFehler.push("rejection " + String(e.reason && e.reason.stack ? e.reason.stack : e.reason).slice(0, 300))); } window.__ppFehler.length = 0; return true;`);
+      // Echte Maus über CDP (vertrauenswürdige Pointer-Events mit echter pointerId): die synthetischen PointerEvents von `dragCanvas` lösten an dieser Ansicht
+      // kein „start“ der OrbitControls aus (Lauf 3, Welle 37: danach kein aktives Modell).
+      let gezogen: string | null = "kein sichtbarer Canvas in der Ansicht";
+      if (canvasDa.reached) {
+        const mitte = await cdp.evaluate<{ x: number; y: number; oben: string } | null>(`const c = ${canvasJs}; if (!c) return null; const r = c.getBoundingClientRect(); const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2); const e = document.elementFromPoint(x, y); return { x, y, oben: e ? (e.tagName + "." + String(e.className).slice(0, 40)) : "nichts" };`);
+        if (mitte === null) gezogen = "Canvas verschwand";
+        else {
+          await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: mitte.x, y: mitte.y, button: "left", buttons: 1, clickCount: 1 });
+          for (let i = 1; i <= 6; i++) {
+            await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: mitte.x + i * 10, y: mitte.y, button: "left", buttons: 1 });
+            await sleepMs(20);
+          }
+          await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: mitte.x + 60, y: mitte.y, button: "left", buttons: 0, clickCount: 1 });
+          await sleepMs(300);
+          gezogen = mitte.oben.startsWith("CANVAS") ? null : `unter der Mitte liegt ${mitte.oben}, nicht der Canvas`;
+        }
+      }
+      const aktiv = await cdp.evaluate<string>(`const p = ${pluginJs}; const v = app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).find((l) => l.view?.file?.path === ${JSON.stringify(SMOKE_PP_SHAPES)})?.view; const a = p.active.get(); return JSON.stringify({ aktiv: a ? (a.label?.() ?? "?") : null, istAnsicht: !!v && a === v.controller, ziel: v?.controller?.shapesTarget?.() ?? null, fehler: window.__ppFehler.slice(0, 3) });`);
+      console.log(`  PP41 Rohwerte nach dem Ziehen: ${aktiv}`);
+      const gehalten = await pollState<{ kind: string; path: string; open: number }>(
+        cdp,
+        `const t = ${pluginJs}.promptHost.session().target; return { kind: t.kind, path: t.path ?? "", open: app.workspace.getLeavesOfType(${JSON.stringify(PANEL_VIEW_TYPE)}).length };`,
+        (x) => x.kind === "file" && x.path === SMOKE_PP_SHAPES,
+        15_000,
+        300,
+      );
+      await cdp.evaluate(`await ${pluginJs}.openPromptPanel(); return true;`);
+      const gezeigt = await pollState<PpState>(cdp, PP_READ, (s) => s.send !== "" && s.target !== "", 10_000, 250);
+      const zielText = gezeigt.state?.target ?? "";
+      if (vorher.kind !== "new" || vorher.open !== 0 || geoeffnet !== SHAPES_VIEW_TYPE) {
+        ppNothing("PP41", T.PP41, `Ausgangslage nicht hergestellt: Ziel vorher „${vorher.kind}“ (erwartet new), offene Fenster ${vorher.open} (erwartet 0), Ansicht der Datei „${geoeffnet}“ (erwartet ${SHAPES_VIEW_TYPE})`);
+      } else {
+        ppRecord(
+          "PP41",
+          T.PP41,
+          gehalten.reached && gehalten.state?.open === 0 && gezeigt.reached && zielText.startsWith(sprache("Edit:", "Ändern:")) && zielText.includes(label),
+          `Ziehen im Viewport: ${gezogen ?? "ok"} · Ziel im Halter danach: ${gehalten.reached ? `„${gehalten.state?.kind}“ ${gehalten.state?.path}, offene Fenster dabei ${gehalten.state?.open} (erwartet 0)` : `nicht angekommen (zuletzt „${gehalten.state?.kind ?? "?"}“)`} · Zielzeile des nächsten Fensters „${zielText}“ (erwartet „${sprache("Edit:", "Ändern:")} … ${label}“)`,
+        );
+      }
+
+      // PP35: das Fenster auf die Datei (wie der Knopf der Ansicht), eine Runde, dann in der Ansicht tippen und sofort übernehmen.
+      await cdp.evaluate(`await ${pluginJs}.openPromptPanel(${JSON.stringify(fileTarget)}); return true;`);
+      let runde = false;
+      let rundeStand = "Fenster stand nicht im Bild";
+      if (await ppWaitPanelInside(cdp)) {
+        const getippt0 = await ppType(cdp, PP_REFINE_PROMPT);
+        const unterKnopf = await cdp.evaluate<string>(`const b = document.querySelector(".okit-prompt-panel-host .okit-prompt-panel-send"); if (!b) return "kein Knopf"; const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return e === b || b.contains(e) ? "Knopf" : (e ? e.tagName + "." + String(e.className).slice(0, 60) : "nichts");`);
+        const geklickt0 = await ppClick(cdp, ".okit-prompt-panel-send");
+        console.log(`  PP35 vor dem Senden: unter dem Knopf liegt ${unterKnopf}`);
+        const r = await pollState<PpState>(cdp, PP_READ, (s) => s.phase === "ok" && s.rounds === 1 && !s.applyDisabled, 40_000, 300);
+        runde = r.reached;
+        const fehler = await cdp.evaluate<string[]>(`return (window.__ppFehler ?? []).slice(0, 4);`);
+        rundeStand = `Fehler im Renderer ${JSON.stringify(fehler)}, Anfragen am Ersatz ${sub.requests.length}, `;
+        rundeStand += `Auftrag getippt ${getippt0}, Senden geklickt ${geklickt0}, Stand ${JSON.stringify({ phase: r.state?.phase, status: r.state?.status, target: r.state?.target, rounds: r.state?.rounds, applyDisabled: r.state?.applyDisabled, sendDisabled: r.state?.sendDisabled })}`;
+      }
+      if (!runde) {
+        ppNothing("PP35", T.PP35, `keine Runde auf der .shapes-Datei: ${rundeStand}`);
+      } else {
+        const lesen = `
+          ${SHAPES_LEAF}
+          const leaf = leafFor(${JSON.stringify(SMOKE_PP_SHAPES)});
+          const f = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_PP_SHAPES)});
+          return { disk: f ? await app.vault.read(f) : "", view: leaf?.view?.getViewData?.() ?? null, editor: cmOf(leaf)?.state.doc.toString() ?? null };
+        `;
+        const snapVorher = (await ppSnapshotInfo(cdp)).count;
+        const getippt = await cdp.evaluate<{ how: string; disk: string }>(`
+          ${SHAPES_LEAF}
+          const leaf = leafFor(${JSON.stringify(SMOKE_PP_SHAPES)});
+          if (!leaf) return { how: "kein Blatt", disk: "" };
+          leaf.view.setMode("text");
+          await new Promise((r) => setTimeout(r, 300));
+          const how = typeAtEnd(leaf, ${JSON.stringify(`\n${typedLine}`)});
+          const f = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_PP_SHAPES)});
+          return { how, disk: await app.vault.read(f) };
+        `);
+        await ppClick(cdp, ".okit-prompt-panel-accept");
+        // Gültig nur, wenn das Getippte beim Klick noch NICHT auf der Platte stand (sonst hätte Obsidians eigenes Speichern es gebracht, nicht `prepare`).
+        const gueltig = getippt.how !== "kein Blatt" && !getippt.disk.includes(typedLine);
+        const geschrieben = await pollState<{ disk: string }>(cdp, `const f = app.vault.getAbstractFileByPath(${JSON.stringify(SMOKE_PP_SHAPES)}); return { disk: f ? await app.vault.read(f) : "" };`, (x) => /box Platte [^\n]* 0\.925 /.test(x.disk), 12_000, 300);
+        // Obsidians Speicher-Verzögerung (rund 2 s) abwarten: ein noch ausstehendes Speichern der Ansicht darf die Platte danach nicht mehr ändern.
+        await sleepMs(3000);
+        const nach = await cdp.evaluate<{ disk: string; view: string | null; editor: string | null }>(lesen);
+        const snap = await ppSnapshotInfo(cdp);
+        const zeilen = (t: string): string[] => t.split("\n").filter((l) => l.trim() !== "");
+        const erwartet = [...zeilen(shapesBody).map((l) => (l.startsWith("box Platte ") ? l.replace(" 0.725 ", " 0.925 ") : l)), typedLine];
+        const platteOk = zeilen(nach.disk).join("\n") === erwartet.join("\n");
+        const ansichtOk = nach.view === nach.disk && nach.editor === nach.disk;
+        const snapOk = snap.count === snapVorher + 1 && (snap.newest ?? "").includes(typedLine) && /box Platte [^\n]* 0\.725 /.test(snap.newest ?? "");
+        // Strg+Z (Cmd+Z) im Editor der Ansicht: die Übernahme kommt als externe Änderung ohne Historie an, das Rückgängig trifft das Getippte; die Änderung der Platte bleibt
+        // (der Rückweg für die Übernahme ist der Schnappschuss), und Ansicht und Platte bleiben gleich.
+        await cdp.evaluate(`${SHAPES_LEAF} cmOf(leafFor(${JSON.stringify(SMOKE_PP_SHAPES)}))?.focus(); return true;`);
+        const z = { key: "z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: process.platform === "darwin" ? 4 : 2 };
+        await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...z });
+        await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...z });
+        await sleepMs(3000);
+        const rueck = await cdp.evaluate<{ disk: string; view: string | null; editor: string | null }>(lesen);
+        const rueckOk = rueck.editor !== null && !rueck.editor.includes(typedLine) && /box Platte [^\n]* 0\.925 /.test(rueck.editor) && rueck.disk === rueck.editor;
+        const detail = `Tippen per ${getippt.how}, Getipptes beim Klick auf der Platte: ${getippt.disk.includes(typedLine)} (erwartet false) · Platte nach dem Übernehmen ${geschrieben.reached ? "geändert" : "NICHT geändert"}, Zeilen wie erwartet (Getipptes + Platte 0,925): ${platteOk} · Ansicht/Editor gleich der Platte: ${ansichtOk} · Schnappschuss ${snapVorher} → ${snap.count} (erwartet +1), enthält das Getippte: ${(snap.newest ?? "").includes(typedLine)} · nach Strg+Z: Getipptes ${rueck.editor?.includes(typedLine) ? "noch da" : "weg"}, Platte 0,925 ${/box Platte [^\n]* 0\.925 /.test(rueck.editor ?? "")}, Platte = Editor ${rueck.disk === rueck.editor}`;
+        if (!gueltig) ppNothing("PP35", T.PP35, `Messung ungültig: ${detail}`);
+        else ppRecord("PP35", T.PP35, geschrieben.reached && platteOk && ansichtOk && snapOk && rueckOk, detail);
+        if (!platteOk || !rueckOk) console.log(`  PP35 Rohwerte: nach=${JSON.stringify(nach)} · rück=${JSON.stringify(rueck)}`);
+      }
+      await cdp.evaluate(`app.workspace.getLeavesOfType(${JSON.stringify(SHAPES_VIEW_TYPE)}).filter((l) => l.view?.file?.path === ${JSON.stringify(SMOKE_PP_SHAPES)}).forEach((l) => l.detach()); return true;`);
     }
 
     // --- PP12. Migration des globalen Modells ------------------------------------
