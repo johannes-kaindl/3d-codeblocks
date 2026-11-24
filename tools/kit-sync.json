@@ -10,7 +10,7 @@
         "num", "settings_schema", "secrets", { "name": "redact", "ref": "0.87.0" }, "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "anthropic-wire", "text-window", "rel-path", "block-lines", "split-list", "fences", "panel-session", "css-color", "measured-quality", "error-message", "sha256", "run-slot", "panel-host", "rotation"
+        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "anthropic-wire", "text-window", "rel-path", "block-lines", "split-list", { "name": "fences", "ref": "0.87.0" }, "panel-session", "css-color", "measured-quality", "error-message", "sha256", "run-slot", "panel-host", "rotation"
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },

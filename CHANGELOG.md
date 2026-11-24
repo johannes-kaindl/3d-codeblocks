@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - **A secret glued to a word is now redacted before it is sent** (shared library code-kit 0.87.0): `key_sk-proj-…`, `my_AKIA…` and `x_Bearer …` stayed in clear text before, and an IBAN behind `_` (`iban_DE89…`) was not read as an IBAN. Ordinary words that end in `sk` (`task-…`) stay untouched.
 
+### Changed
+
+- **Finding the models a note uses reads fenced blocks with the library's fence reader** (code-kit 0.87.0 `listAllFences`) instead of a private copy. Three rare forms now read as Obsidian renders them: a tab-indented ```` ```3d ```` outside a list is an indented code block, not a block; a `> ```` line does not close a flat fence; an unclosed fence inside a list item runs to the end of the note (its last lines count as part of the block).
+
 ## [0.14.2] — 2026-11-19
 
 ### Fixed

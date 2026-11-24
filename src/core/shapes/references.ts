@@ -5,7 +5,7 @@
 // von außen, damit beide Wege dieselbe Wikilink-Semantik haben.
 // Ein übersehener Verweis lässt Datei → Block eine noch benutzte Datei löschen: im Zweifel zählen.
 import { parseBlockConfig } from "../block-config";
-import { wrapInFence } from "../../vendor/kit/fences";
+import { listAllFences, wrapInFence } from "../../vendor/kit/fences";
 
 export interface NoteText {
   path: string;
@@ -33,9 +33,6 @@ const WIKI = /(!?)\[\[([^[\]|#^]+)(?:[#^|](?:[^\][]|\[(?!\[))*)?\]\]/g;
 // Erweiterungen auch in dieser Schreibweise (embed.ts:67 MODEL_EXTENSIONS, registerExtension).
 // Gleiche Bauart: der Alt-Text hört vor jedem `![` auf, der Pfad enthält weder `(` noch `<` (spitze Klammern nur als Umschließung), sonst liefe jede Startstelle bis ans Zeilenende.
 const MD_EMBED = /!\[(?:(?!!\[)[^\]])*\]\((<[^<>]*>|[^()\s<]*)\)/g;
-const QUOTE = /^\s*>[ ]?/;
-const LIST_MARK = /^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+/;
-const FENCE_OPEN = /^(`{3,}|~{3,})\s*([^\s`]*)/;
 
 interface ScannedFence {
   lang: string;
@@ -47,74 +44,24 @@ interface ScannedFence {
   body: string;
 }
 
-function stripQuotes(line: string): { rest: string; quoted: boolean; depth: number } {
-  let rest = line;
-  let depth = 0;
-  while (QUOTE.test(rest)) {
-    rest = rest.replace(QUOTE, "");
-    depth += 1;
-  }
-  return { rest, quoted: depth > 0, depth };
-}
-
 /**
- * Zaunsuche, die Zitat- und Listen-Präfixe kennt (Obsidian rendert solche Zäune; der Kit-Leser `listFences` bewusst nicht).
- * Ein Zaun in einem Zitat endet spätestens an der ersten Zeile ohne `>`; ein Zaun in einem Listenpunkt
- * an der ersten nicht leeren Zeile, die unter die Einrückung des Zaunbeginns fällt. Nur ein Zaun auf
- * oberster Ebene läuft (wie bei listFences) bis zum Dateiende.
+ * Alle Zäune einer Notiz, flach und verschachtelt, aus dem Kit-Leser `listAllFences` (code-kit 0.87.0; dieselbe Lesart wie `countFences` und `findNestedFenceAt`).
+ * Zwei Dinge liest das Kit nicht und bleiben hier, mit Grund:
+ * - `nested` ist hier weiter als beim Kit: auch ein Zaun auf der Zeile eines Listenmarkers (`- ```3d`, im Kit flach) und ein eingerückter Zaun unter einem
+ *   offenen Listenpunkt gelten als verschachtelt, denn ein Ersatz an Spalte 0 würde die Liste zerreißen (der Aufrufer lehnt dann ab).
+ * - Ein nicht geschlossener Zaun endet beim Kit auf der letzten Zeile seines Zitats oder der Notiz; `to` schneidet die leeren Schlusszeilen ab, damit ein Ersatz
+ *   keine Leerzeilen mitnimmt, die nicht zum Zaun gehören.
  */
 function scanFences(lines: string[]): ScannedFence[] {
-  const out: ScannedFence[] = [];
   const containers = containerTracker(lines);
-  let i = 0;
-  while (i < lines.length) {
-    // Zitat- und Listenpräfixe abwechselnd abstreifen, bis nichts mehr geht (`- > ```3d`, `- - ```3d`).
-    let rest = lines[i];
-    let depth = 0;
-    let marked = false;
-    for (;;) {
-      if (QUOTE.test(rest)) {
-        rest = rest.replace(QUOTE, "");
-        depth += 1;
-      } else if (LIST_MARK.test(rest)) {
-        rest = rest.replace(LIST_MARK, "");
-        marked = true;
-      } else break;
-    }
-    const quoted = depth > 0;
-    const indent = /^[ \t]*/.exec(rest)?.[0] ?? "";
-    const fenceText = rest.slice(indent.length);
-    const open = FENCE_OPEN.exec(fenceText);
-    // CommonMark: der Info-String eines Backtick-Zauns darf keinen Backtick enthalten ("```x``` text" ist kein Zaun).
-    if (!open || (open[1][0] === "`" && fenceText.slice(open[1].length).includes("`"))) {
-      i += 1;
-      continue;
-    }
-    const nested = quoted || marked || indent.includes("\t") || indent.length > 3 || (indent.length > 0 && containers(i).list);
-    const marker = open[1];
-    const closeRe = new RegExp(`^\\s*${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
-    const col = lines[i].length - fenceText.length;
-    let j = i + 1;
-    let closed = false;
-    const body: string[] = [];
-    while (j < lines.length) {
-      const stripped = stripQuotes(lines[j]);
-      // Zitat-Tiefe: der Zaun endet, sobald die Tiefe unter die des Zaunbeginns fällt.
-      if (quoted && stripped.depth < depth) break;
-      if (!quoted && nested && lines[j].trim() !== "" && /^[ \t]*/.exec(lines[j])![0].length < col) break;
-      if (closeRe.test(stripped.rest) && (nested || /^ {0,3}\S/.test(stripped.rest))) {
-        closed = true;
-        break;
-      }
-      body.push(stripped.rest.trim());
-      j += 1;
-    }
-    let to = closed ? j : j - 1;
-    while (!closed && to > i && stripQuotes(lines[to]).rest.trim() === "") to -= 1;
-    out.push({ lang: open[2].toLowerCase(), from: i, to, nested, closed, body: body.join("\n") });
-    i = to + 1;
-  }
-  return out;
+  return listAllFences(lines.join("\n")).map((f) => {
+    const open = lines[f.openLine] ?? "";
+    const flatStart = /^ {0,3}(?:`{3,}|~{3,})/.test(open);
+    const indented = /^[ \t]+/.test(open) && containers(f.openLine).list;
+    let to = f.closeLine;
+    while (!f.closed && to > f.openLine && (lines[to] ?? "").replace(/^(?:\s*>[ ]?)+/, "").trim() === "") to -= 1;
+    return { lang: f.lang, from: f.openLine, to, nested: f.nested || !flatStart || indented, closed: f.closed, body: f.body };
+  });
 }
 
 const LIST_LINE = /^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+/;

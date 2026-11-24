@@ -275,15 +275,34 @@ describe("findModelReferences: fix round 2", () => {
   it("A: an unclosed quoted fence of another language does not swallow what follows", () => {
     expect(run("> ```md\n> a\nplain ![[tisch.shapes]]").map((r) => r.kind)).toEqual(["embed"]);
   });
-  it("A: an unclosed list fence ends at the dedent", () => {
-    const refs = run("- x\n  ```3d\n  file: tisch.shapes\n\n![[tisch.shapes]]");
-    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([
-      ["block", 1, 2],
-      ["embed", 4, 4],
-    ]);
+  it("A: an unclosed list fence runs on like the kit reader reads it (code-kit 0.87.0 listAllFences); the embed behind it is part of the block, not lost", () => {
+    // Bis 0.14.2 endete der eigene Scanner am Einzug (block 1-2, embed 4). Der Kit-Leser lässt einen eingerückten, nicht geschlossenen Zaun bis ans Textende laufen;
+    // die Zeile dahinter liegt im Block (und ist dort die Modellzeile). Gemessen an 60 000 erzeugten Notizen gegen die alte Fassung: keine Erwähnung der Datei fiel durch,
+    // jede lag in einem Verweis oder wurde von `unaccountedMentions` gemeldet.
+    const text = "- x\n  ```3d\n  file: tisch.shapes\n\n![[tisch.shapes]]";
+    const refs = run(text);
+    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([["block", 1, 4]]);
+    expect(unaccountedMentions([{ path: "a.md", text }], TARGET, refs).map((m) => m.line)).toEqual([]);
+    expect(refs[0]).toMatchObject({ nested: true });
+  });
+  it("A: a tab-indented fence outside a list is an indented code block, no fence (CommonMark, kit reader); its mention is reported", () => {
+    const text = "\t```3d\n  file: tisch.shapes";
+    const refs = run(text);
+    expect(refs).toEqual([]);
+    expect(unaccountedMentions([{ path: "a.md", text }], TARGET, refs).map((m) => m.line)).toEqual([1]);
+  });
+  it("A: a quoted fence line does not close a flat fence (CommonMark, kit reader); the fence runs on and holds the embed line as its model reference", () => {
+    // Bis 0.14.2 schloss `> ```` den Zaun (der eigene Scanner strich das Zitatzeichen auch bei einem flachen Zaun) und der Embed galt als eigener Verweis.
+    const text = "```3d\n> ```\n![[tisch.shapes]]";
+    const refs = run(text);
+    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([["block", 0, 2]]);
+    expect(unaccountedMentions([{ path: "a.md", text }], TARGET, refs)).toEqual([]);
   });
   it("A: a top-level unclosed fence still runs to the end", () => {
     expect(run("```3d\nfile: tisch.shapes\n\n![[tisch.shapes]]").map((r) => [r.kind, r.from, r.to])).toEqual([["block", 0, 3]]);
+  });
+  it("A: an unclosed fence does not take its trailing blank lines (a replacement would swallow them)", () => {
+    expect(run("```3d\nfile: tisch.shapes\n\n\n").map((r) => [r.kind, r.from, r.to])).toEqual([["block", 0, 1]]);
   });
   it("A: an opener with a backtick in the info string is no fence", () => {
     expect(run("```x``` text\n![[tisch.shapes]]").map((r) => r.kind)).toEqual(["embed"]);
@@ -335,8 +354,10 @@ describe("findModelReferences: fix round 3", () => {
   it("N2: a lazily continued list item stays open", () => {
     expect(run("- a\nlazy\n\n  ![[tisch.shapes]]")[0]).toMatchObject({ kind: "embed", alone: false });
     expect(run("- a\nlazy\n\n  ```3d\n  file: tisch.shapes\n  ```")[0]).toMatchObject({ kind: "block", nested: true, from: 3, to: 5 });
-    const refs = run("- a\nlazy\n\n  ```3d\n  file: x\n\n![[tisch.shapes]]");
-    expect(refs.map((r) => [r.kind, r.from])).toEqual([["embed", 6]]);
+    // Ein nicht geschlossener Zaun im Listenpunkt läuft beim Kit-Leser bis ans Textende (code-kit 0.87.0); der Embed dahinter ist ein gemeldeter Treffer, kein Verweis.
+    const text = "- a\nlazy\n\n  ```3d\n  file: x\n\n![[tisch.shapes]]";
+    // Der Embed ist dann die Modellzeile des Blocks (`parseBlockConfig` liest einen blanken Wikilink als `file`), also weiter ein Verweis, jetzt als Block.
+    expect(run(text).map((r) => [r.kind, r.from, r.to, r.kind === "block" && r.nested])).toEqual([["block", 3, 6, true]]);
   });
   it("N3: quote-in-list and list-in-list fences are found", () => {
     expect(run("- > ```3d\n  > file: tisch.shapes\n  > ```")[0]).toMatchObject({ kind: "block", nested: true, from: 0, to: 2 });
