@@ -1,7 +1,8 @@
 // UI-Texte, die nicht an einer einzelnen Zeile hängen (UI-STANDARD §10), und die Brücke zu den Kit-Bausteinen, die ihre Texte als Bündel nehmen.
-// Die Wörterbücher stehen in `texts-en.ts`/`texts-de.ts`, die Engine in `t.ts`. `PANEL_TEXTS` und `ACCEPT_STRINGS` lesen die Sprache bei jedem Zugriff
+// Die Wörterbücher stehen in `texts-en.ts`/`texts-de.ts`, die Engine in `t.ts`. `PANEL_TEXTS` liest die Sprache bei jedem Zugriff, `acceptStrings()` bei jedem Aufruf
 // (Getter): die Sprache wird erst im `onload` gesetzt, die Module sind da längst geladen.
-import type { AcceptStrings, InsertWhere } from "../vendor/kit-obsidian/panel-accept";
+import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
+import { resolveAcceptStrings } from "../vendor/kit-obsidian/panel-accept-strings";
 import { HELP_SETTING_TEXTS_DE, HELP_SETTING_TEXTS_EN, type HelpSettingTexts } from "../vendor/kit-obsidian/help-setting";
 import {
   isManagerErrorCode,
@@ -51,32 +52,15 @@ export const PANEL_TEXTS = {
       : t("panel.reason", detail),
 };
 
-/** Meldungen des Übernehmens (Kit `panel-accept`, `AcceptStrings`): ganze Sätze, das Panel zeigt sie unverändert. */
-export const ACCEPT_STRINGS: AcceptStrings = {
-  unsupported: (label) => PANEL_TEXTS.unsupported(label),
-  notApplied: (problem) => t("accept.notApplied", problem),
-  get unchanged() { return t("accept.unchanged"); },
-  get cannotReplace() { return t("accept.cannotReplace"); },
-  get blockMoved() { return t("accept.blockMoved"); },
-  get blockChanged() { return t("accept.blockChanged"); },
-  get noteChanged() { return t("accept.noteChanged"); },
-  get closesFence() { return t("accept.closesFence"); },
-  /** Block hinter einem Listenmarker (`- ```shapes`, seit code-kit 0.78.0 gefunden): das Kit lehnt ab, bevor etwas geschrieben wird. */
-  get blockInList() { return t("accept.blockInList"); },
-  get cancelled() { return t("accept.cancelled"); },
-  get noNoteOpen() { return PANEL_TEXTS.noNoteOpen; },
-  get noteInReadingView() { return PANEL_TEXTS.noteInReadingView; },
-  appliedTo: (label) => t("accept.appliedTo", label),
-  appliedAsBlock: (where: InsertWhere) => t("accept.appliedAsBlock", t(`accept.where.${where}`)),
-  get appendedToNote() { return t("accept.appendedToNote"); },
-  fileGone: (path) => t("accept.fileGone", path),
-  fileExists: (path) => t("accept.fileExists", path),
-  couldNotCreate: (path, reason) => (path ? t("accept.couldNotCreate", path, reason) : t("accept.couldNotCreateAnon", reason)),
-  savedFileWithReference: (path) => t("accept.savedWithReference", path),
-  savedFileNoReference: (path, why) => t("accept.savedNoReference", path, t(`accept.noRef.${why}`)),
-  savedFileAppended: (path) => t("accept.savedAppended", path),
-  savedFileReferenceFailed: (path, reason) => t("accept.savedReferenceFailed", path, reason),
-  unclosedFence: (selected) => t(selected ? "accept.unclosedFence.selection" : "accept.unclosedFence.cursor"),
-  nestedFence: (selected) => t(selected ? "accept.nestedFence.selection" : "accept.nestedFence.cursor"),
-  couldNotApply: (reason) => t("accept.couldNotApply", reason),
-};
+/** Meldungen des Übernehmens (Kit `panel-accept`, `AcceptStrings`): die Standardtexte des Kits (obsidian-kit 0.111.0, `resolveAcceptStrings`), überlagert nur
+ *  mit den Sätzen, die fachlich diesem Plugin gehören (MIGRATION § 0.111.0 Punkt 4: „ein neues Modell“, „das Modell sieht schon so aus“). Eine Funktion,
+ *  weil die Sprache erst im `onload` feststeht; `buildAcceptEnv` ruft sie dann. */
+export function acceptStrings(): AcceptStrings {
+  return resolveAcceptStrings({
+    lang: getLang() === "de" ? "de" : "en",
+    unchanged: t("accept.unchanged"),
+    cannotReplace: t("accept.cannotReplace"),
+    blockMoved: t("accept.blockMoved"),
+    appliedTo: (label) => t("accept.appliedTo", label),
+  });
+}

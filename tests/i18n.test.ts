@@ -8,7 +8,7 @@ import { applyChanges } from "../src/core/shapes/changes";
 import { parseShapes } from "../src/core/shapes/parse";
 import { DE } from "../src/i18n/texts-de";
 import { EN } from "../src/i18n/texts-en";
-import { ACCEPT_STRINGS, helpTexts, PANEL_TEXTS } from "../src/i18n/strings";
+import { acceptStrings, helpTexts, PANEL_TEXTS } from "../src/i18n/strings";
 import { promptPanelStrings } from "../src/obsidian/prompt-panel";
 import { getLang, pickLang, setLang, t } from "../src/i18n/t";
 import { makeFakeApp, setMockLanguage } from "./__mocks__/obsidian";
@@ -63,8 +63,6 @@ describe("Wörterbücher EN/DE", () => {
       ...["create", "refine"].flatMap((tk) => [`quality.${tk}.measured`, `quality.${tk}.plural`]),
       ...["model", "text", "split"].map((m) => `sv.${m}`),
       ...["list", "quote", "indent", "inline", "table", "continuation", "markdown-embed"].map((r) => `conv.reason.${r}`),
-      ...["after-block-at-selection", "after-block-at-cursor", "after-frontmatter", "after-selection", "at-cursor"].map((w) => `accept.where.${w}`),
-      ...["reading", "note-changed", "no-note"].map((w) => `accept.noRef.${w}`),
     ];
     expect(families.filter((k) => !(k in EN) || !(k in DE))).toEqual([]);
   });
@@ -96,13 +94,13 @@ describe("Deutsch an den Stellen, die der Nutzer sieht", () => {
     expect(PANEL_TEXTS.title).toBe("Modell per Prompt");
     expect(PANEL_TEXTS.accept).toBe("Übernehmen");
     expect(PANEL_TEXTS.roundChanges(3)).toBe("3 Änderung(en)");
-    expect(ACCEPT_STRINGS.appliedTo("Tisch")).toBe("Übernommen in Tisch.");
-    expect(ACCEPT_STRINGS.appliedAsBlock("after-frontmatter")).toBe("In der offenen Notiz als Codeblock übernommen, hinter der Frontmatter.");
-    expect(ACCEPT_STRINGS.savedFileNoReference("a.shapes", "reading")).toContain("Leseansicht");
-    expect(ACCEPT_STRINGS.unclosedFence(true)).toContain("nie geschlossen");
-    expect(ACCEPT_STRINGS.nestedFence?.(false)).toContain("Zitats, Callouts oder einer Liste");
-    // Kit 0.98.0: der Block hinter einem Listenmarker wird abgelehnt; der Text gehört dem Plugin (der Kit-Standard wäre Englisch).
-    expect(ACCEPT_STRINGS.blockInList).toContain("steht in einer Liste");
+    expect(acceptStrings().appliedTo("Tisch")).toBe("Übernommen in Tisch.");
+    expect(acceptStrings().appliedAsBlock("after-frontmatter")).toBe("Codeblock hinter den Eigenschaften der Notiz eingefügt.");
+    expect(acceptStrings().savedFileNoReference("a.shapes", "reading")).toContain("Lesemodus");
+    expect(acceptStrings().unclosedFence(true)).toContain("nie geschlossen");
+    expect(acceptStrings().nestedFence?.(false)).toContain("Zitats, Callouts oder einer Liste");
+    // Kit 0.98.0: der Block hinter einem Listenmarker wird abgelehnt; seit 0.111.0 mit dem deutschen Standardtext des Kits.
+    expect(acceptStrings().blockInList).toContain("steht in einer Liste");
   });
 
   it("die Kit-Bündel (Hilfe-Zeile) und die Texte, die das Plugin im Kit-Rahmen selbst sagt, wechseln mit", () => {

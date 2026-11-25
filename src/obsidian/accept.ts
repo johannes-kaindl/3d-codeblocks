@@ -8,7 +8,7 @@ import { exportBaseName } from "../core/shapes/export";
 import { acceptText, chainOf, type PanelState, type PanelTarget } from "../core/shapes/panel-state";
 import { parseShapes } from "../core/shapes/parse";
 import { referenceBlock, shapesBlock } from "../core/shapes/references";
-import { ACCEPT_STRINGS } from "../i18n/strings";
+import { acceptStrings } from "../i18n/strings";
 import { t } from "../i18n/t";
 import type { WritePorts } from "../vendor/kit/block-writer";
 import { readBlockText, type AcceptEnv, type AcceptOutcome, type AcceptSpec } from "../vendor/kit-obsidian/panel-accept";
@@ -23,7 +23,7 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
 
 /** Der Kit-`AcceptEnv` fuer dieses Plugin ohne Einstellung und Wahl (der Rahmen waehlt nie; beide Wege sind Knoepfe): Meldungen aus `src/i18n`, Lesemodus lehnt ab. */
 export function buildAcceptEnv(d: { app: App; ports: WritePorts; lastEditor: () => MarkdownView | null }): Omit<AcceptEnv, "settings" | "choose"> {
-  return { app: d.app, ports: d.ports, lastEditor: d.lastEditor, strings: ACCEPT_STRINGS, readingMode: "refuse" };
+  return { app: d.app, ports: d.ports, lastEditor: d.lastEditor, strings: acceptStrings(), readingMode: "refuse" };
 }
 
 /** Offene Ansichten einer .shapes-Datei (wie `convertFileToBlock`): ihr Puffer kann neuer sein als die Platte. */

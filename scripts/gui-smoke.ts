@@ -4823,7 +4823,7 @@ let PP37_NO_NOTE = "Open a note to insert a code block.";
 let PP37_READING = "reading view";
 const PP_CREATE_PROMPT = "A table: top 1.2 x 0.7 m, four legs, 0.75 m high.";
 const PP_REFINE_PROMPT = "Raise the table top by 20 cm.";
-let PP_STALE_MESSAGE = "The block changed — nothing was applied.";
+let PP_STALE_MESSAGE = "Block changed: its content differs from what the panel opened; nothing was written.";
 let PP_EDIT_LABEL = "Edit in prompt panel";
 /** Selektor der Formen, die ein Lucide-Icon in seinem `<svg>` trägt — ein leeres `<svg>` (unbekannte Icon-ID) hat keine. */
 const PP_ICON_SHAPE = "svg path, svg line, svg circle, svg rect, svg polyline, svg polygon, svg ellipse";
@@ -7127,7 +7127,7 @@ async function main(): Promise<void> {
     PP37_NO_NOTE = "Öffne eine Notiz, um einen Codeblock einzufügen.";
     PP37_READING = "Leseansicht";
     PP_EDIT_LABEL = "Im Prompt-Panel bearbeiten";
-    PP_STALE_MESSAGE = "Der Block hat sich geändert — es wurde nichts übernommen.";
+    PP_STALE_MESSAGE = "Block geändert: Sein Inhalt weicht von dem ab, den das Panel geöffnet hat; nichts geschrieben.";
   }
   const keep = args.has("keep");
   const modelArg = flag("model");

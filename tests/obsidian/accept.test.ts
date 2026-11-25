@@ -8,7 +8,6 @@ import { pushRound, type Rounds } from "../../src/vendor/kit/rounds";
 import { EMPTY_ROUNDS } from "../../src/vendor/kit/rounds";
 import type { PluginSettings } from "../../src/core/settings-types";
 import type { RawChange } from "../../src/core/shapes/protocol";
-import { PANEL_TEXTS } from "../../src/i18n/strings";
 
 // Seit K9 Etappe 3 schreibt der Kit-Rahmen (Station 7) mit der Beschreibung dieses Plugins; die Kette der Kit-Aufrufe, wie `acceptVia` des Rahmens sie macht
 // (erst `prepare`, dann `acceptPanel` des Kits mit der Beschreibung ohne `beforeWrite`), steht hier einmal nach, damit die Fälle dieser Datei weiter an der
@@ -192,7 +191,7 @@ describe("acceptPanel — target shapes-block", () => {
     const hand = NOTE.replace("-0.55 0.35 -0.3", "-0.5 0.35 -0.3");
     const { env, store } = setup({ "n.md": hand });
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
-    expect(r).toEqual({ ok: false, message: "The block changed — nothing was applied." });
+    expect(r).toEqual({ ok: false, message: "Block changed: its content differs from what the panel opened; nothing was written." });
     expect(store["n.md"]).toBe(hand);
     expect(await readTargetText(env, BLOCK)).toBeNull();
   });
@@ -212,7 +211,7 @@ describe("acceptPanel — target shapes-block", () => {
     it("refine chain: refused, C untouched", async () => {
       const { env, store } = setup({ "n.md": afterDelete });
       const r = await acceptPanel(env, stateOf(staleB, refine([{ op: "change", name: "C", size: [9, 9, 9] }], "box B size 2 at 0 0 0")));
-      expect(r).toEqual({ ok: false, message: "The block changed — nothing was applied." });
+      expect(r).toEqual({ ok: false, message: "Block changed: its content differs from what the panel opened; nothing was written." });
       expect(store["n.md"]).toBe(afterDelete);
       expect(await readTargetText(env, staleB)).toBeNull();
     });
@@ -277,7 +276,7 @@ describe("acceptPanel — target shapes-block", () => {
       return text;
     };
     const r = await acceptPanel(env, stateOf(BLOCK, refine(UP)));
-    expect(r).toEqual({ ok: false, message: "The note changed — nothing was applied." });
+    expect(r).toEqual({ ok: false, message: "The target changed while applying; nothing was written. Try again." });
     expect(store["n.md"]).toBe(NOTE.replace("1.2", "7.7"));
   });
   it("refuses a create root on an existing block", async () => {
@@ -437,7 +436,7 @@ describe("acceptPanel — target new", () => {
     // Seit K9 liefert ein neu eingefügter Block ein `retarget`: das Fenster arbeitet auf ihm weiter, statt neu zu beginnen (Beschriftung = Titel der Form).
     expect(r).toEqual({
       ok: true,
-      message: "Applied to the open note as a code block after the selection.",
+      message: "Code block inserted after the selection.",
       retarget: { kind: "block", path: "n.md", lineStart: 1, lineEnd: 4, label: "Tisch", body: MODEL },
     });
     expect(selections).toEqual([]);
@@ -447,7 +446,7 @@ describe("acceptPanel — target new", () => {
     const note = ["a", "```js", "x()", "```", "b"].join("\n");
     const { env, store, selections } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
-    expect(r.message).toBe("Applied to the open note as a code block after the code block at the cursor.");
+    expect(r.message).toBe("Code block inserted after the code block at the cursor.");
     expect(selections).toEqual([]);
     expect(store["n.md"]).toBe(["a", "```js", "x()", "```", "", "```shapes", MODEL, "```", "", "b"].join("\n"));
   });
@@ -455,7 +454,7 @@ describe("acceptPanel — target new", () => {
     const note = ["a", "```js", "x()", "y()", "```", "b"].join("\n");
     const { env, store } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, selection: { to: { line: 2, ch: 3 } } });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
-    expect(r.message).toBe("Applied to the open note as a code block after the code block at the selection.");
+    expect(r.message).toBe("Code block inserted after the code block at the selection.");
     expect(store["n.md"]).toBe(["a", "```js", "x()", "y()", "```", "", "```shapes", MODEL, "```", "", "b"].join("\n"));
   });
   it("as block with the cursor in a fence that is never closed: refused with a message, nothing written", async () => {
@@ -463,7 +462,7 @@ describe("acceptPanel — target new", () => {
     const { env, store, selections } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
     expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/never closed.*nothing was applied/i);
+    expect(r.message).toMatch(/never closed.*nothing was inserted/i);
     expect(selections).toEqual([]);
     expect(store["n.md"]).toBe(note);
   });
@@ -472,7 +471,7 @@ describe("acceptPanel — target new", () => {
     const { env, store, selections } = setup({ "n.md": note }, { settings: { acceptAs: "block" }, cursorLine: 2 });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
     expect(r.ok).toBe(false);
-    expect(r.message).toBe("The cursor is in a code block inside a quote, callout or list — nothing was applied. Move it outside and try again.");
+    expect(r.message).toBe("The cursor is in a code block inside a quote, callout or list. Nothing was written; move the cursor outside it and try again.");
     expect(selections).toEqual([]);
     expect(store["n.md"]).toBe(note);
   });
@@ -504,13 +503,13 @@ describe("acceptPanel — target new", () => {
   it("as block without an open note: noNoteOpen, nothing written", async () => {
     const { env, selections, store } = setup({}, { settings: { acceptAs: "block" }, noEditorView: true });
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
-    expect(r).toEqual({ ok: false, message: PANEL_TEXTS.noNoteOpen });
+    expect(r).toEqual({ ok: false, message: "No note is open to put a code block in; nothing was written." });
     expect(selections).toEqual([]);
     expect(Object.keys(store)).toEqual([]);
   });
   it("as block with a note in reading mode: noNoteOpen", async () => {
     const { env, selections } = setup({ "n.md": "intro" }, { settings: { acceptAs: "block" }, previewMode: true });
-    expect(await acceptPanel(env, stateOf(NEW, create(MODEL)))).toEqual({ ok: false, message: PANEL_TEXTS.noteInReadingView });
+    expect(await acceptPanel(env, stateOf(NEW, create(MODEL)))).toEqual({ ok: false, message: "The note is in reading view; nothing was written. Switch it to editing." });
     expect(selections).toEqual([]);
   });
   it("as file: creates the file and inserts a reference", async () => {
@@ -539,7 +538,7 @@ describe("acceptPanel — target new", () => {
     const r = await acceptPanel(env, stateOf(NEW, create(MODEL)));
     expect(r.ok).toBe(true);
     expect(r.message).toContain("Anhänge/Tisch.shapes");
-    expect(r.message).toMatch(/reference could not be inserted/);
+    expect(r.message).toMatch(/link could not be inserted/);
     expect(store["Anhänge/Tisch.shapes"]).toBe(MODEL + "\n");
   });
   it("as file without an open note: file created, message says no reference", async () => {
@@ -565,7 +564,7 @@ describe("acceptPanel — target new", () => {
 describe("acceptPanel — other and robustness", () => {
   it("other targets are unsupported", async () => {
     const { env } = setup({});
-    expect(await acceptPanel(env, stateOf({ kind: "other", label: "Szene" }, refine(UP)))).toEqual({ ok: false, message: PANEL_TEXTS.unsupported("Szene") });
+    expect(await acceptPanel(env, stateOf({ kind: "other", label: "Szene" }, refine(UP)))).toEqual({ ok: false, message: "Szene can't be changed here." });
   });
   it("never rejects, even when ports throw", async () => {
     const { env } = setup({ "n.md": NOTE });
