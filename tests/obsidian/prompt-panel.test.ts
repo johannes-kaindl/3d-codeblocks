@@ -287,6 +287,33 @@ describe("createShapesRun — der Lauf", () => {
   });
 });
 
+describe("Auftragsfeld im Lauf (B11, code-kit panel-host 0.91.0)", () => {
+  it("a draft typed while the run is going stays after the round; only the sent instruction is cleared", async () => {
+    const h = held(PARTS);
+    const { host } = makeHost(h.complete);
+    host.setDraft("a box");
+    expect(host.start("a box")).toBe(true);
+    await h.started;
+    host.setDraft("now make it red");
+    h.release();
+    await host.settled();
+    expect(roundsOf(host)).toHaveLength(1);
+    expect(host.live().draft).toBe("now make it red");
+  });
+
+  it("control: without typing during the run the sent draft is cleared after the round", async () => {
+    const h = held(PARTS);
+    const { host } = makeHost(h.complete);
+    host.setDraft("a box");
+    expect(host.start("a box")).toBe(true);
+    await h.started;
+    h.release();
+    await host.settled();
+    expect(roundsOf(host)).toHaveLength(1);
+    expect(host.live().draft).toBe("");
+  });
+});
+
 describe("shapesWays — die Schreibwege", () => {
   const round = (text = "box A size 1 1 1"): ShapesRound => ({ kind: "create", instruction: "x", text, model: "m", at: 1 });
   const stateOf = (target: PanelTarget, ...rs: ShapesRound[]): PanelState => ({ target, rounds: rs.reduce((a, r) => pushRound(a, r), EMPTY_ROUNDS as PanelState["rounds"]) });

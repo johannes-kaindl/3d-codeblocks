@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { listFences } from "../../../src/vendor/kit/fences";
-import { pruefeLinear } from "../../vendor/kit/linear-probe";
+import { lastGeschuetzt, type LinearProbeSkipKontext } from "../../vendor/kit/linear-probe";
 import { findModelReferences, referenceBlock, shapesBlock, unaccountedMentions } from "../../../src/core/shapes/references";
 
 const TARGET = "Modelle/tisch.shapes";
@@ -275,13 +275,12 @@ describe("findModelReferences: fix round 2", () => {
   it("A: an unclosed quoted fence of another language does not swallow what follows", () => {
     expect(run("> ```md\n> a\nplain ![[tisch.shapes]]").map((r) => r.kind)).toEqual(["embed"]);
   });
-  it("A: an unclosed list fence runs on like the kit reader reads it (code-kit 0.87.0 listAllFences); the embed behind it is part of the block, not lost", () => {
-    // Bis 0.14.2 endete der eigene Scanner am Einzug (block 1-2, embed 4). Der Kit-Leser lässt einen eingerückten, nicht geschlossenen Zaun bis ans Textende laufen;
-    // die Zeile dahinter liegt im Block (und ist dort die Modellzeile). Gemessen an 60 000 erzeugten Notizen gegen die alte Fassung: keine Erwähnung der Datei fiel durch,
-    // jede lag in einem Verweis oder wurde von `unaccountedMentions` gemeldet.
+  it("A: an unclosed list fence ends with its list item like the kit reader reads it (code-kit 0.88.0 listAllFences); the embed behind it is its own reference", () => {
+    // Bis 0.14.2 endete der eigene Scanner am Einzug (block 1-2, embed 4); code-kit 0.87.0 ließ den Zaun bis ans Textende laufen (block 1-4); seit code-kit 0.88.0
+    // endet ein offener Zaun unter einem Listenpunkt mit dem Listenpunkt, wie in Obsidian: wieder block 1-2 und embed 4. Keine Erwähnung fällt durch.
     const text = "- x\n  ```3d\n  file: tisch.shapes\n\n![[tisch.shapes]]";
     const refs = run(text);
-    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([["block", 1, 4]]);
+    expect(refs.map((r) => [r.kind, r.from, r.to])).toEqual([["block", 1, 2], ["embed", 4, 4]]);
     expect(unaccountedMentions([{ path: "a.md", text }], TARGET, refs).map((m) => m.line)).toEqual([]);
     expect(refs[0]).toMatchObject({ nested: true });
   });
@@ -354,10 +353,10 @@ describe("findModelReferences: fix round 3", () => {
   it("N2: a lazily continued list item stays open", () => {
     expect(run("- a\nlazy\n\n  ![[tisch.shapes]]")[0]).toMatchObject({ kind: "embed", alone: false });
     expect(run("- a\nlazy\n\n  ```3d\n  file: tisch.shapes\n  ```")[0]).toMatchObject({ kind: "block", nested: true, from: 3, to: 5 });
-    // Ein nicht geschlossener Zaun im Listenpunkt läuft beim Kit-Leser bis ans Textende (code-kit 0.87.0); der Embed dahinter ist ein gemeldeter Treffer, kein Verweis.
+    // Ein nicht geschlossener Zaun im Listenpunkt endet seit code-kit 0.88.0 mit dem Listenpunkt (0.87.0: bis ans Textende, der Embed war dann die Modellzeile
+    // des Blocks); der Embed dahinter ist wieder ein eigener Verweis, der Block mit `file: x` verweist nicht auf die Datei.
     const text = "- a\nlazy\n\n  ```3d\n  file: x\n\n![[tisch.shapes]]";
-    // Der Embed ist dann die Modellzeile des Blocks (`parseBlockConfig` liest einen blanken Wikilink als `file`), also weiter ein Verweis, jetzt als Block.
-    expect(run(text).map((r) => [r.kind, r.from, r.to, r.kind === "block" && r.nested])).toEqual([["block", 3, 6, true]]);
+    expect(run(text).map((r) => [r.kind, r.from, r.to])).toEqual([["embed", 6, 6]]);
   });
   it("N3: quote-in-list and list-in-list fences are found", () => {
     expect(run("- > ```3d\n  > file: tisch.shapes\n  > ```")[0]).toMatchObject({ kind: "block", nested: true, from: 0, to: 2 });
@@ -442,24 +441,24 @@ describe("findModelReferences: Anzeigeteil mit Klammern und Laufzeit", () => {
     expect(embeds("![kaputt ![](tisch.shapes)")).toEqual(["embed"]);
   });
   // Quadratisch war jede Zeile mit vielen Öffnern ohne Abschluss: jede Startstelle lief bis ans Zeilenende (n = 10 000 Zeichen: 2,5 bis 6 s, Fuzz Welle 36).
-  const linear = (bau: (n: number) => string) => {
-    const r = pruefeLinear((text: string) => findModelReferences([{ path: "n.md", text }], TARGET, resolve), bau);
+  const linear = (ctx: LinearProbeSkipKontext, bau: (n: number) => string) => {
+    const r = lastGeschuetzt(ctx).pruefeLinear((text: string) => findModelReferences([{ path: "n.md", text }], TARGET, resolve), bau);
     expect(r.linear, r.message).toBe(true);
   };
-  it("stays linear on a line of unclosed wikilink openers", () => linear((n) => "![[".repeat(n)));
-  it("stays linear on a line of unclosed openers with an alias", () => linear((n) => "[[a|".repeat(n)));
-  it("stays linear on many indented fence lines (the list state before each fence was recomputed from line 0)", () => {
-    linear((n) => "```\n ".repeat(n));
-    linear((n) => " ```\n".repeat(n));
+  it("stays linear on a line of unclosed wikilink openers", (ctx) => linear(ctx, (n) => "![[".repeat(n)));
+  it("stays linear on a line of unclosed openers with an alias", (ctx) => linear(ctx, (n) => "[[a|".repeat(n)));
+  it("stays linear on many indented fence lines (the list state before each fence was recomputed from line 0)", (ctx) => {
+    linear(ctx, (n) => "```\n ".repeat(n));
+    linear(ctx, (n) => " ```\n".repeat(n));
   });
   it("still reads a fence inside a list item as nested after a long text", () => {
     const text = [...Array.from({ length: 300 }, (_, i) => `Zeile ${i}`), "- Punkt", "  ```3d", "  file: tisch.shapes", "  ```"].join("\n");
     const refs = findModelReferences([{ path: "n.md", text }], TARGET, resolve);
     expect(refs.map((r) => [r.kind, r.kind === "block" ? r.nested : null])).toEqual([["block", true]]);
   });
-  it("stays linear on a line of unclosed markdown embeds", () => {
-    linear((n) => "![".repeat(n));
-    linear((n) => "![a](<".repeat(n));
-    linear((n) => "![](b".repeat(n));
+  it("stays linear on a line of unclosed markdown embeds", (ctx) => {
+    linear(ctx, (n) => "![".repeat(n));
+    linear(ctx, (n) => "![a](<".repeat(n));
+    linear(ctx, (n) => "![](b".repeat(n));
   });
 });

@@ -1,21 +1,22 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.105.0" },
-    "code-kit": { "ref": "0.78.0" }
+    "obsidian-kit": { "ref": "0.111.0" },
+    "code-kit": { "ref": "0.91.1" }
   },
   "targets": [
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
       "modules": [
-        "num", "settings_schema", "secrets", { "name": "redact", "ref": "0.87.0" }, "safe-markdown",
+        "num", "settings_schema", "secrets", "redact", "safe-markdown",
         "rounds", "sampling-profiles", "backend-probe", "model-list-cache", "endpoint", "endpoint_config",
         "endpoint_diagnostics", "error_body", "sse", "reasoning", "capabilities", "think-splitter",
-        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "anthropic-wire", "text-window", "rel-path", "block-lines", "split-list", { "name": "fences", "ref": "0.87.0" }, "panel-session", "css-color", "measured-quality", "error-message", "sha256", "run-slot", "panel-host", "rotation"
+        "think-toggle", "timeout", "model-choice", "data-url", "stream-blocks", "i18n", "replace-span", "embeddings-client", "llm-json", "model-context", "anthropic-wire", "text-window", "rel-path", "block-lines", "split-list", "fences", "panel-session", "css-color", "measured-quality", "error-message", "sha256", "run-slot", "panel-host", "rotation",
+        "bytes-equal", "editor-span", "ensure-dir", "filename-policy"
       ]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "override-guard", "block-writer", "note-edit", "plugin-id"],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["endpoint-source", "endpoint-secret-hook", "override-guard", "block-writer", "note-edit", "plugin-id", "filename-sanitizer-source"],
       "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {
@@ -25,7 +26,8 @@
         "llm-connection", "llm-connection-strings", "backend-probe", "chat-client", "chat-transport", "endpoint-source", "endpoint-list",
         "endpoint-secrets", "secrets", "shortcuts-bridge", "request-section", "request-session", "model-picker", "collapsible", "clipboard",
         "clock", "stream-area", "version-list", "endpoint-plumbing", "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport",
-        "model-bar", "model-bar-strings", "thinking-control", "write-ports", "choice-modal", "status-indicator", "panel-accept", "file-snapshot", "status-bar-item", "chat-host", "prompt-panel", "prompt-panel-host", "prompt-panel-strings"
+        "model-bar", "model-bar-strings", "thinking-control", "write-ports", "choice-modal", "status-indicator", "panel-accept", "file-snapshot", "status-bar-item", "chat-host", "prompt-panel", "prompt-panel-host", "prompt-panel-strings",
+        "create-note", "panel-accept-strings", "safe-file-name"
       ],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },

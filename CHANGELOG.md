@@ -1,10 +1,17 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) (without a `v` prefix).
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (without a `v` prefix).
 
 ## [Unreleased]
+
+### Fixed
+
+- **Text you type into the prompt panel's instruction field while a run is going stays there after the result** (shared libraries code-kit 0.91.1 and obsidian-kit 0.111.0): the panel used to clear the whole field when a round came in, so a follow-up instruction typed during a long run was lost. Only the instruction that was sent is cleared now.
+- **Converting a .shapes file into a code block reads an unclosed code fence in a list item the way Obsidian does** (code-kit 0.88.0): the fence ends with its list item, so an embed of the model below it counts as its own reference again instead of being read as part of the unclosed block.
+
+### Changed
+
+- **The messages after Apply use the shared wording of the other plugins** (obsidian-kit 0.111.0): for example "Block changed: its content differs from what the panel opened; nothing was written." instead of "The block changed — nothing was applied."; the sentences that are specific to 3D models stay.
 
 ## [0.14.3] — 2026-11-24
 
