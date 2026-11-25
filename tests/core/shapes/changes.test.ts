@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges, applyChangesAnswer, matchPart } from "../../../src/core/shapes/changes";
 import { readChangesAnswer } from "../../../src/core/shapes/protocol";
-import { pruefeLinear } from "../../vendor/kit/linear-probe";
+import { lastGeschuetzt, type LinearProbeSkipKontext } from "../../vendor/kit/linear-probe";
 
 const TABLE = [
   "title: Tisch",
@@ -438,11 +438,11 @@ describe("shape change (Plan 3b)", () => {
 
 describe("applyChanges: Laufzeit auf dem Text der Datei", () => {
   // Der Text stammt aus der Datei des Nutzers; Quadratisch waere 5x Eingabe = 25x Zeit (Probe: n = 1 000, 10 000, 50 000, Quotient < 12 oder unter 50 ms).
-  const linear = (bau: (n: number) => string) => {
-    const r = pruefeLinear((text: string) => applyChanges(`title: t\nbox a\n${text}\nbox b`, []), bau);
+  const linear = (ctx: LinearProbeSkipKontext, bau: (n: number) => string) => {
+    const r = lastGeschuetzt(ctx).pruefeLinear((text: string) => applyChanges(`title: t\nbox a\n${text}\nbox b`, []), bau);
     expect(r.linear, r.message).toBe(true);
   };
-  it("viele Leerzeilen bleiben linear", () => linear((n) => "\n".repeat(n)));
-  it("viele Zeilen mit Wagenruecklauf bleiben linear", () => linear((n) => "\r\n".repeat(n)));
+  it("viele Leerzeilen bleiben linear", (ctx) => linear(ctx, (n) => "\n".repeat(n)));
+  it("viele Zeilen mit Wagenruecklauf bleiben linear", (ctx) => linear(ctx, (n) => "\r\n".repeat(n)));
   // Eine Probe mit 50 000 Teilezeilen („box a\n“) misst vor allem den Müllsammler (isoliert Quotient 5,5, im vollen Gate unter Last 12,9): sie bleibt draußen.
 });

@@ -9,7 +9,7 @@
  * gemessen 2026-11-19: n = 1 000 → 0,7 ms, n = 10 000 → 98 ms; Fix und Fuzz gehören ins Kit, Task im code-kit-Cockpit). Die Gegenprobe (eine absichtlich quadratische Fassung wird rot) steht am Ende.
  */
 import { describe, expect, it } from "vitest";
-import { pruefeLinearFuzz } from "../vendor/kit/linear-probe";
+import { lastGeschuetzt, type LinearProbeSkipKontext } from "../vendor/kit/linear-probe";
 import { parseShapes } from "../../src/core/shapes/parse";
 import { findModelReferences } from "../../src/core/shapes/references";
 import { readPartsAnswer } from "../../src/core/shapes/protocol";
@@ -19,33 +19,34 @@ const FUZZ_MS = 180_000;
 
 /** Befund als lesbarer Text, damit eine rote Zeile ohne Nachlesen verständlich ist (CORE-TEST-14). */
 const befund = (r: { verdaechtig: ReadonlyArray<{ message: string }> }): string => r.verdaechtig.map((v) => v.message).join("\n");
-const fuzz = (fn: (s: string) => unknown, alphabet: readonly string[], maxLaenge = 3): void => {
-  const f = pruefeLinearFuzz(fn, { alphabet, maxLaenge });
+/** Unter Last (über der Schwelle der Probe) übersprungen statt rot (obsidian-kit 0.108.0, `lastGeschuetzt`); jeder andere Fehler läuft durch. */
+const fuzz = (ctx: LinearProbeSkipKontext, fn: (s: string) => unknown, alphabet: readonly string[], maxLaenge = 3): void => {
+  const f = lastGeschuetzt(ctx).pruefeLinearFuzz(fn, { alphabet, maxLaenge });
   expect(f.linear, befund(f)).toBe(true);
   // Eine Bilanz ohne Messung ist kein Erfolg (CORE-TEST-19).
   expect(f.gemessen, "der Fuzz hat Eingaben gemessen").toBeGreaterThan(20);
 };
 
 describe("shapes-Quelltext aus der Datei", () => {
-  it("parseShapes: Fuzz über Leerraum, Zeilenumbruch, Wagenrücklauf, Kommentar und Zahlen", () => {
-    fuzz(parseShapes, ["\n", " ", "box", "#", "1"]);
+  it("parseShapes: Fuzz über Leerraum, Zeilenumbruch, Wagenrücklauf, Kommentar und Zahlen", (ctx) => {
+    fuzz(ctx, parseShapes, ["\n", " ", "box", "#", "1"]);
   }, FUZZ_MS);
 });
 
 describe("Vault-Notizen auf der Suche nach Verweisen", () => {
-  it("findModelReferences: Fuzz über Zäune, Verweisklammern, Leerraum und Zeilenumbruch (Text der Notiz)", () => {
+  it("findModelReferences: Fuzz über Zäune, Verweisklammern, Leerraum und Zeilenumbruch (Text der Notiz)", (ctx) => {
     const resolve = (link: string): string | null => (link === "m.glb" ? "m.glb" : null);
-    fuzz((s) => findModelReferences([{ path: "n.md", text: s }], "m.glb", resolve), ["```", "![[", "]]", "![", "\n", " "]);
+    fuzz(ctx, (s) => findModelReferences([{ path: "n.md", text: s }], "m.glb", resolve), ["```", "![[", "]]", "![", "\n", " "]);
   }, FUZZ_MS);
 });
 
 describe("Ansichtsangabe und Modellantwort", () => {
-  it("parseView: Fuzz über Präfix, Doppelpunkt, Leerraum und Zahlen", () => {
-    fuzz(parseView, ["camera:", " ", ":", "1", "-"]);
+  it("parseView: Fuzz über Präfix, Doppelpunkt, Leerraum und Zahlen", (ctx) => {
+    fuzz(ctx, parseView, ["camera:", " ", ":", "1", "-"]);
   }, FUZZ_MS);
 
-  it("readPartsAnswer: Fuzz über Think-Marken, Zäune, Klammern und Anführungszeichen", () => {
-    fuzz(readPartsAnswer, ["<think>", "```json\n", "{", "[", '"', "\\"]);
+  it("readPartsAnswer: Fuzz über Think-Marken, Zäune, Klammern und Anführungszeichen", (ctx) => {
+    fuzz(ctx, readPartsAnswer, ["<think>", "```json\n", "{", "[", '"', "\\"]);
   }, FUZZ_MS);
 });
 
@@ -53,8 +54,8 @@ describe("Gegenprobe: der Fuzz kann rot werden (CORE-TEST-01)", () => {
   /** Absichtlich quadratisch: ein Lauf von Zeilenumbrüchen mitten im Text, den ein `\n*$` je Startstelle neu abläuft. */
   const quadratisch = (s: string): string => `x\n${s}\ny`.replace(/\n*$/, "\n");
 
-  it("pruefeLinearFuzz meldet die quadratische Form als Verdacht", () => {
-    const f = pruefeLinearFuzz((s) => quadratisch(s), { alphabet: ["\n", "x"], maxLaenge: 1, verschachtelt: false });
+  it("pruefeLinearFuzz meldet die quadratische Form als Verdacht", (ctx) => {
+    const f = lastGeschuetzt(ctx).pruefeLinearFuzz((s) => quadratisch(s), { alphabet: ["\n", "x"], maxLaenge: 1, verschachtelt: false });
     expect(f.linear).toBe(false);
     expect(f.verdaechtig.map((v) => v.einheit)).toContain("\n");
   }, FUZZ_MS);

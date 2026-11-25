@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diffParts, formatDiff } from "../../../src/core/shapes/diff";
-import { pruefeLinear } from "../../vendor/kit/linear-probe";
+import { lastGeschuetzt } from "../../vendor/kit/linear-probe";
 import type { ShapeDraft } from "../../../src/core/shapes/types";
 
 const P = (over: Partial<ShapeDraft>): ShapeDraft => ({ kind: "box", name: "Platte", size: [1.2, 0.05, 0.7], at: [0, 0.725, 0], rot: [0, 0, 0], color: "#8b5a2b", ...over });
@@ -75,8 +75,8 @@ describe("diffParts", () => {
     const [before, after] = paare(5000);
     expect(diffParts(before, after)).toHaveLength(2500);
   });
-  it("stays linear in the number of parts", () => {
-    const r = pruefeLinear(([before, after]: [ShapeDraft[], ShapeDraft[]]) => diffParts(before, after), paare);
+  it("stays linear in the number of parts", (ctx) => {
+    const r = lastGeschuetzt(ctx).pruefeLinear(([before, after]: [ShapeDraft[], ShapeDraft[]]) => diffParts(before, after), paare);
     expect(r.linear, r.message).toBe(true);
   });
 });

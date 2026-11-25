@@ -8,7 +8,7 @@ import {
   readPartsAnswer,
   REFINE_SYSTEM,
 } from "../../../src/core/shapes/protocol";
-import { pruefeLinear } from "../../vendor/kit/linear-probe";
+import { lastGeschuetzt, type LinearProbeSkipKontext } from "../../vendor/kit/linear-probe";
 
 describe("readPartsAnswer", () => {
   it("reads a parts object with leading whitespace", () => {
@@ -26,19 +26,19 @@ describe("readPartsAnswer", () => {
 
 describe("readPartsAnswer: Laufzeit", () => {
   // Quadratisch waere 5x Eingabe = 25x Zeit; die Probe misst n = 1 000, 10 000, 50 000 (Quotient < 12 oder unter 50 ms).
-  const linear = (bau: (n: number) => string) => {
-    const r = pruefeLinear(readPartsAnswer, bau);
+  const linear = (ctx: LinearProbeSkipKontext, bau: (n: number) => string) => {
+    const r = lastGeschuetzt(ctx).pruefeLinear(readPartsAnswer, bau);
     expect(r.linear, r.message).toBe(true);
   };
-  it("viele offene Klammern bleiben linear", () => linear((n) => "[1,".repeat(n)));
-  it("viele offene geschweifte Klammern bleiben linear", () => linear((n) => '{"a":'.repeat(n)));
-  it("viele nie geschlossene think-Tags bleiben linear", () => linear((n) => "<think>".repeat(n) + '{"parts":[]}'));
-  it("viele Zeichen im String zwischen Klammern bleiben linear", () => linear((n) => '["'.repeat(n)));
+  it("viele offene Klammern bleiben linear", (ctx) => linear(ctx, (n) => "[1,".repeat(n)));
+  it("viele offene geschweifte Klammern bleiben linear", (ctx) => linear(ctx, (n) => '{"a":'.repeat(n)));
+  it("viele nie geschlossene think-Tags bleiben linear", (ctx) => linear(ctx, (n) => "<think>".repeat(n) + '{"parts":[]}'));
+  it("viele Zeichen im String zwischen Klammern bleiben linear", (ctx) => linear(ctx, (n) => '["'.repeat(n)));
   // Zwei quadratische Familien (Fuzz von kitcc-w18, 2026-10-12): ein Escape frisst das schliessende Anfuehrungszeichen
   // jedes Strings, und verschachtelte Spannen sind alle ausgeglichen, parsen aber alle an derselben Stelle nicht.
-  it("Escape vor Anfuehrungszeichen und Klammer bleibt linear", () => linear((n) => '\\"['.repeat(n)));
-  it("verschachtelte ausgeglichene Spannen, die nicht parsen, bleiben linear", () =>
-    linear((n) => "[".repeat(n) + "x" + "]".repeat(n)));
+  it("Escape vor Anfuehrungszeichen und Klammer bleibt linear", (ctx) => linear(ctx, (n) => '\\"['.repeat(n)));
+  it("verschachtelte ausgeglichene Spannen, die nicht parsen, bleiben linear", (ctx) =>
+    linear(ctx, (n) => "[".repeat(n) + "x" + "]".repeat(n)));
   it("findet die Liste nach vielen offenen Klammern, die später geschlossen werden", () => {
     expect(readPartsAnswer(`[1,[2,${'{"parts":[{"shape":"box"}]}'}`)).toEqual({ ok: true, parts: [{ shape: "box" }] });
   });
